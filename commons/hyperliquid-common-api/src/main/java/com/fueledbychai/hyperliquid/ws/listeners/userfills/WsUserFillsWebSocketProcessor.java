@@ -1,0 +1,77 @@
+package com.fueledbychai.hyperliquid.ws.listeners.userfills;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.fueledbychai.websocket.AbstractWebSocketProcessor;
+import com.fueledbychai.websocket.IWebSocketClosedListener;
+
+public class WsUserFillsWebSocketProcessor extends AbstractWebSocketProcessor<WsUserFill> {
+
+    private static final Logger logger = LoggerFactory.getLogger(WsUserFillsWebSocketProcessor.class);
+
+    public WsUserFillsWebSocketProcessor(IWebSocketClosedListener listener) {
+        super(listener);
+    }
+
+    @Override
+    protected WsUserFill parseMessage(String message) {
+        logger.info("Received user fill message: {}", message);
+        try {
+            JSONObject jsonObject = new JSONObject(message);
+
+            if (!jsonObject.has("channel")) {
+                return null;
+            }
+
+            String channel = jsonObject.getString("channel");
+
+            if (!"userFills".equals(channel)) {
+                logger.warn("Unknown message type: " + channel);
+                logger.warn(message);
+                return null;
+            }
+
+            // Support both root-level and 'data' object for user/fills
+            JSONObject dataObject = jsonObject.has("data") ? jsonObject.getJSONObject("data") : jsonObject;
+
+            WsUserFill userFill = new WsUserFill();
+            if (dataObject.has("isSnapshot")) {
+                userFill.setSnapshot(dataObject.getBoolean("isSnapshot"));
+            }
+            userFill.setUser(dataObject.optString("user", null));
+
+            JSONArray fillsArray = dataObject.optJSONArray("fills");
+            if (fillsArray != null) {
+                for (int i = 0; i < fillsArray.length(); i++) {
+                    JSONObject fillObj = fillsArray.getJSONObject(i);
+                    WsFill fill = new WsFill();
+                    fill.setCoin(fillObj.optString("coin", null));
+                    fill.setPrice(fillObj.optString("px", null));
+                    fill.setSize(fillObj.optString("sz", null));
+                    fill.setSide(fillObj.optString("side", null));
+                    fill.setTime(fillObj.optLong("time", 0));
+                    fill.setStartPosition(fillObj.optString("startPosition", null));
+                    fill.setDir(fillObj.optString("dir", null));
+                    fill.setClosedPnl(fillObj.optString("closedPnl", null));
+                    fill.setHash(fillObj.optString("hash", null));
+                    fill.setOrderId(fillObj.optLong("oid", 0));
+                    fill.setTaker(fillObj.optBoolean("crossed", false));
+                    fill.setFee(fillObj.optString("fee", null));
+                    fill.setTradeId(fillObj.optLong("tid", 0));
+                    fill.setFeeToken(fillObj.optString("feeToken", null));
+                    fill.setBuilderFee(fillObj.optString("builderFee", null));
+                    // Ignore liquidation field
+                    userFill.addFill(fill);
+                }
+            }
+            return userFill;
+        } catch (Exception e) {
+            logger.error("Error parsing message: " + message, e);
+            return null;
+        }
+    }
+
+}

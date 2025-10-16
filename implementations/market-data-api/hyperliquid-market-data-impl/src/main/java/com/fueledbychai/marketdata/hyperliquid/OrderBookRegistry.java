@@ -1,0 +1,53 @@
+package com.fueledbychai.marketdata.hyperliquid;
+
+import java.util.HashMap;
+import java.util.Map;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.fueledbychai.data.Ticker;
+import com.fueledbychai.hyperliquid.ws.HyperliquidConfiguration;
+import com.fueledbychai.hyperliquid.ws.HyperliquidWebSocketClient;
+import com.fueledbychai.hyperliquid.ws.HyperliquidWebSocketClientBuilder;
+
+public class OrderBookRegistry {
+    protected static final Logger logger = LoggerFactory.getLogger(OrderBookRegistry.class);
+    protected static OrderBookRegistry instance = null;
+    protected Map<Ticker, HyperliquidOrderBook> orderBooks = new HashMap<>();
+    protected HyperliquidConfiguration config = HyperliquidConfiguration.getInstance();
+    protected String wsUrl = config.getWebSocketUrl();
+
+    public static OrderBookRegistry getInstance() {
+        if (instance == null) {
+            instance = new OrderBookRegistry();
+        }
+        return instance;
+    }
+
+    public HyperliquidOrderBook getOrderBook(Ticker ticker) {
+        HyperliquidOrderBook orderBook = orderBooks.get(ticker);
+        if (orderBook == null) {
+            orderBook = new HyperliquidOrderBook(ticker);
+            orderBooks.put(ticker, orderBook);
+            startMarketBookWSClient(ticker, orderBook);
+        }
+        return orderBook;
+    }
+
+    public void startMarketBookWSClient(Ticker ticker, HyperliquidOrderBook orderBook) {
+        try {
+            logger.info("Starting order book WebSocket client");
+            HyperliquidWebSocketClient orderBookWSClient = HyperliquidWebSocketClientBuilder.buildOrderBookUpdateClient(
+                    wsUrl, ticker.getSymbol(), new OrderBookWebSocketProcessor(orderBook, () -> {
+                        logger.info("Order book WebSocket closed, trying to restart...");
+                        startMarketBookWSClient(ticker, orderBook);
+                    }));
+            orderBookWSClient.connect();
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+
+    }
+
+}

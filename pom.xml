@@ -1,6 +1,6 @@
 <!--
 MIT License
-Copyright (c) 2015  Rob Terpilowski
+Copyright (c) 2015  FueledByChai Contributors
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software 
 and associated documentation files (the "Software"), to deal in the Software without restriction, 
 including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, 
@@ -18,31 +18,31 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.sumzerotrading</groupId>
-    <artifactId>SumZeroTrading</artifactId>
+    <groupId>com.fueledbychai</groupId>
+    <artifactId>FueledByChaiTrading</artifactId>
     <version>0.2.0-SNAPSHOT</version>
     <packaging>pom</packaging>
-    <name>SumZeroTrading</name>
+    <name>FueledByChaiTrading</name>
 
     <modules>
         <module>commons</module>
         <module>examples</module>
         <module>implementations</module>
-        <module>SumZeroParent</module>
-        <module>sumzero-api</module>
+        <module>FueledByChaiParent</module>
+        <module>fueledbychai-api</module>
     
     </modules>
     <distributionManagement>
         <repository>
-            <id>bintray-rterp-maven</id>
-            <name>rterp-maven</name>
-            <url>https://api.bintray.com/maven/rterp/maven/SumZeroTrading/;publish=1</url>
+            <id>bintray-fueledbychai-org-maven</id>
+            <name>fueledbychai-org-maven</name>
+            <url>https://api.bintray.com/maven/fueledbychai-org/maven/FueledByChaiTrading/;publish=1</url>
         </repository>
     </distributionManagement>    
     <scm>
-        <connection>scm:git:git@github.com:rterp/SumZeroTrading.git</connection>
-        <developerConnection>scm:git:git@github.com:rterp/SumZeroTrading.git</developerConnection>
-        <url>git@github.com:rterp/SumZeroTrading.git</url>
+        <connection>scm:git:git@github.com:fueledbychai-org/FueledByChaiTrading.git</connection>
+        <developerConnection>scm:git:git@github.com:fueledbychai-org/FueledByChaiTrading.git</developerConnection>
+        <url>git@github.com:fueledbychai-org/FueledByChaiTrading.git</url>
         <!--<tag>2.0.2-23</tag>-->
         <!--<tag>GMapsFX-2.12.0</tag>-->
         <tag>HEAD</tag>

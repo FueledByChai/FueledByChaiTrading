@@ -1,6 +1,6 @@
-# SumZero Trading - Broker Capabilities Documentation
+# FueledByChai - Broker Capabilities Documentation
 
-This directory contains comprehensive documentation of broker capabilities, supported features, and API method support for all broker implementations in the SumZero Trading library.
+This directory contains comprehensive documentation of broker capabilities, supported features, and API method support for all broker implementations in the FueledByChai library.
 
 ## 📋 Available Documentation
 
@@ -39,14 +39,14 @@ To regenerate this documentation:
 ```bash
 # Using Maven
 mvn exec:java -pl examples/CryptoExamples \
-  -Dexec.mainClass="com.sumzerotrading.documentation.GenerateBrokerDocumentation" \
+  -Dexec.mainClass="com.fueledbychai.documentation.GenerateBrokerDocumentation" \
   -Dexec.args="docs/generated"
 
 # Or compile and run directly
 mvn compile
 java -cp "target/classes:target/dependency/*" \
-  com.sumzerotrading.documentation.GenerateBrokerDocumentation docs/generated
+  com.fueledbychai.documentation.GenerateBrokerDocumentation docs/generated
 ```
 
 ---
-*Generated on: 2025-10-15T04:07:37.625532*
+*Generated on: 2025-10-16T13:24:46.380274*

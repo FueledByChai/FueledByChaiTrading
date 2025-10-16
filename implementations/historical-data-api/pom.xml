@@ -2,7 +2,7 @@
 <!--
 MIT License
 
-Copyright (c) 2015  Rob Terpilowski
+Copyright (c) 2015  FueledByChai Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software
 and associated documentation files (the "Software"), to deal in the Software without restriction,
@@ -25,19 +25,18 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
-    <groupId>com.sumzerotrading</groupId>
-    <artifactId>sumzero-implementations</artifactId>
+    <groupId>com.fueledbychai</groupId>
+    <artifactId>fueledbychai-implementations</artifactId>
     <version>0.2.0-SNAPSHOT</version>
   </parent>
 
-  <groupId>com.sumzerotrading</groupId>
+  <groupId>com.fueledbychai</groupId>
   <artifactId>historical-data-api</artifactId>
   <name>historical-data-api</name>
   <description>API for subscribing to market data</description>
   <packaging>pom</packaging>
     <modules>
         <module>ib-historical-data-api-impl</module>
-        <module>bitmex-historical-data-api-impl</module>
         <module>paradex-historical-data-api-impl</module>
     </modules>
 </project>

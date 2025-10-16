@@ -1,38 +1,38 @@
 # 📚 How to Generate Broker Documentation
 
-This guide shows you multiple ways to generate comprehensive broker capability documentation for the SumZero Trading library.
+This guide shows you multiple ways to generate comprehensive broker capability documentation for the FueledByChai Trading library.
 
 ## 🚀 Quick Start - Generate Documentation Now
 
 ### Method 1: Maven Plugin (Easiest)
 
 ```bash
-cd /Users/RobTerpilowski/Code/JavaProjects/SumZeroTrading
+cd /Users/  /Code/JavaProjects/FueledByChaiTrading
 
 # Generate documentation using Maven
 mvn compile exec:java -pl examples/CryptoExamples \
-  -Dexec.mainClass="com.sumzerotrading.documentation.GenerateBrokerDocumentation" \
+  -Dexec.mainClass="com.fueledbychai.documentation.GenerateBrokerDocumentation" \
   -Dexec.args="docs/generated"
 ```
 
 ### Method 2: Direct Java Execution
 
 ```bash
-cd /Users/RobTerpilowski/Code/JavaProjects/SumZeroTrading
+cd /Users/  /Code/JavaProjects/FueledByChai
 
 # First compile the project
 mvn clean compile -pl examples/CryptoExamples
 
 # Then run the documentation generator
 java -cp "examples/CryptoExamples/target/classes:examples/CryptoExamples/target/dependency/*" \
-  com.sumzerotrading.documentation.GenerateBrokerDocumentation \
+  com.fueledbychai.documentation.GenerateBrokerDocumentation \
   docs/generated
 ```
 
 ### Method 3: IDE Execution
 
 1. **Open your IDE** (IntelliJ IDEA, Eclipse, VS Code)
-2. **Navigate to**: `examples/CryptoExamples/src/main/java/com/sumzerotrading/documentation/GenerateBrokerDocumentation.java`
+2. **Navigate to**: `examples/CryptoExamples/src/main/java/com/fueledbychai/documentation/GenerateBrokerDocumentation.java`
 3. **Right-click** → **Run Main Method**
 4. **Optional**: Set program arguments to specify output directory: `docs/generated`
 
@@ -55,7 +55,7 @@ docs/generated/
 **README.md** - Main index:
 
 ```markdown
-# SumZero Trading - Broker Capabilities Documentation
+# FueledByChai Trading - Broker Capabilities Documentation
 
 ## Available Documentation
 
@@ -117,7 +117,7 @@ docs/generated/
 ```bash
 # Generate docs to custom location
 mvn exec:java -pl examples/CryptoExamples \
-  -Dexec.mainClass="com.sumzerotrading.documentation.GenerateBrokerDocumentation" \
+  -Dexec.mainClass="com.fueledbychai.documentation.GenerateBrokerDocumentation" \
   -Dexec.args="/path/to/custom/output"
 ```
 
@@ -154,7 +154,7 @@ To include new brokers in documentation:
 3. **Regenerate docs**:
    ```bash
    mvn exec:java -pl examples/CryptoExamples \
-     -Dexec.mainClass="com.sumzerotrading.documentation.GenerateBrokerDocumentation"
+     -Dexec.mainClass="com.fueledbychai.documentation.GenerateBrokerDocumentation"
    ```
 
 ## 🔄 Automated Documentation Generation
@@ -200,7 +200,7 @@ jobs:
       - name: Generate Documentation
         run: |
           mvn compile exec:java -pl examples/CryptoExamples \
-            -Dexec.mainClass="com.sumzerotrading.documentation.GenerateBrokerDocumentation" \
+            -Dexec.mainClass="com.fueledbychai.documentation.GenerateBrokerDocumentation" \
             -Dexec.args="docs/generated"
       - name: Commit Documentation
         run: |

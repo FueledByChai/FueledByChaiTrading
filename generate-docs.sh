@@ -1,11 +1,10 @@
 #!/bin/bash
 
-# Documentation Generation Script for SumZero Trading
+# Documentation Generation Script for FueledByChai Trading
 
-echo "🚀 Starting SumZero Trading Documentation Generation..."
+echo "🚀 Starting FueledByChai Trading Documentation Generation..."
 
 # Set working directory
-cd /Users/RobTerpilowski/Code/JavaProjects/SumZeroTrading
 
 # Create output directory
 mkdir -p docs/generated
@@ -26,7 +25,7 @@ echo "✅ Compilation successful"
 # Generate documentation using Maven exec plugin
 echo "📝 Generating documentation..."
 mvn exec:java -pl examples/CryptoExamples \
-    -Dexec.mainClass="com.sumzerotrading.documentation.GenerateBrokerDocumentation" \
+    -Dexec.mainClass="com.fueledbychai.documentation.GenerateBrokerDocumentation" \
     -Dexec.args="docs/generated" \
     -q
 

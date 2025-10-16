@@ -11,5 +11,5 @@
     </root>
 
     <!-- Enable DEBUG for HLSigner performance analysis -->
-    <logger name="com.sumzerotrading.hyperliquid.ws.json.HLSigner" level="DEBUG" />
+    <logger name="com.fueledbychai.hyperliquid.ws.json.HLSigner" level="DEBUG" />
 </configuration>

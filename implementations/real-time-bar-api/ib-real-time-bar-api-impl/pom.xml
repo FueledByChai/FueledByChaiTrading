@@ -1,7 +1,7 @@
 <!--
 MIT License
 
-Copyright (c) 2015  Rob Terpilowski
+Copyright (c) 2015  FueledByChai Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software 
 and associated documentation files (the "Software"), to deal in the Software without restriction, 
@@ -22,12 +22,12 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     <modelVersion>4.0.0</modelVersion>
   
     <parent>
-        <groupId>com.sumzerotrading</groupId>
+        <groupId>com.fueledbychai</groupId>
         <artifactId>real-time-bar-api</artifactId>
         <version>0.2.0-SNAPSHOT</version>
     </parent>
 
-    <groupId>com.sumzerotrading</groupId>
+    <groupId>com.fueledbychai</groupId>
     <artifactId>ib-real-time-bar-api-impl</artifactId>
     <version>0.2.0-SNAPSHOT</version>
     <packaging>jar</packaging>
@@ -40,13 +40,13 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
     <dependencies>
         <dependency>
-            <groupId>com.sumzerotrading</groupId>
-            <artifactId>sumzero-real-time-bar-api</artifactId>
+            <groupId>com.fueledbychai</groupId>
+            <artifactId>fueledbychai-real-time-bar-api</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <groupId>com.sumzerotrading</groupId>
-            <artifactId>sumzero-historical-data-api</artifactId>
+            <groupId>com.fueledbychai</groupId>
+            <artifactId>fueledbychai-historical-data-api</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -73,14 +73,14 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
             <scope>test</scope>
         </dependency>
         <dependency>
-            <artifactId>sumzero-ib-common-api</artifactId>
-            <groupId>com.sumzerotrading</groupId>
+            <artifactId>fueledbychai-ib-common-api</artifactId>
+            <groupId>com.fueledbychai</groupId>
             <type>jar</type>
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <artifactId>sumzero-commons-api</artifactId>
-            <groupId>com.sumzerotrading</groupId>
+            <artifactId>fueledbychai-commons-api</artifactId>
+            <groupId>com.fueledbychai</groupId>
             <type>jar</type>
             <version>${project.version}</version>
         </dependency>

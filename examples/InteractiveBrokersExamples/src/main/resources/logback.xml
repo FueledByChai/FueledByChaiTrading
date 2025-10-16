@@ -12,6 +12,6 @@
 
     <!-- Example for setting a specific logger to DEBUG -->
     <!--
-    <logger name="com.sumzerotrading" level="DEBUG" />
+    <logger name="com.fueledbychai" level="DEBUG" />
     -->
 </configuration>

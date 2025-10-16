@@ -2,7 +2,7 @@
 <!--
 MIT License
 
-Copyright (c) 2015  Rob Terpilowski
+Copyright (c) 2015  FueledByChai Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software 
 and associated documentation files (the "Software"), to deal in the Software without restriction, 
@@ -25,25 +25,24 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
-    <groupId>com.sumzerotrading</groupId>
-    <artifactId>SumZeroParent</artifactId>
+    <groupId>com.fueledbychai</groupId>
+    <artifactId>FueledByChaiParent</artifactId>
     <version>0.2.0-SNAPSHOT</version>
-    <relativePath>../SumZeroParent</relativePath>
+    <relativePath>../FueledByChaiParent</relativePath>
   </parent>
 
-  <groupId>com.sumzerotrading</groupId>
-  <artifactId>sumzero-commons</artifactId>
-  <name>sumzero-commons</name>
+  <groupId>com.fueledbychai</groupId>
+  <artifactId>fueledbychai-commons</artifactId>
+  <name>fueledbychai-commons</name>
   <description>Classes that are used by all projects</description>
   <packaging>pom</packaging>
 
   <modules>
-    <module>sumzero-commons-api</module>
+    <module>fueledbychai-commons-api</module>
     <module>interactive-brokers-api</module>
-    <module>sumzero-ib-common-api</module>
+    <module>fueledbychai-ib-common-api</module>
     <module>interactive-brokers-client</module>
     <module>interactive-brokers-integration-tests</module>
-    <module>bitmex-common-api</module>
     <module>paradex-common-api</module>
     <module>hyperliquid-common-api</module>
   </modules>

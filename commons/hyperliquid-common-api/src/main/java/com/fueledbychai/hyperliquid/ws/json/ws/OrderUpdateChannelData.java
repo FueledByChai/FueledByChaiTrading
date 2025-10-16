@@ -1,0 +1,12 @@
+package com.fueledbychai.hyperliquid.ws.json.ws;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+public class OrderUpdateChannelData {
+
+    @JsonProperty("channel")
+    public String channel = "orderUpdates";
+
+    @JsonProperty("data")
+    public OrderStatusOld[] data;
+}
