@@ -52,7 +52,16 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-release-plugin</artifactId>
-                    <version>2.5.3</version>
+                    <version>3.0.1</version>
+                    <configuration>
+                        <autoVersionSubmodules>true</autoVersionSubmodules>
+                        <useReleaseProfile>false</useReleaseProfile>
+                        <releaseProfiles>release</releaseProfiles>
+                        <goals>deploy</goals>
+                        <tagNameFormat>v@{project.version}</tagNameFormat>
+                        <preparationGoals>clean verify</preparationGoals>
+                        <completionGoals>clean</completionGoals>
+                    </configuration>
                 </plugin>
                          <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
