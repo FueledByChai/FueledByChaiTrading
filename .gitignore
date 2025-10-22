@@ -20,3 +20,7 @@ SumZeroTrading.code-workspace
 *.ear
 
 
+implementations/broker-api/paradex-broker-api-impl/src/test/java/com/fueledbychai/broker/paradex/ParadexTranslatorTest.java
+.vscode/launch.json
+.gitignore
+

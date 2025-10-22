@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +19,16 @@ import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fueledbychai.broker.Position;
+import com.fueledbychai.broker.order.OrderTicket;
+import com.fueledbychai.broker.order.OrderTicket.Modifier;
+import com.fueledbychai.data.Exchange;
+import com.fueledbychai.data.FueledByChaiException;
+import com.fueledbychai.data.InstrumentDescriptor;
+import com.fueledbychai.data.InstrumentType;
+import com.fueledbychai.paradex.common.api.historical.OHLCBar;
+import com.fueledbychai.paradex.common.api.order.OrderType;
+import com.fueledbychai.paradex.common.api.order.ParadexOrder;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
@@ -27,16 +38,6 @@ import com.google.gson.TypeAdapter;
 import com.google.gson.reflect.TypeToken;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
-import com.fueledbychai.broker.Position;
-import com.fueledbychai.broker.order.OrderTicket;
-import com.fueledbychai.broker.order.OrderTicket.Modifier;
-import com.fueledbychai.data.Exchange;
-import com.fueledbychai.data.InstrumentDescriptor;
-import com.fueledbychai.data.InstrumentType;
-import com.fueledbychai.data.FueledByChaiException;
-import com.fueledbychai.paradex.common.api.historical.OHLCBar;
-import com.fueledbychai.paradex.common.api.order.OrderType;
-import com.fueledbychai.paradex.common.api.order.ParadexOrder;
 import com.swmansion.starknet.data.TypedData;
 import com.swmansion.starknet.data.types.Felt;
 import com.swmansion.starknet.signer.StarkCurveSigner;
@@ -241,7 +242,7 @@ public class ParadexRestApi implements IParadexRestApi {
     }
 
     @Override
-    public List<OrderTicket> getOpenOrders(String jwtToken, String market) {
+    public List<ParadexOrder> getOpenOrders(String jwtToken, String market) {
         checkPrivateApi();
         return executeWithRetry(() -> {
 
@@ -380,68 +381,67 @@ public class ParadexRestApi implements IParadexRestApi {
     }
 
     @Override
-    public String placeOrder(String jwtToken, OrderTicket tradeOrder) {
+    public String placeOrder(String jwtToken, ParadexOrder order) {
         checkPrivateApi();
-        return executeWithRetry(() -> {
-            ParadexOrder order = ParadexUtil.translateOrder(tradeOrder);
-            String path = "/orders";
-            String url = baseUrl + path;
-            long timestamp = System.currentTimeMillis();
-            // BigInteger chainID = new
-            // BigInteger("8458834024819506728615521019831122032732688838300957472069977523540");
-            String chainIdHex = "0x" + chainID.toString(16).toUpperCase();
-            String orderMessage = createOrderMessage(timestamp, chainIdHex, order);
-            String signatureString = getOrderMessageSignature(orderMessage);
+        String path = "/orders";
+        String url = baseUrl + path;
+        long timestamp = System.currentTimeMillis();
+        // BigInteger chainID = new
+        // BigInteger("8458834024819506728615521019831122032732688838300957472069977523540");
+        String chainIdHex = "0x" + chainID.toString(16).toUpperCase();
+        String orderMessage = createOrderMessage(timestamp, chainIdHex, order);
+        String signatureString = getOrderMessageSignature(orderMessage);
 
-            JsonObject orderJson = new JsonObject();
-            orderJson.addProperty("client_id", order.getClientId());
-            orderJson.addProperty("market", order.getTicker());
-            orderJson.addProperty("side", order.getSide().toString());
-            orderJson.addProperty("signature_timestamp", timestamp);
-            orderJson.addProperty("size", order.getSize().toString());
-            orderJson.addProperty("type", order.getOrderType().toString());
-            if (order.getOrderType().equals(OrderType.LIMIT)) {
-                orderJson.addProperty("price", order.getLimitPrice().toString());
-                orderJson.addProperty("instruction", "POST_ONLY");
+        JsonObject orderJson = new JsonObject();
+        orderJson.addProperty("client_id", order.getClientId());
+        orderJson.addProperty("market", order.getTicker());
+        orderJson.addProperty("side", order.getSide().toString());
+        orderJson.addProperty("signature_timestamp", timestamp);
+        orderJson.addProperty("size", order.getSize().toString());
+        orderJson.addProperty("type", order.getOrderType().toString());
+        if (order.getOrderType().equals(OrderType.LIMIT)) {
+            orderJson.addProperty("price", order.getLimitPrice().toString());
+            orderJson.addProperty("instruction", "POST_ONLY");
+        }
+        // add flags from order if any
+        if (order.getFlags() != null && order.getFlags().length > 0) {
+            JsonArray flagsArray = new JsonArray();
+            for (String flag : order.getFlags()) {
+                flagsArray.add(flag);
             }
-            if (tradeOrder.getModifiers().contains(Modifier.REDUCE_ONLY)) {
-                // add an array to the orderJson and then add reduce_only to the array
-                JsonArray flags = new JsonArray();
-                flags.add("REDUCE_ONLY");
-                orderJson.add("flags", flags);
+            orderJson.add("flags", flagsArray);
+        }
+        orderJson.addProperty("signature", signatureString);
+
+        RequestBody requestBody = RequestBody.create(orderJson.toString(),
+                MediaType.get("application/json; charset=utf-8"));
+
+        Request.Builder requestBuilder = new Request.Builder().url(url).post(requestBody).addHeader("Authorization",
+                "Bearer " + jwtToken);
+
+        Request request = requestBuilder.build();
+        logger.info("Request: " + request);
+        logger.info("Request body: " + orderJson.toString());
+
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                logger.error("Error response: " + response.body().string());
+                throw new IOException("Unexpected code " + response);
             }
-            orderJson.addProperty("signature", signatureString);
 
-            RequestBody requestBody = RequestBody.create(orderJson.toString(),
-                    MediaType.get("application/json; charset=utf-8"));
-
-            Request.Builder requestBuilder = new Request.Builder().url(url).post(requestBody).addHeader("Authorization",
-                    "Bearer " + jwtToken);
-
-            Request request = requestBuilder.build();
-            logger.info("Request: " + request);
-            logger.info("Request body: " + orderJson.toString());
-
-            try (Response response = client.newCall(request).execute()) {
-                if (!response.isSuccessful()) {
-                    logger.error("Error response: " + response.body().string());
-                    throw new IOException("Unexpected code " + response);
-                }
-
-                String responseBody = response.body().string();
-                logger.info("Response output: " + responseBody);
-                JsonObject jsonResponse = JsonParser.parseString(responseBody).getAsJsonObject();
-                if (jsonResponse.has("id")) {
-                    return jsonResponse.get("id").getAsString();
-                } else {
-                    return "";
-                }
-
-            } catch (IOException e) {
-                logger.error(e.getMessage(), e);
-                throw new RuntimeException(e);
+            String responseBody = response.body().string();
+            logger.info("Response output: " + responseBody);
+            JsonObject jsonResponse = JsonParser.parseString(responseBody).getAsJsonObject();
+            if (jsonResponse.has("id")) {
+                return jsonResponse.get("id").getAsString();
+            } else {
+                return "";
             }
-        }, 3, 500); // Retry up to 3 times with 1 second backoff
+
+        } catch (IOException e) {
+            logger.error(e.getMessage(), e);
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -614,7 +614,7 @@ public class ParadexRestApi implements IParadexRestApi {
     }
 
     @Override
-    public String getOrderMessageSignature(String orderMessage) throws Exception {
+    public String getOrderMessageSignature(String orderMessage) {
 
         // Convert the account address and private key to Felt types
         Felt accountAddress = Felt.fromHex(accountAddressString);
@@ -644,13 +644,6 @@ public class ParadexRestApi implements IParadexRestApi {
         // Convert the signature to a string
         List<BigInteger> signatureBigInt = signature.stream().map(Felt::getValue).collect(Collectors.toList());
         String signatureStr = convertBigIntListToString(signatureBigInt);
-
-        // Log the values being sent
-
-        // System.out.println("Signature: " + signatureStr);
-        // System.out.println("Message Hash: " + messageHash.hexString().toString());
-        // System.out.println("Timestamp: " + timestamp);
-        // System.out.println("Signature Expiration: " + expiry);
 
         return signatureStr;
     }
@@ -759,7 +752,7 @@ public class ParadexRestApi implements IParadexRestApi {
                 order.getOrderType().toString(), order.getChainSize(), order.getChainLimitPrice());
     }
 
-    protected List<OrderTicket> parseParadoxOrders(String responseBody) {
+    protected List<ParadexOrder> parseParadoxOrders(String responseBody) {
 
         JsonObject jsonObject = JsonParser.parseString(responseBody).getAsJsonObject();
         JsonArray resultsArray = jsonObject.getAsJsonArray("results");
@@ -768,7 +761,7 @@ public class ParadexRestApi implements IParadexRestApi {
         }.getType();
 
         List<ParadexOrder> orders = gson.fromJson(resultsArray, listType);
-        return ParadexUtil.translateOrders(orders);
+        return orders;
     }
 
     protected List<OHLCBar> parseOHLCBars(String responseBody) {

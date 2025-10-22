@@ -3,13 +3,21 @@ package com.fueledbychai.broker.paradex;
 import java.math.BigDecimal;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.List;
+import java.util.stream.Collectors;
 
 import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.OrderStatus;
 import com.fueledbychai.broker.order.OrderStatus.Status;
+import com.fueledbychai.broker.order.OrderTicket;
+import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.data.FueledByChaiException;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.paradex.common.ParadexTickerRegistry;
+import com.fueledbychai.paradex.common.api.ParadexUtil;
+import com.fueledbychai.paradex.common.api.order.OrderType;
+import com.fueledbychai.paradex.common.api.order.ParadexOrder;
+import com.fueledbychai.paradex.common.api.order.Side;
 import com.fueledbychai.paradex.common.api.ws.fills.ParadexFill;
 import com.fueledbychai.paradex.common.api.ws.orderstatus.CancelReason;
 import com.fueledbychai.paradex.common.api.ws.orderstatus.IParadexOrderStatusUpdate;
@@ -107,5 +115,51 @@ public class ParadexTranslator implements IParadexTranslator {
         fill.setTaker(paradexFill.getLiquidity() == ParadexFill.LiquidityType.TAKER);
         fill.setCommission(new BigDecimal(paradexFill.getFee()));
         return fill;
+    }
+
+    @Override
+    public OrderTicket translateOrder(ParadexOrder order) {
+        OrderTicket tradeOrder = new OrderTicket();
+
+        return tradeOrder;
+    }
+
+    @Override
+    public ParadexOrder translateOrder(OrderTicket order) {
+        ParadexOrder paradoxOrder = new ParadexOrder();
+        paradoxOrder.setClientId(order.getClientOrderId());
+        paradoxOrder.setTicker(order.getTicker().getSymbol());
+
+        if (order.getTradeDirection() == TradeDirection.BUY) {
+            paradoxOrder.setSide(Side.BUY);
+        } else {
+            paradoxOrder.setSide(Side.SELL);
+        }
+
+        paradoxOrder.setSize(order.getSize());
+
+        if (order.getType() == OrderTicket.Type.MARKET) {
+            paradoxOrder.setOrderType(OrderType.MARKET);
+        } else if (order.getType() == OrderTicket.Type.LIMIT) {
+            paradoxOrder.setOrderType(OrderType.LIMIT);
+        } else if (order.getType() == OrderTicket.Type.STOP) {
+            paradoxOrder.setOrderType(OrderType.STOP);
+        } else {
+            throw new UnsupportedOperationException("Order type " + order.getType() + " is not supported");
+        }
+
+        if (order.getType() == OrderTicket.Type.LIMIT) {
+            // need to format the limit price based on the minimum tick size for the symbol.
+            BigDecimal limitPrice = ParadexUtil.formatPrice(order.getLimitPrice(),
+                    order.getTicker().getMinimumTickSize());
+            paradoxOrder.setLimitPrice(limitPrice);
+        }
+
+        return paradoxOrder;
+    }
+
+    @Override
+    public List<OrderTicket> translateOrders(List<ParadexOrder> orders) {
+        return orders.stream().map(this::translateOrder).collect(Collectors.toList());
     }
 }

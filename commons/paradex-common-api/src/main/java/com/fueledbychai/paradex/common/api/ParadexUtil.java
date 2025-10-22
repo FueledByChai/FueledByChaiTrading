@@ -17,48 +17,6 @@ import com.fueledbychai.paradex.common.api.order.Side;
 
 public class ParadexUtil {
 
-    public static OrderTicket translateOrder(ParadexOrder order) {
-        OrderTicket tradeOrder = new OrderTicket();
-
-        return tradeOrder;
-    }
-
-    public static ParadexOrder translateOrder(OrderTicket order) {
-        ParadexOrder paradoxOrder = new ParadexOrder();
-        paradoxOrder.setClientId(order.getReference());
-        paradoxOrder.setTicker(order.getTicker().getSymbol());
-
-        if (order.getTradeDirection() == TradeDirection.BUY) {
-            paradoxOrder.setSide(Side.BUY);
-        } else {
-            paradoxOrder.setSide(Side.SELL);
-        }
-
-        paradoxOrder.setSize(order.getSize());
-
-        if (order.getType() == OrderTicket.Type.MARKET) {
-            paradoxOrder.setOrderType(OrderType.MARKET);
-        } else if (order.getType() == OrderTicket.Type.LIMIT) {
-            paradoxOrder.setOrderType(OrderType.LIMIT);
-        } else if (order.getType() == OrderTicket.Type.STOP) {
-            paradoxOrder.setOrderType(OrderType.STOP);
-        } else {
-            throw new UnsupportedOperationException("Order type " + order.getType() + " is not supported");
-        }
-
-        if (order.getType() == OrderTicket.Type.LIMIT) {
-            // need to format the limit price based on the minimum tick size for the symbol.
-            BigDecimal limitPrice = formatPrice(order.getLimitPrice(), order.getTicker().getMinimumTickSize());
-            paradoxOrder.setLimitPrice(limitPrice);
-        }
-
-        return paradoxOrder;
-    }
-
-    public static List<OrderTicket> translateOrders(List<ParadexOrder> orders) {
-        return orders.stream().map(ParadexUtil::translateOrder).collect(Collectors.toList());
-    }
-
     public static BarData translateBar(OHLCBar bar) {
         BarData barData = new BarData(java.time.Instant.ofEpochSecond(bar.getTime()).atZone(ZoneOffset.UTC),
                 new BigDecimal(String.valueOf(bar.getOpen())), new BigDecimal(String.valueOf(bar.getHigh())),

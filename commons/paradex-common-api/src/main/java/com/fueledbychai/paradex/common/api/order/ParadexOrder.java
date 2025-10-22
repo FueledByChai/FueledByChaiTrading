@@ -3,6 +3,7 @@ package com.fueledbychai.paradex.common.api.order;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.time.ZonedDateTime;
+import java.util.Arrays;
 
 import com.google.gson.annotations.SerializedName;
 
@@ -20,6 +21,7 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
     protected ZonedDateTime filledAt;
     protected ZonedDateTime canceledAt;
     protected ZonedDateTime orderTTLExpiration;
+    protected String[] flags;
     // This is used to track when the order was expired, not serialized in JSON
 
     protected long timeToLiveInMs = 0;
@@ -213,6 +215,30 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
 
     }
 
+    public void setFlags(String[] flags) {
+        this.flags = flags;
+    }
+
+    public String[] getFlags() {
+        return flags;
+    }
+
+    public void addFlag(String flag) {
+        if (this.flags == null) {
+            this.flags = new String[] { flag };
+            return;
+        }
+        for (String existingFlag : this.flags) {
+            if (existingFlag.equals(flag)) {
+                return; // already exists
+            }
+        }
+        String[] newFlags = new String[this.flags.length + 1];
+        System.arraycopy(this.flags, 0, newFlags, 0, this.flags.length);
+        newFlags[this.flags.length] = flag;
+        this.flags = newFlags;
+    }
+
     @Override
     public int hashCode() {
         final int prime = 31;
@@ -229,6 +255,7 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
         result = prime * result + ((timeInForce == null) ? 0 : timeInForce.hashCode());
         result = prime * result + ((cancelReason == null) ? 0 : cancelReason.hashCode());
         result = prime * result + (int) (lastUpdatedAt ^ (lastUpdatedAt >>> 32));
+        result = prime * result + Arrays.hashCode(flags);
         return result;
     }
 
@@ -289,7 +316,7 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
             return false;
         if (lastUpdatedAt != other.lastUpdatedAt)
             return false;
-        return true;
+        return Arrays.equals(flags, other.flags);
     }
 
     @Override
@@ -297,7 +324,7 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
         return "ParadexOrder [orderType=" + orderType + ", clientId=" + clientId + ", ticker=" + ticker + ", size="
                 + size + ", limitPrice=" + limitPrice + ", stopPrice=" + stopPrice + ", remainingSize=" + remainingSize
                 + ", orderId=" + orderId + ", side=" + side + ", timeInForce=" + timeInForce + ", cancelReason="
-                + cancelReason + ", lastUpdatedAt=" + lastUpdatedAt + "]";
+                + cancelReason + ", lastUpdatedAt=" + lastUpdatedAt + "]" + Arrays.toString(flags);
     }
 
     @Override

@@ -8,12 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockStatic;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -21,7 +17,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-import org.junit.Ignore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
@@ -39,6 +34,7 @@ import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.paradex.common.api.ParadexConfiguration;
 import com.fueledbychai.paradex.common.api.ParadexRestApi;
+import com.fueledbychai.paradex.common.api.order.ParadexOrder;
 import com.fueledbychai.paradex.common.api.ws.ParadexWebSocketClient;
 import com.fueledbychai.paradex.common.api.ws.orderstatus.IParadexOrderStatusUpdate;
 import com.fueledbychai.paradex.common.api.ws.orderstatus.OrderStatusWebSocketProcessor;
@@ -69,6 +65,9 @@ public class ParadexBrokerTest {
     private OrderTicket mockTradeOrder;
 
     @Mock
+    private ParadexOrder mockParadexOrder;
+
+    @Mock
     private OrderEventListener mockOrderEventListener;
 
     @Mock
@@ -79,6 +78,9 @@ public class ParadexBrokerTest {
 
     @Mock
     private IParadexOrderStatusUpdate mockOrderStatusUpdate;
+
+    @Mock
+    private IParadexTranslator mockTranslator;
 
     @Mock
     private Ticker mockTicker1;
@@ -96,6 +98,7 @@ public class ParadexBrokerTest {
         broker.orderStatusWSClient = mockOrderStatusWSClient;
         broker.orderStatusProcessor = mockOrderStatusProcessor;
         broker.authenticationScheduler = mockAuthenticationScheduler;
+        broker.translator = mockTranslator;
     }
 
     // ==================== Order Management Tests ====================
@@ -139,11 +142,13 @@ public class ParadexBrokerTest {
         broker.jwtToken = jwtToken;
         broker.connected = true;
 
+        when(mockTranslator.translateOrder(mockTradeOrder)).thenReturn(mockParadexOrder);
+
         // Act
         broker.placeOrder(mockTradeOrder);
 
         // Assert
-        verify(mockRestApi).placeOrder(jwtToken, mockTradeOrder);
+        verify(mockRestApi).placeOrder(jwtToken, mockParadexOrder);
     }
 
     @Test
@@ -581,8 +586,10 @@ public class ParadexBrokerTest {
         String orderId = "order123";
         broker.jwtToken = jwtToken;
         broker.connected = true;
+
+        when(mockTranslator.translateOrder(mockTradeOrder)).thenReturn(mockParadexOrder);
         // Can't set executor to null, so just test normal placeOrder
-        when(mockRestApi.placeOrder(jwtToken, mockTradeOrder)).thenReturn(orderId);
+        when(mockRestApi.placeOrder(jwtToken, mockParadexOrder)).thenReturn(orderId);
 
         // Act & Assert
         assertDoesNotThrow(() -> {
@@ -590,7 +597,7 @@ public class ParadexBrokerTest {
         });
 
         // Verify order was placed and mapped
-        verify(mockRestApi).placeOrder(jwtToken, mockTradeOrder);
+        verify(mockRestApi).placeOrder(jwtToken, mockParadexOrder);
         assertEquals(mockTradeOrder, broker.tradeOrderMap.get(orderId));
     }
 

@@ -9,6 +9,7 @@ import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.paradex.common.api.historical.OHLCBar;
+import com.fueledbychai.paradex.common.api.order.ParadexOrder;
 
 public interface IParadexRestApi {
 
@@ -29,11 +30,11 @@ public interface IParadexRestApi {
     List<OHLCBar> getOHLCBars(String symbol, int resolutionInMinutes, int lookbackInMinutes,
             HistoricalPriceKind priceKind);
 
-    List<OrderTicket> getOpenOrders(String jwtToken, String market);
+    List<ParadexOrder> getOpenOrders(String jwtToken, String market);
 
     RestResponse cancelOrder(String jwtToken, String orderId);
 
-    String placeOrder(String jwtToken, OrderTicket tradeOrder);
+    String placeOrder(String jwtToken, ParadexOrder tradeOrder);
 
     String getJwtToken();
 

@@ -43,16 +43,26 @@ public class ParadexTradingExample {
         OrderTicket order = new OrderTicket();
 
         order.setTicker(btcTicker).setSize(BigDecimal.valueOf(0.01)).setDirection(TradeDirection.BUY)
-                .setType(Type.LIMIT).setLimitPrice(BigDecimal.valueOf(110000)).addModifier(Modifier.POST_ONLY);
+                .setType(Type.LIMIT).setLimitPrice(BigDecimal.valueOf(110000)).addModifier(Modifier.POST_ONLY)
+                .setClientOrderId("123");
 
         broker.placeOrder(order);
+        Thread.sleep(1000);
+
+        OrderTicket order2 = new OrderTicket();
+
+        order2.setTicker(btcTicker).setSize(BigDecimal.valueOf(0.01)).setDirection(TradeDirection.BUY)
+                .setType(Type.LIMIT).setLimitPrice(BigDecimal.valueOf(110000)).addModifier(Modifier.POST_ONLY)
+                .setClientOrderId("123");
+
+        broker.placeOrder(order2);
 
     }
 
     public static void main(String[] args) throws Exception {
         // config file
         // System.setProperty("paradex.config.file",
-        //         "/path/to/your/paradex-trading-example.properties");
+        // "/path/to/your/paradex-trading-example.properties");
         ParadexTradingExample example = new ParadexTradingExample();
         example.executeTrade();
         // example.onBoard();

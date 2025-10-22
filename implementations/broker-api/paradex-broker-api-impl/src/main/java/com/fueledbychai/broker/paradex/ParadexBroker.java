@@ -37,13 +37,13 @@ import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.OrderEvent;
 import com.fueledbychai.broker.order.OrderStatus;
 import com.fueledbychai.broker.order.OrderStatus.CancelReason;
-import com.fueledbychai.broker.order.OrderStatus.Status;
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.paradex.common.api.IParadexRestApi;
 import com.fueledbychai.paradex.common.api.ParadexApiFactory;
 import com.fueledbychai.paradex.common.api.ParadexConfiguration;
 import com.fueledbychai.paradex.common.api.RestResponse;
+import com.fueledbychai.paradex.common.api.order.ParadexOrder;
 import com.fueledbychai.paradex.common.api.ws.ParadexWSClientBuilder;
 import com.fueledbychai.paradex.common.api.ws.ParadexWebSocketClient;
 import com.fueledbychai.paradex.common.api.ws.accountinfo.AccountWebSocketProcessor;
@@ -163,7 +163,8 @@ public class ParadexBroker extends AbstractBasicBroker {
     public void placeOrder(OrderTicket order) {
         checkConnected();
         order.setOrderEntryTime(getCurrentTime());
-        String orderId = restApi.placeOrder(jwtToken, order);
+        ParadexOrder paradexOrder = translator.translateOrder(order);
+        String orderId = restApi.placeOrder(jwtToken, paradexOrder);
         logger.info("{} Order for {} placed with ID: {}", order.getDirection(), order.getTicker().getSymbol(), orderId);
         order.setOrderId(orderId);
         tradeOrderMap.put(orderId, order);

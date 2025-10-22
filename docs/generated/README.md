@@ -2,7 +2,7 @@
 
 This directory contains comprehensive documentation of broker capabilities, supported features, and API method support for all broker implementations in the FueledByChai library.
 
-## ? Available Documentation
+## 📋 Available Documentation
 
 ### Overview Documents
 - **[Broker Comparison](broker-comparison.md)** - Side-by-side feature comparison
@@ -11,7 +11,7 @@ This directory contains comprehensive documentation of broker capabilities, supp
 ### Individual Broker Documentation
 - **[Hyperliquid](hyperliquid-capabilities.md)** - High-performance perpetual futures DEX with low latency trading
 
-## ? Quick Start
+## 🚀 Quick Start
 
 ```java
 // Check if a broker supports a specific method
@@ -26,13 +26,13 @@ if (caps.supportsMethod(BrokerMethodCapability.CANCEL_ORDERS_BY_IDS)) {
 }
 ```
 
-## ? Summary Statistics
+## 📊 Summary Statistics
 
 - **Total Brokers**: 1
 - **Total Supported Methods**: 23
 - **Average Methods per Broker**: 23.0
 
-## ? Regenerating Documentation
+## 🔄 Regenerating Documentation
 
 To regenerate this documentation:
 
@@ -49,4 +49,4 @@ java -cp "target/classes:target/dependency/*" \
 ```
 
 ---
-*Generated on: 2025-10-17T16:57:24.326901*
+*Generated on: 2025-10-22T07:28:19.141692*

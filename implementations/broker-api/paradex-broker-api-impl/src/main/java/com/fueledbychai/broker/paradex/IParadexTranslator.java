@@ -1,10 +1,13 @@
 package com.fueledbychai.broker.paradex;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.OrderStatus;
 import com.fueledbychai.broker.order.OrderStatus.Status;
+import com.fueledbychai.broker.order.OrderTicket;
+import com.fueledbychai.paradex.common.api.order.ParadexOrder;
 import com.fueledbychai.paradex.common.api.ws.fills.ParadexFill;
 import com.fueledbychai.paradex.common.api.ws.orderstatus.CancelReason;
 import com.fueledbychai.paradex.common.api.ws.orderstatus.IParadexOrderStatusUpdate;
@@ -18,5 +21,11 @@ public interface IParadexTranslator {
             BigDecimal remainingSize);
 
     Fill translateFill(ParadexFill paradexFill);
+
+    OrderTicket translateOrder(ParadexOrder order);
+
+    ParadexOrder translateOrder(OrderTicket order);
+
+    List<OrderTicket> translateOrders(List<ParadexOrder> orders);
 
 }
