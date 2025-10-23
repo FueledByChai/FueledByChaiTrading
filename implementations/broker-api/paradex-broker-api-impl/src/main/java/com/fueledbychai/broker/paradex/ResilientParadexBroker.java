@@ -62,7 +62,7 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
     // Resilience4j components for cancel operations
     private final Retry cancelOrderRetry;
     private final CircuitBreaker cancelOrderCircuitBreaker;
-    
+
     // Resilience4j components for order status requests
     private final Retry orderStatusRetry;
     private final CircuitBreaker orderStatusCircuitBreaker;
@@ -82,7 +82,7 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
 
         this.cancelOrderRetry = createRetryForOrders("cancelOrder");
         this.cancelOrderCircuitBreaker = createCircuitBreakerForOrders("cancelOrder");
-        
+
         this.orderStatusRetry = createRetryForOrders("orderStatus");
         this.orderStatusCircuitBreaker = createCircuitBreakerForOrders("orderStatus");
 
@@ -229,43 +229,42 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
 
         try {
             // Apply resilience patterns: retry -> circuit breaker -> bulkhead
-            Decorators.ofSupplier(orderPlacementSupplier)
-                .withRetry(placeOrderRetry)
-                .withCircuitBreaker(placeOrderCircuitBreaker)
-                .withBulkhead(placeOrderBulkhead)
-                .decorate()
-                .get();
-                
+            Decorators.ofSupplier(orderPlacementSupplier).withRetry(placeOrderRetry)
+                    .withCircuitBreaker(placeOrderCircuitBreaker).withBulkhead(placeOrderBulkhead).decorate().get();
+
             orderPlaced = true;
             logger.debug("Successfully placed order for {} with resilience patterns", order.getTicker().getSymbol());
-            
+
         } catch (Exception e) {
             lastException = e;
-            logger.warn("Order placement failed for {} after all retries: {}", 
-                order.getTicker().getSymbol(), e.getMessage());
+            logger.warn("Order placement failed for {} after all retries: {}", order.getTicker().getSymbol(),
+                    e.getMessage());
         }
 
-        // If order placement failed or we're unsure of the result, attempt reconciliation
+        // If order placement failed or we're unsure of the result, attempt
+        // reconciliation
         if (!orderPlaced || lastException != null) {
-            logger.info("Attempting order reconciliation for {} due to placement failure or uncertainty", 
-                order.getTicker().getSymbol());
-                
+            logger.info("Attempting order reconciliation for {} due to placement failure or uncertainty",
+                    order.getTicker().getSymbol());
+
             boolean reconciled = reconcileOrderStatus(order);
-            
+
             if (reconciled) {
-                logger.info("Order reconciliation successful for {} - order was actually placed with ID: {}", 
-                    order.getTicker().getSymbol(), order.getOrderId());
+                logger.info("Order reconciliation successful for {} - order was actually placed with ID: {}",
+                        order.getTicker().getSymbol(), order.getOrderId());
                 // Order was successfully placed despite the exception, so don't rethrow
                 return;
             } else {
-                logger.error("Order reconciliation failed for {} - order was not found on server", 
-                    order.getTicker().getSymbol());
-                // Order was not placed and reconciliation failed, rethrow the original exception
+                logger.error("Order reconciliation failed for {} - order was not found on server",
+                        order.getTicker().getSymbol());
+                // Order was not placed and reconciliation failed, rethrow the original
+                // exception
                 if (lastException != null) {
                     if (lastException instanceof RuntimeException) {
                         throw (RuntimeException) lastException;
                     } else {
-                        throw new RuntimeException("Order placement failed and reconciliation unsuccessful", lastException);
+                        throw new RuntimeException("Order placement failed and reconciliation unsuccessful",
+                                lastException);
                     }
                 }
             }
@@ -279,10 +278,8 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
      * @return a unique client order ID
      */
     private String generateClientOrderId(OrderTicket order) {
-        return String.format("%s-%d-%d", 
-            order.getTicker().getSymbol().replace("-", ""),
-            System.currentTimeMillis(),
-            System.nanoTime() % 10000);
+        return String.format("%s-%d-%d", order.getTicker().getSymbol().replace("-", ""), System.currentTimeMillis(),
+                System.nanoTime() % 10000);
     }
 
     @Override
@@ -381,25 +378,25 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
             try {
                 return delegate.requestOrderStatusByClientOrderId(clientOrderId);
             } catch (Exception e) {
-                logger.error("Error requesting order status for client order ID {}: {}", clientOrderId, e.getMessage(), e);
+                logger.error("Error requesting order status for client order ID {}: {}", clientOrderId, e.getMessage(),
+                        e);
                 throw e;
             }
         };
 
         // Apply resilience patterns: retry -> circuit breaker
-        return Decorators.ofSupplier(orderStatusSupplier)
-                .withRetry(orderStatusRetry)
-                .withCircuitBreaker(orderStatusCircuitBreaker)
-                .decorate()
-                .get();
+        return Decorators.ofSupplier(orderStatusSupplier).withRetry(orderStatusRetry)
+                .withCircuitBreaker(orderStatusCircuitBreaker).decorate().get();
     }
 
     /**
      * Attempts to reconcile an order by checking its status via client order ID.
-     * This method is used when placeOrder fails to determine if the order was actually placed.
+     * This method is used when placeOrder fails to determine if the order was
+     * actually placed.
      * 
      * @param order the order ticket to reconcile
-     * @return true if reconciliation was successful and order was found, false otherwise
+     * @return true if reconciliation was successful and order was found, false
+     *         otherwise
      */
     private boolean reconcileOrderStatus(OrderTicket order) {
         if (order.getClientOrderId() == null || order.getClientOrderId().trim().isEmpty()) {
@@ -410,25 +407,25 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
         try {
             logger.info("Attempting to reconcile order status for client order ID: {}", order.getClientOrderId());
             OrderTicket retrievedOrder = requestOrderStatusByClientOrderId(order.getClientOrderId());
-            
+
             if (retrievedOrder != null) {
                 // Order was found on the server, update our local order with server info
                 order.setOrderId(retrievedOrder.getOrderId());
                 order.setCurrentStatus(retrievedOrder.getCurrentStatus());
                 order.setFilledSize(retrievedOrder.getFilledSize());
                 order.setFilledPrice(retrievedOrder.getFilledPrice());
-                
-                logger.info("Successfully reconciled order for client ID {}: Server Order ID = {}, Status = {}", 
-                    order.getClientOrderId(), order.getOrderId(), order.getCurrentStatus());
+
+                logger.info("Successfully reconciled order for client ID {}: Server Order ID = {}, Status = {}",
+                        order.getClientOrderId(), order.getOrderId(), order.getCurrentStatus());
                 return true;
             } else {
-                logger.info("Order reconciliation failed - no order found on server for client ID: {}", 
-                    order.getClientOrderId());
+                logger.info("Order reconciliation failed - no order found on server for client ID: {}",
+                        order.getClientOrderId());
                 return false;
             }
         } catch (Exception e) {
-            logger.warn("Failed to reconcile order status for client ID {}: {}", 
-                order.getClientOrderId(), e.getMessage());
+            logger.warn("Failed to reconcile order status for client ID {}: {}", order.getClientOrderId(),
+                    e.getMessage());
             return false;
         }
     }
