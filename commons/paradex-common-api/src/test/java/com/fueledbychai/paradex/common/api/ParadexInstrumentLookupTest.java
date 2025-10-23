@@ -10,6 +10,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -42,7 +43,7 @@ class ParadexInstrumentLookupTest {
     }
 
     @Test
-    void testLookupByCommonSymbol_Success() {
+    void testLookupByCommonSymbol_Success() throws IOException {
         // Given
         String commonSymbol = "BTC";
         String expectedParadexSymbol = "BTC-USD-PERP";
@@ -61,7 +62,7 @@ class ParadexInstrumentLookupTest {
     }
 
     @Test
-    void testLookupByCommonSymbol_DifferentSymbol() {
+    void testLookupByCommonSymbol_DifferentSymbol() throws IOException {
         // Given
         String commonSymbol = "ETH";
         String expectedParadexSymbol = "ETH-USD-PERP";
@@ -82,7 +83,7 @@ class ParadexInstrumentLookupTest {
     }
 
     @Test
-    void testLookupByCommonSymbol_SymbolNotFound() {
+    void testLookupByCommonSymbol_SymbolNotFound() throws IOException {
         // Given
         String commonSymbol = "UNKNOWN";
         String expectedParadexSymbol = "UNKNOWN-USD-PERP";
@@ -98,7 +99,7 @@ class ParadexInstrumentLookupTest {
     }
 
     @Test
-    void testLookupByExchangeSymbol_Success() {
+    void testLookupByExchangeSymbol_Success() throws IOException {
         // Given
         String exchangeSymbol = "BTC-USD-PERP";
         InstrumentDescriptor expectedDescriptor = createBitcoinDescriptor();
@@ -115,7 +116,7 @@ class ParadexInstrumentLookupTest {
     }
 
     @Test
-    void testLookupByExchangeSymbol_DifferentSymbol() {
+    void testLookupByExchangeSymbol_DifferentSymbol() throws IOException {
         // Given
         String exchangeSymbol = "ETH-USD-PERP";
         InstrumentDescriptor expectedDescriptor = createEthereumDescriptor();
@@ -132,7 +133,7 @@ class ParadexInstrumentLookupTest {
     }
 
     @Test
-    void testLookupByExchangeSymbol_SymbolNotFound() {
+    void testLookupByExchangeSymbol_SymbolNotFound() throws IOException {
         // Given
         String exchangeSymbol = "UNKNOWN-USD-PERP";
 
@@ -147,7 +148,7 @@ class ParadexInstrumentLookupTest {
     }
 
     @Test
-    void testLookupByTicker_CryptoTicker() {
+    void testLookupByTicker_CryptoTicker() throws IOException {
         // Given
         Ticker ticker = new Ticker("BTC-USD-PERP").setExchange(Exchange.PARADEX)
                 .setInstrumentType(InstrumentType.PERPETUAL_FUTURES);
@@ -165,7 +166,7 @@ class ParadexInstrumentLookupTest {
     }
 
     @Test
-    void testLookupByTicker_StockTicker() {
+    void testLookupByTicker_StockTicker() throws IOException {
         // Given
         Ticker ticker = new Ticker("AAPL").setExchange(Exchange.INTERACTIVE_BROKERS_SMART)
                 .setInstrumentType(InstrumentType.STOCK);
@@ -183,7 +184,7 @@ class ParadexInstrumentLookupTest {
     }
 
     @Test
-    void testLookupByTicker_TickerNotFound() {
+    void testLookupByTicker_TickerNotFound() throws IOException {
         // Given
         Ticker ticker = new Ticker("UNKNOWN-USD-PERP").setExchange(Exchange.PARADEX)
                 .setInstrumentType(InstrumentType.PERPETUAL_FUTURES);
@@ -199,7 +200,7 @@ class ParadexInstrumentLookupTest {
     }
 
     @Test
-    void testLookupByTicker_NullTicker() {
+    void testLookupByTicker_NullTicker() throws IOException {
         // When & Then - This should throw NullPointerException
         try {
             instrumentLookup.lookupByTicker(null);
@@ -212,7 +213,7 @@ class ParadexInstrumentLookupTest {
     }
 
     @Test
-    void testMultipleLookups_VerifyDifferentCalls() {
+    void testMultipleLookups_VerifyDifferentCalls() throws IOException {
         // Given
         String commonSymbol = "BTC";
         String exchangeSymbol = "ETH-USD-PERP";
@@ -244,7 +245,7 @@ class ParadexInstrumentLookupTest {
     }
 
     @Test
-    void testCommonSymbolToParadexSymbolConversion() {
+    void testCommonSymbolToParadexSymbolConversion() throws IOException {
         // Test that the conversion method is being called correctly
         try (MockedStatic<ParadexUtil> mockedUtil = Mockito.mockStatic(ParadexUtil.class)) {
             // Given
@@ -266,7 +267,7 @@ class ParadexInstrumentLookupTest {
     }
 
     @Test
-    void testApiIntegration_UsesCorrectApiInstance() {
+    void testApiIntegration_UsesCorrectApiInstance() throws IOException {
         // Test that the class uses the API factory correctly
         try (MockedStatic<ParadexApiFactory> mockedFactory = Mockito.mockStatic(ParadexApiFactory.class)) {
             // Given
@@ -309,7 +310,7 @@ class ParadexInstrumentLookupTest {
      */
     private static class TestableParadexInstrumentLookup extends ParadexInstrumentLookup {
         public TestableParadexInstrumentLookup(IParadexRestApi api) {
-            this.api = api;
+            super(api);
         }
     }
 }

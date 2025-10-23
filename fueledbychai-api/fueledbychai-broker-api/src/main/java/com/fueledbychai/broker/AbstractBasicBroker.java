@@ -17,6 +17,7 @@ import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.FillEventListener;
 import com.fueledbychai.broker.order.OrderEvent;
 import com.fueledbychai.broker.order.OrderEventListener;
+import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.data.ComboTicker;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.time.TimeUpdatedListener;
@@ -246,4 +247,15 @@ public abstract class AbstractBasicBroker implements IBroker {
 
     }
 
+    @Override
+    public BrokerRequestResult cancelOrderByClientOrderId(String clientOrderId) {
+        throw new UnsupportedOperationException("Not supported"); // To change body of generated methods, choose Tools |
+                                                                  // Templates.
+    }
+
+    @Override
+    public OrderTicket requestOrderStatusByClientOrderId(String clientOrderId) {
+        throw new UnsupportedOperationException("Not supported"); // To change body of generated methods, choose Tools |
+                                                                  // Templates.
+    }
 }

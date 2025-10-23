@@ -77,5 +77,11 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
             <artifactId>caffeine</artifactId>
             <version>3.1.8</version> <!-- or latest -->
             </dependency>           
+
+            <dependency>
+    <groupId>io.github.resilience4j</groupId>
+    <artifactId>resilience4j-all</artifactId>
+    <version>2.3.0</version>
+</dependency>
     </dependencies>
 </project>

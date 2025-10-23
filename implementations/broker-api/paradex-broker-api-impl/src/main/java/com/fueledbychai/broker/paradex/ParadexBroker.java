@@ -154,6 +154,44 @@ public class ParadexBroker extends AbstractBasicBroker {
     }
 
     @Override
+    public BrokerRequestResult cancelOrderByClientOrderId(String clientOrderId) {
+        checkConnected();
+        logger.info("Canceling order with Client Order ID: {}", clientOrderId);
+        RestResponse cancelOrderResponse = restApi.cancelOrderByClientOrderId(jwtToken, clientOrderId);
+
+        if (!cancelOrderResponse.isSuccessful()) {
+            String errormessage = cancelOrderResponse.getBody();
+            logger.error("Failed to cancel order with Client Order ID {}: {}", clientOrderId, errormessage);
+
+            if (errormessage != null && errormessage.contains("ORDER_IS_CLOSED")) {
+                logger.error(
+                        "Removing order with Client Order ID {} from active list since it is likely already closed.",
+                        clientOrderId);
+                String closedOrderId = errormessage.replaceAll(".*?(\\d+).*", "$1");
+                OrderTicket order = tradeOrderMap.get(closedOrderId);
+                if (order != null) {
+                    order.setCurrentStatus(OrderStatus.Status.CANCELED);
+                    OrderStatus status = new OrderStatus(OrderStatus.Status.CANCELED, order.getOrderId(),
+                            order.getFilledSize(), order.getSize().subtract(order.getFilledSize()),
+                            order.getFilledPrice(), order.getTicker(), getCurrentTime());
+                    status.setCancelReason(CancelReason.USER_CANCELED);
+
+                    OrderEvent event = new OrderEvent(order, status);
+
+                    tradeOrderMap.remove(closedOrderId);
+                    super.fireOrderEvent(event);
+
+                }
+                return new BrokerRequestResult(false, errormessage);
+            }
+        } else {
+            logger.info("Cancel order request for Client Order ID {} successful.", clientOrderId);
+
+        }
+        return new BrokerRequestResult();
+    }
+
+    @Override
     public BrokerRequestResult cancelOrder(OrderTicket order) {
         checkConnected();
         return cancelOrder(order.getOrderId());
@@ -225,6 +263,29 @@ public class ParadexBroker extends AbstractBasicBroker {
     public OrderTicket requestOrderStatus(String orderId) {
         throw new UnsupportedOperationException("Not supported yet."); // To change body of generated methods, choose
                                                                        // Tools | Templates.
+    }
+
+    @Override
+    public OrderTicket requestOrderStatusByClientOrderId(String clientOrderId) {
+        checkConnected();
+        logger.info("Requesting order status by client order ID: {}", clientOrderId);
+        
+        try {
+            ParadexOrder paradexOrder = restApi.getOrderByClientOrderId(jwtToken, clientOrderId);
+            if (paradexOrder != null) {
+                // Convert ParadexOrder back to OrderTicket
+                OrderTicket orderTicket = translator.translateOrder(paradexOrder);
+                logger.info("Retrieved order status for client ID {}: Status = {}, Order ID = {}", 
+                    clientOrderId, orderTicket.getCurrentStatus(), orderTicket.getOrderId());
+                return orderTicket;
+            } else {
+                logger.warn("No order found for client order ID: {}", clientOrderId);
+                return null;
+            }
+        } catch (Exception e) {
+            logger.error("Error requesting order status for client order ID {}: {}", clientOrderId, e.getMessage(), e);
+            throw e;
+        }
     }
 
     @Override
