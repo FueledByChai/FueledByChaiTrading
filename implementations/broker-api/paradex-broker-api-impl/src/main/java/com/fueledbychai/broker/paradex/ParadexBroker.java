@@ -269,14 +269,14 @@ public class ParadexBroker extends AbstractBasicBroker {
     public OrderTicket requestOrderStatusByClientOrderId(String clientOrderId) {
         checkConnected();
         logger.info("Requesting order status by client order ID: {}", clientOrderId);
-        
+
         try {
             ParadexOrder paradexOrder = restApi.getOrderByClientOrderId(jwtToken, clientOrderId);
             if (paradexOrder != null) {
                 // Convert ParadexOrder back to OrderTicket
                 OrderTicket orderTicket = translator.translateOrder(paradexOrder);
-                logger.info("Retrieved order status for client ID {}: Status = {}, Order ID = {}", 
-                    clientOrderId, orderTicket.getCurrentStatus(), orderTicket.getOrderId());
+                logger.info("Retrieved order status for client ID {}: Status = {}, Order ID = {}", clientOrderId,
+                        orderTicket.getCurrentStatus(), orderTicket.getOrderId());
                 return orderTicket;
             } else {
                 logger.warn("No order found for client order ID: {}", clientOrderId);

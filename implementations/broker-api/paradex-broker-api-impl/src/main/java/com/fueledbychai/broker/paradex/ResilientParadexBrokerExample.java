@@ -46,7 +46,7 @@ public class ResilientParadexBrokerExample {
 
         // Example 3: Monitoring resilience patterns
         exampleWithMonitoring();
-        
+
         // Example 4: Order reconciliation feature
         exampleWithOrderReconciliation();
     }
@@ -157,51 +157,52 @@ public class ResilientParadexBrokerExample {
             resilientBroker.disconnect();
         }
     }
-    
+
     /**
      * Example 4: Demonstrating order reconciliation feature
      */
     private static void exampleWithOrderReconciliation() {
         logger.info("=== Example 4: Order Reconciliation ===");
-        
+
         ResilientParadexBroker resilientBroker = new ResilientParadexBroker();
-        
+
         try {
             resilientBroker.connect();
-            
+
             // Create an order with a specific client order ID for tracking
             OrderTicket order = createSampleOrder("BTC-USD", TradeDirection.BUY, "0.5", "48000.00");
-            
+
             // Set a custom client order ID for better tracking
             String clientOrderId = "MY_ORDER_" + System.currentTimeMillis();
             order.setClientOrderId(clientOrderId);
-            
+
             logger.info("Placing order with client ID: {}", clientOrderId);
-            
+
             try {
                 // Place the order - if it fails, reconciliation will automatically attempt
                 // to check if the order was actually placed on the server
                 resilientBroker.placeOrder(order);
-                
-                logger.info("Order placement completed. Final order ID: {}, Status: {}", 
-                    order.getOrderId(), order.getCurrentStatus());
-                
+
+                logger.info("Order placement completed. Final order ID: {}, Status: {}", order.getOrderId(),
+                        order.getCurrentStatus());
+
                 // Demonstrate manual order status checking
                 if (order.getOrderId() != null && !order.getOrderId().isEmpty()) {
                     logger.info("Order successfully placed and tracked with server ID: {}", order.getOrderId());
                 } else {
                     logger.warn("Order placement may have had issues - no server order ID available");
                 }
-                
+
             } catch (Exception e) {
                 logger.error("Order placement failed completely: {}", e.getMessage());
-                
-                // Even if placement failed, you can manually check order status using client order ID
+
+                // Even if placement failed, you can manually check order status using client
+                // order ID
                 try {
                     OrderTicket retrievedOrder = resilientBroker.requestOrderStatusByClientOrderId(clientOrderId);
                     if (retrievedOrder != null) {
-                        logger.info("Manual reconciliation found order on server: ID = {}, Status = {}", 
-                            retrievedOrder.getOrderId(), retrievedOrder.getCurrentStatus());
+                        logger.info("Manual reconciliation found order on server: ID = {}, Status = {}",
+                                retrievedOrder.getOrderId(), retrievedOrder.getCurrentStatus());
                     } else {
                         logger.info("Manual reconciliation confirmed order was not placed on server");
                     }
@@ -209,13 +210,13 @@ public class ResilientParadexBrokerExample {
                     logger.error("Manual reconciliation also failed: {}", reconciliationError.getMessage());
                 }
             }
-            
+
         } catch (Exception e) {
             logger.error("Error in reconciliation example: {}", e.getMessage(), e);
         } finally {
             resilientBroker.disconnect();
         }
-        
+
         logger.info("Key benefits of reconciliation:");
         logger.info("1. Automatic detection of successfully placed orders despite API errors");
         logger.info("2. Reduced false negatives in order placement");

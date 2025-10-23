@@ -141,22 +141,22 @@ public class ResilientParadexBrokerTest {
 
     @Test
     public void testPlaceOrderWithReconciliationAfterFailure() {
-        // Create a mock REST API that fails on placeOrder but succeeds on getOrderByClientOrderId
+        // Create a mock REST API that fails on placeOrder but succeeds on
+        // getOrderByClientOrderId
         IParadexRestApi mockRestApi = mock(IParadexRestApi.class);
-        
+
         // placeOrder always fails
-        when(mockRestApi.placeOrder(anyString(), any()))
-                .thenThrow(new ResponseException("Internal Server Error", 500));
-        
+        when(mockRestApi.placeOrder(anyString(), any())).thenThrow(new ResponseException("Internal Server Error", 500));
+
         // But the order actually exists when we check by client order ID
         when(mockRestApi.getOrderByClientOrderId(anyString(), anyString()))
                 .thenReturn(createMockParadexOrder("SERVER_ORDER_123", "CLIENT_ORDER_456"));
-        
+
         when(mockRestApi.getJwtToken()).thenReturn("test-jwt-token");
 
         // Create ParadexBroker with mock API
         ParadexBroker delegate = new ParadexBroker(mockRestApi);
-        
+
         // Wrap with resilient broker
         ResilientParadexBroker resilientBroker = new ResilientParadexBroker(delegate);
 
@@ -171,32 +171,32 @@ public class ResilientParadexBrokerTest {
 
         // This should succeed via reconciliation despite placeOrder failures
         assertDoesNotThrow(() -> resilientBroker.placeOrder(order));
-        
+
         // Verify the order was reconciled with server data
         assertEquals("SERVER_ORDER_123", order.getOrderId());
-        
-        // Verify that reconciliation was attempted by checking getOrderByClientOrderId was called
+
+        // Verify that reconciliation was attempted by checking getOrderByClientOrderId
+        // was called
         verify(mockRestApi, atLeastOnce()).getOrderByClientOrderId(anyString(), eq("CLIENT_ORDER_456"));
     }
 
     @Test
     public void testPlaceOrderFailsWhenReconciliationAlsoFails() {
-        // Create a mock REST API that fails on both placeOrder and getOrderByClientOrderId
+        // Create a mock REST API that fails on both placeOrder and
+        // getOrderByClientOrderId
         IParadexRestApi mockRestApi = mock(IParadexRestApi.class);
-        
+
         // placeOrder fails
-        when(mockRestApi.placeOrder(anyString(), any()))
-                .thenThrow(new ResponseException("Internal Server Error", 500));
-        
+        when(mockRestApi.placeOrder(anyString(), any())).thenThrow(new ResponseException("Internal Server Error", 500));
+
         // getOrderByClientOrderId also fails (order not found)
-        when(mockRestApi.getOrderByClientOrderId(anyString(), anyString()))
-                .thenReturn(null);
-        
+        when(mockRestApi.getOrderByClientOrderId(anyString(), anyString())).thenReturn(null);
+
         when(mockRestApi.getJwtToken()).thenReturn("test-jwt-token");
 
         // Create ParadexBroker with mock API
         ParadexBroker delegate = new ParadexBroker(mockRestApi);
-        
+
         // Wrap with resilient broker
         ResilientParadexBroker resilientBroker = new ResilientParadexBroker(delegate);
 
@@ -211,7 +211,7 @@ public class ResilientParadexBrokerTest {
 
         // This should fail since both placeOrder and reconciliation fail
         assertThrows(RuntimeException.class, () -> resilientBroker.placeOrder(order));
-        
+
         // Verify that reconciliation was attempted
         verify(mockRestApi, atLeastOnce()).getOrderByClientOrderId(anyString(), eq("CLIENT_ORDER_789"));
     }
@@ -219,9 +219,10 @@ public class ResilientParadexBrokerTest {
     /**
      * Helper method to create a mock ParadexOrder for testing
      */
-    private com.fueledbychai.paradex.common.api.order.ParadexOrder createMockParadexOrder(String orderId, String clientOrderId) {
-        com.fueledbychai.paradex.common.api.order.ParadexOrder mockOrder = 
-            mock(com.fueledbychai.paradex.common.api.order.ParadexOrder.class);
+    private com.fueledbychai.paradex.common.api.order.ParadexOrder createMockParadexOrder(String orderId,
+            String clientOrderId) {
+        com.fueledbychai.paradex.common.api.order.ParadexOrder mockOrder = mock(
+                com.fueledbychai.paradex.common.api.order.ParadexOrder.class);
         when(mockOrder.getOrderId()).thenReturn(orderId);
         when(mockOrder.getClientId()).thenReturn(clientOrderId);
         return mockOrder;
