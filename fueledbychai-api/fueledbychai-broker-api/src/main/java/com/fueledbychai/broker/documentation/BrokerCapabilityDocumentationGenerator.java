@@ -287,7 +287,7 @@ public class BrokerCapabilityDocumentationGenerator {
             return "Futures contracts";
         case PERPETUAL_FUTURES:
             return "Perpetual futures contracts";
-        case PERPETUAL_OPTIONS:
+        case PERPETUAL_OPTION:
             return "Perpetual options contracts";
         case CURRENCY:
             return "Foreign exchange pairs";
@@ -299,7 +299,7 @@ public class BrokerCapabilityDocumentationGenerator {
             return "Index instruments";
         case COMBO:
             return "Combination instruments";
-        case SPOT_METALS:
+        case SPOT_METAL:
             return "Spot metals trading";
         case NONE:
             return "No specific instrument type";

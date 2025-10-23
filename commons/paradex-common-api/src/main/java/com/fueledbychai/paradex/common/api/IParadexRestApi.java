@@ -1,11 +1,9 @@
 package com.fueledbychai.paradex.common.api;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
 import com.fueledbychai.broker.Position;
-import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.paradex.common.api.historical.OHLCBar;
@@ -34,11 +32,15 @@ public interface IParadexRestApi {
 
     RestResponse cancelOrder(String jwtToken, String orderId);
 
+    RestResponse cancelOrderByClientOrderId(String jwtToken, String clientOrderId);
+
+    ParadexOrder getOrderByClientOrderId(String jwtToken, String clientOrderId);
+
     String placeOrder(String jwtToken, ParadexOrder tradeOrder);
 
     String getJwtToken();
 
-    String getJwtToken(Map<String, String> headers) throws IOException;
+    String getJwtToken(Map<String, String> headers);
 
     String getOrderMessageSignature(String orderMessage) throws Exception;
 

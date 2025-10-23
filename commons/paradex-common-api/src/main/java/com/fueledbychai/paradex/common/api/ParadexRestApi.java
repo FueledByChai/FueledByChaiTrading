@@ -8,7 +8,6 @@ import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,10 +19,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.broker.Position;
-import com.fueledbychai.broker.order.OrderTicket;
-import com.fueledbychai.broker.order.OrderTicket.Modifier;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.FueledByChaiException;
+import com.fueledbychai.data.ResponseException;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.paradex.common.api.historical.OHLCBar;
@@ -137,7 +135,8 @@ public class ParadexRestApi implements IParadexRestApi {
         try (Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 logger.error("Error response: " + response.body().string());
-                throw new IOException("Unexpected code " + response);
+                throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                        response.code());
             }
 
             String responseBody = response.body().string();
@@ -169,7 +168,8 @@ public class ParadexRestApi implements IParadexRestApi {
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
                     logger.error("Error response: " + response.body().string());
-                    throw new IOException("Unexpected code " + response);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
                 }
 
                 String responseBody = response.body().string();
@@ -226,7 +226,8 @@ public class ParadexRestApi implements IParadexRestApi {
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
                     logger.error("Error response: " + response.body().string());
-                    throw new IOException("Unexpected code " + response);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
                 }
 
                 String responseBody = response.body().string();
@@ -261,7 +262,8 @@ public class ParadexRestApi implements IParadexRestApi {
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
                     logger.error("Error response: " + response.body().string());
-                    throw new IOException("Unexpected code " + response);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
                 }
 
                 String responseBody = response.body().string();
@@ -279,8 +281,8 @@ public class ParadexRestApi implements IParadexRestApi {
     @Override
     public RestResponse cancelOrder(String jwtToken, String orderId) {
         checkPrivateApi();
-        return executeWithRetry(() -> {
 
+        try {
             String path = "/orders/" + orderId;
             String url = baseUrl + path;
             Request.Builder requestBuilder = new Request.Builder().url(url).delete().addHeader("Authorization",
@@ -289,35 +291,90 @@ public class ParadexRestApi implements IParadexRestApi {
             Request request = requestBuilder.build();
             logger.info("Request: " + request);
 
-            try (Response response = client.newCall(request).execute()) {
-                /**
-                 * 2025-10-03T17:03:29.662+0000 [pool-3-thread-1] INFO
-                 * c.f.service.MarketDataService - Canceling expired buy order:
-                 * 1759510877650201709231040002 (age: 132289ms) 2025-10-03T17:03:29.764+0000
-                 * [pool-3-thread-1] ERROR c.s.p.common.api.ParadexRestApi - Error response:
-                 * {"error":"ORDER_IS_CLOSED","message":"order is closed:
-                 * 1759510877650201709231040002"}
-                 */
-                if (response.code() == 400) {
-                    RestResponse restResponse = new RestResponse(response.code(), response.body().string());
-                    return restResponse;
-                } else if (!response.isSuccessful()) {
-                    logger.error("Error response: " + response.body().string());
-                    throw new IOException("Unexpected code " + response);
-                }
-
-                String responseBody = response.body().string();
-                logger.info("Response output: " + responseBody);
-
-                return new RestResponse(response.code(), responseBody);
-
-            } catch (Exception e) {
-                logger.error(e.getMessage(), e);
-                throw new RuntimeException(e);
+            Response response = client.newCall(request).execute();
+            if (response.code() == 400) {
+                RestResponse restResponse = new RestResponse(response.code(), response.body().string());
+                return restResponse;
+            } else if (!response.isSuccessful()) {
+                logger.error("Error response: " + response.body().string());
+                throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                        response.code());
             }
 
-        }, 3, 500); // Retry up to 3 times with 500ms backoff
+            String responseBody = response.body().string();
+            logger.info("Response output: " + responseBody);
 
+            return new RestResponse(response.code(), responseBody);
+        } catch (IOException e) {
+            logger.error("IO error in cancelOrder: " + e.getMessage(), e);
+            throw new FueledByChaiException("Network error canceling order: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public RestResponse cancelOrderByClientOrderId(String jwtToken, String clientOrderId) {
+        checkPrivateApi();
+
+        try {
+            String path = "/orders/by_client_id/" + clientOrderId;
+            String url = baseUrl + path;
+            Request.Builder requestBuilder = new Request.Builder().url(url).delete().addHeader("Authorization",
+                    "Bearer " + jwtToken);
+
+            Request request = requestBuilder.build();
+            logger.info("Request: " + request);
+
+            Response response = client.newCall(request).execute();
+            if (response.code() == 400) {
+                RestResponse restResponse = new RestResponse(response.code(), response.body().string());
+                return restResponse;
+            } else if (!response.isSuccessful()) {
+                logger.error("Error response: " + response.body().string());
+                throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                        response.code());
+            }
+
+            String responseBody = response.body().string();
+            logger.info("Response output: " + responseBody);
+
+            return new RestResponse(response.code(), responseBody);
+        } catch (IOException e) {
+            logger.error("IO error in cancelOrderByClientOrderId: " + e.getMessage(), e);
+            throw new FueledByChaiException("Network error canceling order by client ID: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public ParadexOrder getOrderByClientOrderId(String jwtToken, String clientOrderId) {
+        checkPrivateApi();
+
+        try {
+            String path = "/orders-history";
+            String url = baseUrl + path;
+            HttpUrl.Builder urlBuilder = HttpUrl.parse(url).newBuilder();
+            urlBuilder.addQueryParameter("client_id", clientOrderId);
+            String newUrl = urlBuilder.build().toString();
+            Request.Builder requestBuilder = new Request.Builder().url(newUrl).get().addHeader("Authorization",
+                    "Bearer " + jwtToken);
+
+            Request request = requestBuilder.build();
+            logger.info("Request: " + request);
+
+            Response response = client.newCall(request).execute();
+            if (!response.isSuccessful()) {
+                logger.error("Error response: " + response.body().string());
+                throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                        response.code());
+            }
+
+            String responseBody = response.body().string();
+            logger.info("Response output: " + responseBody);
+
+            return parseParadexOrder(responseBody);
+        } catch (IOException e) {
+            logger.error("IO error in getOrderByClientOrderId: " + e.getMessage(), e);
+            throw new FueledByChaiException("Network error getting order by client ID: " + e.getMessage(), e);
+        }
     }
 
     @Override
@@ -334,7 +391,8 @@ public class ParadexRestApi implements IParadexRestApi {
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
                     logger.error("Error response: " + response.body().string());
-                    throw new IOException("Unexpected code " + response);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
                 }
 
                 String responseBody = response.body().string();
@@ -366,7 +424,8 @@ public class ParadexRestApi implements IParadexRestApi {
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
                     logger.error("Error response: " + response.body().string());
-                    throw new IOException("Unexpected code " + response);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
                 }
 
                 String responseBody = response.body().string();
@@ -426,7 +485,8 @@ public class ParadexRestApi implements IParadexRestApi {
         try (Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 logger.error("Error response: " + response.body().string());
-                throw new IOException("Unexpected code " + response);
+                throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                        response.code());
             }
 
             String responseBody = response.body().string();
@@ -456,35 +516,41 @@ public class ParadexRestApi implements IParadexRestApi {
     }
 
     @Override
-    public String getJwtToken(Map<String, String> headers) throws IOException {
+    public String getJwtToken(Map<String, String> headers) {
         checkPrivateApi();
-        String path = "/auth";
-        String url = baseUrl + path;
-        Request.Builder requestBuilder = new Request.Builder().url(url)
-                .post(RequestBody.create("{}", MediaType.get("application/json; charset=utf-8")));
 
-        headers.forEach(requestBuilder::addHeader);
+        try {
+            String path = "/auth";
+            String url = baseUrl + path;
+            Request.Builder requestBuilder = new Request.Builder().url(url)
+                    .post(RequestBody.create("{}", MediaType.get("application/json; charset=utf-8")));
 
-        Request request = requestBuilder.build();
-        logger.info("Request: " + request);
+            headers.forEach(requestBuilder::addHeader);
 
-        try (Response response = client.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                logger.error("Error response: " + response.body().string());
-                throw new IOException("Unexpected code " + response);
+            Request request = requestBuilder.build();
+            logger.info("Request: " + request);
+
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    logger.error("Error response: " + response.body().string());
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
+                }
+
+                String responseBody = response.body().string();
+
+                // Parse the JSON response to extract the jwt_token
+                JSONObject jsonResponse = new JSONObject(responseBody);
+                if (jsonResponse.has("jwt_token")) {
+                    return jsonResponse.getString("jwt_token");
+                }
             }
 
-            String responseBody = response.body().string();
-
-            // Parse the JSON response to extract the jwt_token
-            JSONObject jsonResponse = new JSONObject(responseBody);
-            if (jsonResponse.has("jwt_token")) {
-                return jsonResponse.getString("jwt_token");
-            }
+            throw new FueledByChaiException("JWT Token not found in response");
+        } catch (IOException e) {
+            logger.error("IO error in getJwtToken: " + e.getMessage(), e);
+            throw new FueledByChaiException("Network error getting JWT token: " + e.getMessage(), e);
         }
-
-        throw new IllegalStateException("JWT Token not found in response");
-
     }
 
     @Override
@@ -502,7 +568,8 @@ public class ParadexRestApi implements IParadexRestApi {
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
                     logger.error("Error response: " + response.body().string());
-                    throw new IOException("Unexpected code " + response);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
                 }
 
                 String responseBody = response.body().string();
@@ -588,7 +655,6 @@ public class ParadexRestApi implements IParadexRestApi {
 
         // Convert the auth message to a typed data object
         TypedData typedData = TypedData.fromJsonString(authMessage);
-        Felt messageHash = typedData.getMessageHash(accountAddress);
 
         // Create new StarkCurveSigner with the private key
         StarkCurveSigner scSigner = new StarkCurveSigner(privateKey);
@@ -624,13 +690,8 @@ public class ParadexRestApi implements IParadexRestApi {
         logger.info("Chain ID: " + chainID);
         // System.out.println("Key value: " + privateKey.getValue());
 
-        // Get current timestamp in seconds
-        long timestamp = System.currentTimeMillis() / 1000;
-        long expiry = timestamp + 24 * 60 * 60; // now + 24 hours
-
         // Convert the auth message to a typed data object
         TypedData typedData = TypedData.fromJsonString(orderMessage);
-        Felt messageHash = typedData.getMessageHash(accountAddress);
 
         // Create new StarkCurveSigner with the private key
         StarkCurveSigner scSigner = new StarkCurveSigner(privateKey);
@@ -960,6 +1021,13 @@ public class ParadexRestApi implements IParadexRestApi {
         }
 
         return positionInfoList;
+    }
+
+    protected ParadexOrder parseParadexOrder(String responseBody) {
+        JsonObject jsonObject = JsonParser.parseString(responseBody).getAsJsonObject();
+        JsonArray resultsArray = jsonObject.getAsJsonArray("results");
+        ParadexOrder order = gson.fromJson(resultsArray.get(0), ParadexOrder.class);
+        return order;
     }
 
     private class ZonedDateTimeAdapter extends TypeAdapter<ZonedDateTime> {

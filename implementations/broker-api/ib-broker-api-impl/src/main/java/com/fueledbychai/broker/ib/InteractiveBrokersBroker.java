@@ -687,4 +687,10 @@ public class InteractiveBrokersBroker extends BaseIBConnectionDelegate implement
 
     }
 
+    @Override
+    public BrokerRequestResult cancelOrderByClientOrderId(String clientOrderId) {
+        throw new UnsupportedOperationException("Not supported"); // To change body of generated methods, choose Tools |
+                                                                  // Templates.
+    }
+
 }

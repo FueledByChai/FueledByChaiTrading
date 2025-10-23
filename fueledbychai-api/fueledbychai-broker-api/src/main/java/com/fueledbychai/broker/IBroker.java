@@ -41,6 +41,8 @@ public interface IBroker {
      */
     public abstract BrokerRequestResult cancelOrder(String id);
 
+    public abstract BrokerRequestResult cancelOrderByClientOrderId(String clientOrderId);
+
     /**
      * Cancels the specified order
      *
@@ -189,6 +191,8 @@ public interface IBroker {
      * @return The TradeOrder for the specified ID, or null if no trade was found.
      */
     public OrderTicket requestOrderStatus(String orderId);
+
+    public OrderTicket requestOrderStatusByClientOrderId(String clientOrderId);
 
     /**
      * Requests all open orders
