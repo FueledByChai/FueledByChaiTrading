@@ -340,7 +340,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     @Override
-    public void placeOrder(OrderTicket order) {
+    public BrokerRequestResult placeOrder(OrderTicket order) {
 
         String orderId = System.currentTimeMillis() + "-" + (int) (Math.random() * 10000); // Generate a unique order ID
         order.setOrderId(orderId); // Set the generated order ID
@@ -384,7 +384,8 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
             }
         });
 
-        // return orderId; // Return immediately
+        return new BrokerRequestResult();
+
     }
 
     @Override

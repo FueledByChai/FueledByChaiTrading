@@ -120,8 +120,49 @@ public class ParadexTranslator implements IParadexTranslator {
     @Override
     public OrderTicket translateOrder(ParadexOrder order) {
         OrderTicket tradeOrder = new OrderTicket();
+        tradeOrder.setClientOrderId(order.getClientId());
+        Ticker ticker = tickerRegistry.lookupByBrokerSymbol(order.getTicker());
+        tradeOrder.setTicker(ticker);
+        tradeOrder.setSize(order.getSize());
+        tradeOrder.setLimitPrice(order.getLimitPrice());
+        if (order.getSide() == Side.BUY) {
+            tradeOrder.setDirection(TradeDirection.BUY);
+        } else {
+            tradeOrder.setDirection(TradeDirection.SELL);
+        }
+        if (order.getOrderType() == OrderType.MARKET) {
+            tradeOrder.setType(OrderTicket.Type.MARKET);
+        } else if (order.getOrderType() == OrderType.LIMIT) {
+            tradeOrder.setType(OrderTicket.Type.LIMIT);
+        } else if (order.getOrderType() == OrderType.STOP) {
+            tradeOrder.setType(OrderTicket.Type.STOP);
+        } else {
+            throw new UnsupportedOperationException("Order type " + order.getOrderType() + " is not supported");
+        }
+
+        tradeOrder.setOrderId(order.getOrderId());
+        Status currentStatus = null;
+        if (order.getOrderStatus() == ParadexOrderStatus.CLOSED) {
+            if (order.getCancelReason() != null && order.getCancelReason().length() > 0) {
+                currentStatus = Status.CANCELED;
+            } else {
+                currentStatus = Status.FILLED;
+            }
+        } else if (order.getOrderStatus() == ParadexOrderStatus.OPEN) {
+            if (order.getRemainingSize().compareTo(order.getSize()) < 0) {
+                currentStatus = Status.PARTIAL_FILL;
+            } else {
+                currentStatus = Status.NEW;
+            }
+        } else if (order.getOrderStatus() == ParadexOrderStatus.NEW
+                || order.getOrderStatus() == ParadexOrderStatus.UNTRIGGERED) {
+            currentStatus = translateStatusCode(order.getOrderStatus(), CancelReason.NONE, order.getSize(),
+                    order.getRemainingSize());
+            tradeOrder.setCurrentStatus(currentStatus);
+        }
 
         return tradeOrder;
+
     }
 
     @Override

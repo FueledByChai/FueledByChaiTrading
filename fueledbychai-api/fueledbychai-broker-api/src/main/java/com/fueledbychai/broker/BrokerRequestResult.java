@@ -3,6 +3,7 @@ package com.fueledbychai.broker;
 public class BrokerRequestResult {
 
     protected boolean success;
+    protected boolean shouldRefresh = false;
     protected String message = "";
 
     public BrokerRequestResult() {
@@ -11,6 +12,12 @@ public class BrokerRequestResult {
 
     public BrokerRequestResult(boolean success, String message) {
         this.success = success;
+        this.message = message;
+    }
+
+    public BrokerRequestResult(boolean success, boolean shouldRefresh, String message) {
+        this.success = success;
+        this.shouldRefresh = shouldRefresh;
         this.message = message;
     }
 
