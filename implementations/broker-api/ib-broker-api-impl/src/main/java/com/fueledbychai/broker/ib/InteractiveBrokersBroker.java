@@ -375,17 +375,20 @@ public class InteractiveBrokersBroker extends BaseIBConnectionDelegate implement
         return ++nextOrderId + "";
     }
 
-    public void placeOrder(OrderTicket order) {
+    public BrokerRequestResult placeOrder(OrderTicket order) {
         logger.info("Order received: " + order);
         order.setOrderEntryTime(getZoneDateTime());
 
         List<IbOrderAndContract> orders = buildOrderAndContract(order);
         logger.debug("Order converted to " + orders.size() + " IB Order(s)");
+
         orders.get(orders.size() - 1).getOrder().transmit(true);
         for (IbOrderAndContract ibOrder : orders) {
             ibConnection.placeOrder(ibOrder.getOrder().orderId(), ibOrder.getContract(), ibOrder.getOrder());
         }
         logger.debug("Orders placed at IB");
+
+        return new BrokerRequestResult();
     }
 
     public void aquireLock() {
@@ -691,6 +694,12 @@ public class InteractiveBrokersBroker extends BaseIBConnectionDelegate implement
     public BrokerRequestResult cancelOrderByClientOrderId(String clientOrderId) {
         throw new UnsupportedOperationException("Not supported"); // To change body of generated methods, choose Tools |
                                                                   // Templates.
+    }
+
+    @Override
+    public OrderTicket requestOrderStatusByClientOrderId(String clientOrderId) {
+        throw new UnsupportedOperationException("Not supported yet."); // To change body of generated methods, choose
+                                                                       // Tools | Templates.
     }
 
 }

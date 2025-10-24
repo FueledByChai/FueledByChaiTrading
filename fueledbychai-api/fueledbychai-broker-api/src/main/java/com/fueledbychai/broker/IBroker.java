@@ -67,7 +67,7 @@ public interface IBroker {
      *
      * @param order The order to place with the broker.
      */
-    public abstract void placeOrder(OrderTicket order);
+    public abstract BrokerRequestResult placeOrder(OrderTicket order);
 
     /**
      * Gets the next order ID, or -1 if there was a problem getting the orderId

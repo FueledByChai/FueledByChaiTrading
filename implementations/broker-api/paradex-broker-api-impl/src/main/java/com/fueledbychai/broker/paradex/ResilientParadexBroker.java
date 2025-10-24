@@ -205,7 +205,7 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
     }
 
     @Override
-    public void placeOrder(OrderTicket order) {
+    public BrokerRequestResult placeOrder(OrderTicket order) {
         // Ensure order has a client order ID for reconciliation
         if (order.getClientOrderId() == null || order.getClientOrderId().trim().isEmpty()) {
             String clientOrderId = generateClientOrderId(order);
@@ -217,19 +217,19 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
         Exception lastException = null;
 
         // Create resilient supplier for the order placement
-        Supplier<Void> orderPlacementSupplier = () -> {
+        Supplier<BrokerRequestResult> orderPlacementSupplier = () -> {
             try {
-                delegate.placeOrder(order);
-                return null;
+                return delegate.placeOrder(order);
             } catch (Exception e) {
                 logger.error("Error placing order for {}: {}", order.getTicker().getSymbol(), e.getMessage(), e);
                 throw e;
             }
         };
 
+        BrokerRequestResult result = null;
         try {
             // Apply resilience patterns: retry -> circuit breaker -> bulkhead
-            Decorators.ofSupplier(orderPlacementSupplier).withRetry(placeOrderRetry)
+            result = Decorators.ofSupplier(orderPlacementSupplier).withRetry(placeOrderRetry)
                     .withCircuitBreaker(placeOrderCircuitBreaker).withBulkhead(placeOrderBulkhead).decorate().get();
 
             orderPlaced = true;
@@ -253,7 +253,7 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
                 logger.info("Order reconciliation successful for {} - order was actually placed with ID: {}",
                         order.getTicker().getSymbol(), order.getOrderId());
                 // Order was successfully placed despite the exception, so don't rethrow
-                return;
+                return new BrokerRequestResult();
             } else {
                 logger.error("Order reconciliation failed for {} - order was not found on server",
                         order.getTicker().getSymbol());
@@ -267,8 +267,11 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
                                 lastException);
                     }
                 }
+                return new BrokerRequestResult();
             }
         }
+
+        return result != null ? result : new BrokerRequestResult();
     }
 
     /**
@@ -306,6 +309,14 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
             try {
                 return delegate.cancelOrderByClientOrderId(clientOrderId);
             } catch (Exception e) {
+
+                // get the status of the order
+                OrderTicket orderStatus = requestOrderStatusByClientOrderId(clientOrderId);
+                if (orderStatus != null) {
+                    logger.info("Order status for client ID {}: {}", clientOrderId, orderStatus);
+                } else {
+                    logger.warn("No order found for client ID {}", clientOrderId);
+                }
                 logger.error("Error canceling order by client ID {}: {}", clientOrderId, e.getMessage(), e);
                 throw e;
             }

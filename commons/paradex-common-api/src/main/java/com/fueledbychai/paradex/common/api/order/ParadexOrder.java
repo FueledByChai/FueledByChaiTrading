@@ -5,6 +5,7 @@ import java.math.BigInteger;
 import java.time.ZonedDateTime;
 import java.util.Arrays;
 
+import com.fueledbychai.paradex.common.api.ws.orderstatus.ParadexOrderStatus;
 import com.google.gson.annotations.SerializedName;
 
 public class ParadexOrder implements Comparable<ParadexOrder> {
@@ -22,6 +23,8 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
     protected ZonedDateTime canceledAt;
     protected ZonedDateTime orderTTLExpiration;
     protected String[] flags;
+    @SerializedName("status")
+    protected ParadexOrderStatus orderStatus;
     // This is used to track when the order was expired, not serialized in JSON
 
     protected long timeToLiveInMs = 0;
@@ -239,6 +242,14 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
         this.flags = newFlags;
     }
 
+    public ParadexOrderStatus getOrderStatus() {
+        return orderStatus;
+    }
+
+    public void setOrderStatus(ParadexOrderStatus orderStatus) {
+        this.orderStatus = orderStatus;
+    }
+
     @Override
     public int hashCode() {
         final int prime = 31;
@@ -256,6 +267,7 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
         result = prime * result + ((cancelReason == null) ? 0 : cancelReason.hashCode());
         result = prime * result + (int) (lastUpdatedAt ^ (lastUpdatedAt >>> 32));
         result = prime * result + Arrays.hashCode(flags);
+        result = prime * result + ((orderStatus == null) ? 0 : orderStatus.hashCode());
         return result;
     }
 
@@ -316,6 +328,11 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
             return false;
         if (lastUpdatedAt != other.lastUpdatedAt)
             return false;
+        if (orderStatus == null) {
+            if (other.orderStatus != null)
+                return false;
+        } else if (!orderStatus.equals(other.orderStatus))
+            return false;
         return Arrays.equals(flags, other.flags);
     }
 
@@ -324,7 +341,8 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
         return "ParadexOrder [orderType=" + orderType + ", clientId=" + clientId + ", ticker=" + ticker + ", size="
                 + size + ", limitPrice=" + limitPrice + ", stopPrice=" + stopPrice + ", remainingSize=" + remainingSize
                 + ", orderId=" + orderId + ", side=" + side + ", timeInForce=" + timeInForce + ", cancelReason="
-                + cancelReason + ", lastUpdatedAt=" + lastUpdatedAt + "]" + Arrays.toString(flags);
+                + cancelReason + ", lastUpdatedAt=" + lastUpdatedAt + ", orderStatus=" + orderStatus + "]"
+                + Arrays.toString(flags);
     }
 
     @Override

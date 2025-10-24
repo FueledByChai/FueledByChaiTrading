@@ -158,7 +158,7 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
     }
 
     @Override
-    public void placeOrder(OrderTicket order) {
+    public BrokerRequestResult placeOrder(OrderTicket order) {
         checkConnected();
         order.setClientOrderId(getNextOrderId());
         BestBidOffer bbo = bestBidOfferMap.get(order.getTicker().getSymbol());
@@ -180,7 +180,8 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
             }
         }
         if (bbo == null) {
-            throw new FueledByChaiException("No market data available for " + order.getTicker() + ", cannot place order");
+            throw new FueledByChaiException(
+                    "No market data available for " + order.getTicker() + ", cannot place order");
         }
         order.setOrderEntryTime(getCurrentTime());
         HyperliquidOrderTicket hyperliquidOrderTicket = new HyperliquidOrderTicket(bbo, order);
@@ -189,6 +190,8 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
         SubmitPostResponse submittedOrders = websocketApi
                 .submitOrders(translator.translateOrderTickets(hyperliquidOrderTicket));
         updateOrderIds(order, submittedOrders);
+
+        return new BrokerRequestResult();
 
     }
 
@@ -246,7 +249,8 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
 
     protected void checkConnected() {
         // if (bitmexClient == null) {
-        // throw new FueledByChaiException("Not connected to broker, call connect() first");
+        // throw new FueledByChaiException("Not connected to broker, call connect()
+        // first");
         // }
     }
 

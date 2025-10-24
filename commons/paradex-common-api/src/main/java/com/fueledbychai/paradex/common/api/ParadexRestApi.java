@@ -292,10 +292,7 @@ public class ParadexRestApi implements IParadexRestApi {
             logger.info("Request: " + request);
 
             Response response = client.newCall(request).execute();
-            if (response.code() == 400) {
-                RestResponse restResponse = new RestResponse(response.code(), response.body().string());
-                return restResponse;
-            } else if (!response.isSuccessful()) {
+            if (!response.isSuccessful()) {
                 logger.error("Error response: " + response.body().string());
                 throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
                         response.code());
@@ -325,10 +322,7 @@ public class ParadexRestApi implements IParadexRestApi {
             logger.info("Request: " + request);
 
             Response response = client.newCall(request).execute();
-            if (response.code() == 400) {
-                RestResponse restResponse = new RestResponse(response.code(), response.body().string());
-                return restResponse;
-            } else if (!response.isSuccessful()) {
+            if (!response.isSuccessful()) {
                 logger.error("Error response: " + response.body().string());
                 throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
                         response.code());
