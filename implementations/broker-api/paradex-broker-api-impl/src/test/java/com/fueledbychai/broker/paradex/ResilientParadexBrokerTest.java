@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 
 import org.junit.jupiter.api.Test;
 
+import com.fueledbychai.broker.IBrokerOrderRegistry;
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.data.FueledByChaiException;
@@ -21,6 +22,30 @@ import static org.mockito.Mockito.*;
  */
 public class ResilientParadexBrokerTest {
 
+    /**
+     * Creates a properly configured ParadexBroker delegate for testing
+     */
+    private ParadexBroker createTestDelegate(IParadexRestApi mockRestApi) {
+        // Enable unit test mode for ParadexBroker
+        ParadexBroker.unitTestMode = true;
+
+        // Use spy approach like ParadexBrokerTest
+        ParadexBroker delegate = spy(ParadexBroker.class);
+        delegate.restApi = mockRestApi;
+        delegate.jwtToken = "test-jwt-token";
+        delegate.connected = true;
+
+        // Set up mock translator
+        IParadexTranslator mockTranslator = mock(IParadexTranslator.class);
+        delegate.translator = mockTranslator;
+
+        // Set up mock order registry
+        IBrokerOrderRegistry mockOrderRegistry = mock(IBrokerOrderRegistry.class);
+        delegate.setTestOrderRegistry(mockOrderRegistry);
+
+        return delegate;
+    }
+
     @Test
     public void testPlaceOrderWithRetryOnIOException() {
         // Create a mock REST API that fails twice then succeeds
@@ -33,7 +58,7 @@ public class ResilientParadexBrokerTest {
         when(mockRestApi.getJwtToken()).thenReturn("test-jwt-token");
 
         // Create ParadexBroker with mock API
-        ParadexBroker delegate = new ParadexBroker(mockRestApi);
+        ParadexBroker delegate = createTestDelegate(mockRestApi);
 
         // Wrap with resilient broker
         ResilientParadexBroker resilientBroker = new ResilientParadexBroker(delegate);
@@ -66,7 +91,7 @@ public class ResilientParadexBrokerTest {
         when(mockRestApi.getJwtToken()).thenReturn("test-jwt-token");
 
         // Create ParadexBroker with mock API
-        ParadexBroker delegate = new ParadexBroker(mockRestApi);
+        ParadexBroker delegate = createTestDelegate(mockRestApi);
 
         // Wrap with resilient broker
         ResilientParadexBroker resilientBroker = new ResilientParadexBroker(delegate);
@@ -98,7 +123,7 @@ public class ResilientParadexBrokerTest {
         when(mockRestApi.getJwtToken()).thenReturn("test-jwt-token");
 
         // Create ParadexBroker with mock API
-        ParadexBroker delegate = new ParadexBroker(mockRestApi);
+        ParadexBroker delegate = createTestDelegate(mockRestApi);
 
         // Wrap with resilient broker
         ResilientParadexBroker resilientBroker = new ResilientParadexBroker(delegate);
@@ -125,7 +150,7 @@ public class ResilientParadexBrokerTest {
         when(mockRestApi.getJwtToken()).thenReturn("test-jwt-token");
 
         // Create ParadexBroker with mock API
-        ParadexBroker delegate = new ParadexBroker(mockRestApi);
+        ParadexBroker delegate = createTestDelegate(mockRestApi);
 
         // Wrap with resilient broker
         ResilientParadexBroker resilientBroker = new ResilientParadexBroker(delegate);
@@ -149,13 +174,22 @@ public class ResilientParadexBrokerTest {
         when(mockRestApi.placeOrder(anyString(), any())).thenThrow(new ResponseException("Internal Server Error", 500));
 
         // But the order actually exists when we check by client order ID
-        when(mockRestApi.getOrderByClientOrderId(anyString(), anyString()))
-                .thenReturn(createMockParadexOrder("SERVER_ORDER_123", "CLIENT_ORDER_456"));
+        com.fueledbychai.paradex.common.api.order.ParadexOrder mockParadexOrder = createMockParadexOrder(
+                "SERVER_ORDER_123", "CLIENT_ORDER_456");
+        when(mockRestApi.getOrderByClientOrderId(anyString(), anyString())).thenReturn(mockParadexOrder);
 
         when(mockRestApi.getJwtToken()).thenReturn("test-jwt-token");
 
         // Create ParadexBroker with mock API
-        ParadexBroker delegate = new ParadexBroker(mockRestApi);
+        ParadexBroker delegate = createTestDelegate(mockRestApi);
+
+        // Set up the translator to properly convert ParadexOrder to OrderTicket for
+        // reconciliation
+        OrderTicket reconciledOrderTicket = new OrderTicket();
+        reconciledOrderTicket.setOrderId("SERVER_ORDER_123");
+        reconciledOrderTicket.setClientOrderId("CLIENT_ORDER_456");
+        reconciledOrderTicket.setTicker(new Ticker("BTC-USD"));
+        when(delegate.translator.translateOrder(mockParadexOrder)).thenReturn(reconciledOrderTicket);
 
         // Wrap with resilient broker
         ResilientParadexBroker resilientBroker = new ResilientParadexBroker(delegate);
@@ -195,7 +229,7 @@ public class ResilientParadexBrokerTest {
         when(mockRestApi.getJwtToken()).thenReturn("test-jwt-token");
 
         // Create ParadexBroker with mock API
-        ParadexBroker delegate = new ParadexBroker(mockRestApi);
+        ParadexBroker delegate = createTestDelegate(mockRestApi);
 
         // Wrap with resilient broker
         ResilientParadexBroker resilientBroker = new ResilientParadexBroker(delegate);
@@ -221,10 +255,18 @@ public class ResilientParadexBrokerTest {
      */
     private com.fueledbychai.paradex.common.api.order.ParadexOrder createMockParadexOrder(String orderId,
             String clientOrderId) {
-        com.fueledbychai.paradex.common.api.order.ParadexOrder mockOrder = mock(
-                com.fueledbychai.paradex.common.api.order.ParadexOrder.class);
-        when(mockOrder.getOrderId()).thenReturn(orderId);
-        when(mockOrder.getClientId()).thenReturn(clientOrderId);
-        return mockOrder;
+        // Use a real ParadexOrder instance instead of a mock to avoid stubbing issues
+        com.fueledbychai.paradex.common.api.order.ParadexOrder order = new com.fueledbychai.paradex.common.api.order.ParadexOrder();
+        order.setOrderId(orderId);
+        order.setClientId(clientOrderId);
+        // Set required fields for proper translation
+        order.setOrderStatus(com.fueledbychai.paradex.common.api.ws.orderstatus.ParadexOrderStatus.OPEN);
+        order.setTicker("BTC-USD");
+        order.setSize(new java.math.BigDecimal("1.0"));
+        order.setRemainingSize(new java.math.BigDecimal("0.5"));
+        order.setSide(com.fueledbychai.paradex.common.api.order.Side.BUY);
+        order.setOrderType(com.fueledbychai.paradex.common.api.order.OrderType.LIMIT);
+        order.setLimitPrice(new java.math.BigDecimal("50000.00"));
+        return order;
     }
 }

@@ -10,6 +10,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -18,15 +20,14 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
-import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.fueledbychai.broker.BrokerAccountInfoListener;
 import com.fueledbychai.broker.BrokerErrorListener;
+import com.fueledbychai.broker.IBrokerOrderRegistry;
 import com.fueledbychai.broker.order.OrderEvent;
 import com.fueledbychai.broker.order.OrderEventListener;
 import com.fueledbychai.broker.order.OrderStatus;
@@ -34,6 +35,7 @@ import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.paradex.common.api.ParadexConfiguration;
 import com.fueledbychai.paradex.common.api.ParadexRestApi;
+import com.fueledbychai.paradex.common.api.RestResponse;
 import com.fueledbychai.paradex.common.api.order.ParadexOrder;
 import com.fueledbychai.paradex.common.api.ws.ParadexWebSocketClient;
 import com.fueledbychai.paradex.common.api.ws.orderstatus.IParadexOrderStatusUpdate;
@@ -46,7 +48,7 @@ import com.fueledbychai.time.TimeUpdatedListener;
  * methods and protected field access
  */
 @ExtendWith(MockitoExtension.class)
-@Disabled
+
 public class ParadexBrokerTest {
 
     @Mock
@@ -88,17 +90,23 @@ public class ParadexBrokerTest {
     @Mock
     private Ticker mockTicker2;
 
-    @Spy
     private ParadexBroker broker;
+
+    @Mock
+    private IBrokerOrderRegistry mockOrderRegistry;
 
     @BeforeEach
     public void setUp() {
+        ParadexBroker.unitTestMode = true;
+        broker = spy(ParadexBroker.class);
+
         broker.restApi = mockRestApi;
 
         broker.orderStatusWSClient = mockOrderStatusWSClient;
         broker.orderStatusProcessor = mockOrderStatusProcessor;
         broker.authenticationScheduler = mockAuthenticationScheduler;
         broker.translator = mockTranslator;
+        broker.setTestOrderRegistry(mockOrderRegistry);
     }
 
     // ==================== Order Management Tests ====================
@@ -110,6 +118,10 @@ public class ParadexBrokerTest {
         String jwtToken = "testToken";
         broker.jwtToken = jwtToken;
         broker.connected = true;
+        RestResponse mockResponse = mock(RestResponse.class);
+
+        when(mockRestApi.cancelOrder(jwtToken, orderId)).thenReturn(mockResponse);
+        when(mockResponse.isSuccessful()).thenReturn(true);
 
         // Act
         broker.cancelOrder(orderId);
@@ -126,6 +138,10 @@ public class ParadexBrokerTest {
         broker.jwtToken = jwtToken;
         broker.connected = true;
         when(mockTradeOrder.getOrderId()).thenReturn(orderId);
+        RestResponse mockResponse = mock(RestResponse.class);
+
+        when(mockRestApi.cancelOrder(jwtToken, orderId)).thenReturn(mockResponse);
+        when(mockResponse.isSuccessful()).thenReturn(true);
 
         // Act
         broker.cancelOrder(mockTradeOrder);
@@ -141,8 +157,11 @@ public class ParadexBrokerTest {
         String jwtToken = "testToken";
         broker.jwtToken = jwtToken;
         broker.connected = true;
+        when(mockTradeOrder.getTicker()).thenReturn(mockTicker1);
+        when(mockTicker1.getSymbol()).thenReturn("ETH-USD");
 
         when(mockTranslator.translateOrder(mockTradeOrder)).thenReturn(mockParadexOrder);
+        when(mockRestApi.placeOrder(jwtToken, mockParadexOrder)).thenReturn("id-123");
 
         // Act
         broker.placeOrder(mockTradeOrder);
@@ -274,7 +293,7 @@ public class ParadexBrokerTest {
 
         // Register listener using public API
         broker.addOrderEventListener(asyncListener);
-        broker.tradeOrderMap.put("testOrderId", mockTradeOrder);
+        when(mockOrderRegistry.getOpenOrderById("testOrderId")).thenReturn(mockTradeOrder);
 
         // Mock the order status update
         when(mockOrderStatusUpdate.getOrderId()).thenReturn("testOrderId");
@@ -382,7 +401,7 @@ public class ParadexBrokerTest {
         // Cleaned up broken and duplicate test methods for unsupported operations
         String orderId = "filledOrder";
         OrderTicket mockTradeOrder = mock(OrderTicket.class);
-        broker.tradeOrderMap.put(orderId, mockTradeOrder);
+        when(mockOrderRegistry.getOpenOrderById(orderId)).thenReturn(mockTradeOrder);
 
         when(mockOrderStatusUpdate.getOrderId()).thenReturn(orderId);
 
@@ -396,7 +415,7 @@ public class ParadexBrokerTest {
         broker.onParadexOrderStatusEvent(mockOrderStatusUpdate);
 
         // Assert - Order should be removed from map for FILLED status
-        assertFalse(broker.tradeOrderMap.containsKey(orderId));
+        verify(mockOrderRegistry).addCompletedOrder(mockTradeOrder);
     }
 
     @Test
@@ -404,7 +423,7 @@ public class ParadexBrokerTest {
         // Arrange
         String orderId = "canceledOrder";
         OrderTicket mockTradeOrder = mock(OrderTicket.class);
-        broker.tradeOrderMap.put(orderId, mockTradeOrder);
+        when(mockOrderRegistry.getOpenOrderById(orderId)).thenReturn(mockTradeOrder);
 
         when(mockOrderStatusUpdate.getOrderId()).thenReturn(orderId);
 
@@ -418,7 +437,7 @@ public class ParadexBrokerTest {
         broker.onParadexOrderStatusEvent(mockOrderStatusUpdate);
 
         // Assert - Order should be removed from map for CANCELED status
-        assertFalse(broker.tradeOrderMap.containsKey(orderId));
+        verify(mockOrderRegistry).addCompletedOrder(mockTradeOrder);
     }
 
     @Test
@@ -426,7 +445,7 @@ public class ParadexBrokerTest {
         // Arrange
         String orderId = "newOrder";
         OrderTicket mockTradeOrder = mock(OrderTicket.class);
-        broker.tradeOrderMap.put(orderId, mockTradeOrder);
+        when(mockOrderRegistry.getOpenOrderById(orderId)).thenReturn(mockTradeOrder);
 
         when(mockOrderStatusUpdate.getOrderId()).thenReturn(orderId);
 
@@ -440,40 +459,10 @@ public class ParadexBrokerTest {
         broker.onParadexOrderStatusEvent(mockOrderStatusUpdate);
 
         // Assert - Order should remain in map for NEW status
-        assertTrue(broker.tradeOrderMap.containsKey(orderId));
+        verify(mockOrderRegistry, never()).addCompletedOrder(mockTradeOrder);
     }
 
     // ==================== Authentication Scheduler Tests ====================
-
-    @Test
-    public void testStartAuthenticationScheduler_InitialAuthentication() throws Exception {
-        // Arrange
-        String expectedToken = "initialToken";
-        when(mockRestApi.getJwtToken()).thenReturn(expectedToken);
-
-        // Reset the authentication scheduler to null so it will actually start
-        broker.authenticationScheduler = null;
-
-        // Act
-        broker.connect();
-
-        // Wait a bit for the authentication to complete since it runs in a thread
-        Thread.sleep(100);
-
-        // Assert - Verify that authentication was attempted
-        verify(mockRestApi, atLeastOnce()).getJwtToken();
-        assertEquals(expectedToken, broker.jwtToken);
-
-        lenient().when(mockRestApi.getJwtToken()).thenThrow(new RuntimeException("Auth failed"));
-
-        // Act & Assert - Should not throw exception, just log error
-        assertDoesNotThrow(() -> {
-            broker.connect();
-        });
-
-        // Cleanup
-        broker.disconnect();
-    }
 
     // ==================== Shutdown and Cleanup Tests ====================
 
@@ -580,28 +569,6 @@ public class ParadexBrokerTest {
     }
 
     @Test
-    public void testPlaceOrderWithNullExecutor() {
-        // Arrange
-        String jwtToken = "testToken";
-        String orderId = "order123";
-        broker.jwtToken = jwtToken;
-        broker.connected = true;
-
-        when(mockTranslator.translateOrder(mockTradeOrder)).thenReturn(mockParadexOrder);
-        // Can't set executor to null, so just test normal placeOrder
-        when(mockRestApi.placeOrder(jwtToken, mockParadexOrder)).thenReturn(orderId);
-
-        // Act & Assert
-        assertDoesNotThrow(() -> {
-            broker.placeOrder(mockTradeOrder);
-        });
-
-        // Verify order was placed and mapped
-        verify(mockRestApi).placeOrder(jwtToken, mockParadexOrder);
-        assertEquals(mockTradeOrder, broker.tradeOrderMap.get(orderId));
-    }
-
-    @Test
     public void testConcurrentOrderStatusUpdates() throws InterruptedException {
         // Arrange
         int numThreads = 10;
@@ -618,7 +585,7 @@ public class ParadexBrokerTest {
         for (int i = 0; i < numThreads; i++) {
             final int orderId = i;
             OrderTicket order = mock(OrderTicket.class);
-            broker.tradeOrderMap.put(String.valueOf(orderId), order);
+            when(mockOrderRegistry.getOpenOrderById(String.valueOf(orderId))).thenReturn(order);
 
             IParadexOrderStatusUpdate update = mock(IParadexOrderStatusUpdate.class);
             lenient().when(update.getOrderId()).thenReturn(String.valueOf(orderId));

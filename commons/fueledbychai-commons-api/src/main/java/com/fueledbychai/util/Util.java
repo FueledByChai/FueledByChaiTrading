@@ -8,6 +8,9 @@ package com.fueledbychai.util;
 import java.io.IOException;
 import java.time.ZonedDateTime;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.fueledbychai.data.FueledByChaiException;
 
 /**
@@ -46,6 +49,9 @@ public class Util {
      * temporary/network errors, but not on client errors like 404, 400, etc.
      */
     public static boolean isRetryableException(Throwable throwable) {
+        System.out.println(
+                "DEBUG: Checking exception: " + throwable.getClass().getName() + " - " + throwable.getMessage());
+
         // Network-related exceptions are typically retryable
         if (throwable instanceof java.net.SocketTimeoutException || throwable instanceof java.net.ConnectException
                 || throwable instanceof java.net.UnknownHostException
@@ -83,6 +89,55 @@ public class Util {
             return true;
         }
 
+        // ResponseException - check HTTP status code (using class name to avoid
+        // classloader issues)
+        if ("com.fueledbychai.data.ResponseException".equals(throwable.getClass().getName())) {
+            try {
+                // Use reflection to get the status code to avoid classloader issues
+                java.lang.reflect.Method getStatusCodeMethod = throwable.getClass().getMethod("getStatusCode");
+                int statusCode = (Integer) getStatusCodeMethod.invoke(throwable);
+                System.out.println("DEBUG: Found ResponseException with status code: " + statusCode);
+
+                // Server errors (5xx) are retryable
+                if (statusCode >= 500 && statusCode < 600) {
+                    System.out.println("DEBUG: Returning true for server error: " + statusCode);
+                    logger.debug("Retryable server error: HTTP {}", statusCode);
+                    return true;
+                }
+
+                // Rate limiting (429) is retryable
+                if (statusCode == 429) {
+                    logger.debug("Rate limiting detected, will retry: HTTP {}", statusCode);
+                    return true;
+                }
+
+                // Request timeout (408) is retryable
+                if (statusCode == 408) {
+                    logger.debug("Request timeout detected, will retry: HTTP {}", statusCode);
+                    return true;
+                }
+
+                // Client errors (4xx except 408 and 429) are not retryable
+                if (statusCode >= 400 && statusCode < 500) {
+                    logger.debug("Client error, not retrying: HTTP {}", statusCode);
+                    return false;
+                }
+
+                // Check if it has a retryable cause (e.g., IOException)
+                if (throwable.getCause() != null && isRetryableException(throwable.getCause())) {
+                    logger.debug("ResponseException with retryable cause: {}",
+                            throwable.getCause().getClass().getSimpleName());
+                    return true;
+                }
+
+                logger.debug("Non-retryable ResponseException: HTTP {}", statusCode);
+                return false;
+            } catch (Exception e) {
+                logger.warn("Failed to get status code from ResponseException: {}", e.getMessage());
+                // Fall through to other checks
+            }
+        }
+
         // FueledByChaiException - check the underlying cause
         if (throwable instanceof FueledByChaiException) {
             FueledByChaiException fbc = (FueledByChaiException) throwable;
@@ -102,6 +157,16 @@ public class Util {
 
             logger.debug("Non-retryable FueledByChai exception: {}", message);
             return false;
+        }
+
+        // RuntimeException - check the cause (common wrapping pattern)
+        if (throwable instanceof RuntimeException) {
+            RuntimeException re = (RuntimeException) throwable;
+            if (re.getCause() != null) {
+                logger.debug("RuntimeException with cause, checking cause: {}",
+                        re.getCause().getClass().getSimpleName());
+                return isRetryableException(re.getCause());
+            }
         }
 
         // By default, don't retry unknown exceptions

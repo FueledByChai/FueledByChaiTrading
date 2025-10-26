@@ -43,7 +43,8 @@ public class ParadexInstrumentLookup implements IInstrumentLookup {
 
     private Retry createRetryConfig(ParadexLookupRetryConfig retryConfig) {
         RetryConfig.Builder<Object> configBuilder = RetryConfig.custom().maxAttempts(retryConfig.getMaxAttempts())
-                .waitDuration(retryConfig.getWaitDuration()).retryOnException(Util::isRetryableException);
+                .waitDuration(retryConfig.getWaitDuration())
+                .retryOnException(throwable -> Util.isRetryableException(throwable));
 
         // Add exponential backoff if enabled
         if (retryConfig.isExponentialBackoff()) {

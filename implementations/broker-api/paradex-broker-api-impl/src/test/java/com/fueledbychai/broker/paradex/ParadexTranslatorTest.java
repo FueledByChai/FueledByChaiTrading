@@ -199,6 +199,7 @@ class ParadexTranslatorTest {
 
     @Test
     void testTranslateParadexOrderToTradeOrder() {
+        when(mockParadexOrder.getOrderType()).thenReturn(OrderType.MARKET);
         // Test the method that currently returns empty TradeOrder
         OrderTicket result = translator.translateOrder(mockParadexOrder);
 
@@ -318,6 +319,8 @@ class ParadexTranslatorTest {
         // Setup
         ParadexOrder order1 = mock(ParadexOrder.class);
         ParadexOrder order2 = mock(ParadexOrder.class);
+        when(order1.getOrderType()).thenReturn(OrderType.MARKET);
+        when(order2.getOrderType()).thenReturn(OrderType.MARKET);
         List<ParadexOrder> paradexOrders = Arrays.asList(order1, order2);
 
         // Execute
