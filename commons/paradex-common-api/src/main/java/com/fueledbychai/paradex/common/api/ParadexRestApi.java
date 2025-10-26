@@ -21,10 +21,11 @@ import org.slf4j.LoggerFactory;
 import com.fueledbychai.broker.Position;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.FueledByChaiException;
-import com.fueledbychai.data.ResponseException;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
+import com.fueledbychai.data.ResponseException;
 import com.fueledbychai.paradex.common.api.historical.OHLCBar;
+import com.fueledbychai.paradex.common.api.order.Flag;
 import com.fueledbychai.paradex.common.api.order.OrderType;
 import com.fueledbychai.paradex.common.api.order.ParadexOrder;
 import com.google.gson.Gson;
@@ -454,13 +455,15 @@ public class ParadexRestApi implements IParadexRestApi {
         orderJson.addProperty("type", order.getOrderType().toString());
         if (order.getOrderType().equals(OrderType.LIMIT)) {
             orderJson.addProperty("price", order.getLimitPrice().toString());
-            orderJson.addProperty("instruction", "POST_ONLY");
+        }
+        if (order.getInstruction() != null) {
+            orderJson.addProperty("instruction", order.getInstruction().toString());
         }
         // add flags from order if any
         if (order.getFlags() != null && order.getFlags().length > 0) {
             JsonArray flagsArray = new JsonArray();
-            for (String flag : order.getFlags()) {
-                flagsArray.add(flag);
+            for (Flag flag : order.getFlags()) {
+                flagsArray.add(flag.toString());
             }
             orderJson.add("flags", flagsArray);
         }

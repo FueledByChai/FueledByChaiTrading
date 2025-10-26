@@ -44,11 +44,10 @@ public class ParadexTradingExample {
         String orderId = System.currentTimeMillis() + "";
 
         order.setTicker(btcTicker).setSize(BigDecimal.valueOf(0.01)).setDirection(TradeDirection.BUY)
-                .setType(Type.LIMIT).setLimitPrice(BigDecimal.valueOf(110000)).addModifier(Modifier.POST_ONLY)
-                .setClientOrderId(orderId);
+                .setType(Type.LIMIT).setLimitPrice(BigDecimal.valueOf(120000)).setClientOrderId(orderId);
 
         broker.placeOrder(order);
-        Thread.sleep(1000);
+        Thread.sleep(3000);
 
         broker.cancelOrderByClientOrderId(orderId);
 

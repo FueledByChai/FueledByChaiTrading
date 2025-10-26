@@ -309,27 +309,81 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
 
     @Override
     public BrokerRequestResult cancelOrderByClientOrderId(String clientOrderId) {
+        boolean cancelSuccessful = false;
+        Exception lastException = null;
+
         // Create resilient supplier for the order cancellation
         Supplier<BrokerRequestResult> cancelOrderSupplier = () -> {
             try {
                 return delegate.cancelOrderByClientOrderId(clientOrderId);
             } catch (Exception e) {
-
-                // get the status of the order
-                OrderTicket orderStatus = requestOrderStatusByClientOrderId(clientOrderId);
-                if (orderStatus != null) {
-                    logger.info("Order status for client ID {}: {}", clientOrderId, orderStatus);
-                } else {
-                    logger.warn("No order found for client ID {}", clientOrderId);
-                }
                 logger.error("Error canceling order by client ID {}: {}", clientOrderId, e.getMessage(), e);
                 throw e;
             }
         };
 
-        // Apply resilience patterns: retry -> circuit breaker
-        return Decorators.ofSupplier(cancelOrderSupplier).withRetry(cancelOrderRetry)
-                .withCircuitBreaker(cancelOrderCircuitBreaker).decorate().get();
+        BrokerRequestResult result = null;
+        try {
+            // Apply resilience patterns: retry -> circuit breaker
+            result = Decorators.ofSupplier(cancelOrderSupplier).withRetry(cancelOrderRetry)
+                    .withCircuitBreaker(cancelOrderCircuitBreaker).decorate().get();
+
+            cancelSuccessful = true;
+            logger.debug("Successfully canceled order with client ID {} using resilience patterns", clientOrderId);
+
+        } catch (Exception e) {
+            lastException = e;
+            logger.warn("Order cancellation failed for client ID {} after all retries: {}", clientOrderId,
+                    e.getMessage());
+        }
+
+        // If cancellation failed, attempt to check order status for reconciliation
+        if (!cancelSuccessful || lastException != null) {
+            logger.info("Attempting to reconcile order status for client ID {} due to cancellation failure",
+                    clientOrderId);
+
+            try {
+                OrderTicket orderStatus = requestOrderStatusByClientOrderId(clientOrderId);
+                if (orderStatus != null) {
+                    logger.info("Order reconciliation for client ID {}: Order ID = {}, Status = {}", clientOrderId,
+                            orderStatus.getOrderId(), orderStatus.getCurrentStatus());
+
+                    // Check if the order is already canceled or filled (i.e., cancellation not
+                    // needed)
+                    if (orderStatus.getCurrentStatus() != null
+                            && (orderStatus.getCurrentStatus().toString().contains("CANCEL")
+                                    || orderStatus.getCurrentStatus().toString().contains("FILLED"))) {
+                        logger.info(
+                                "Order with client ID {} is already in final state: {}, treating cancellation as successful",
+                                clientOrderId, orderStatus.getCurrentStatus());
+                        return new BrokerRequestResult();
+                    }
+                } else {
+                    logger.info(
+                            "Order reconciliation for client ID {} - no order found on server, may have been already canceled or expired",
+                            clientOrderId);
+                    // If no order is found, it might have been successfully canceled or never
+                    // existed
+                    return new BrokerRequestResult();
+                }
+            } catch (Exception reconciliationException) {
+                logger.warn("Failed to reconcile order status for client ID {}: {}", clientOrderId,
+                        reconciliationException.getMessage());
+            }
+
+            // If we reach here, cancellation failed and reconciliation didn't show the
+            // order as canceled
+            if (lastException != null) {
+                if (lastException instanceof RuntimeException) {
+                    throw (RuntimeException) lastException;
+                } else {
+                    throw new RuntimeException("Order cancellation failed and reconciliation unsuccessful",
+                            lastException);
+                }
+            }
+        }
+
+        return result != null ? result : new BrokerRequestResult();
     }
 
     @Override
@@ -417,7 +471,7 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
      */
     protected boolean reconcileOrderStatus(OrderTicket order) {
         if (order.getClientOrderId() == null || order.getClientOrderId().trim().isEmpty()) {
-            logger.debug("Cannot reconcile order - no client order ID available for {}", order.getTicker().getSymbol());
+            logger.warn("Cannot reconcile order - no client order ID available for {}", order.getTicker().getSymbol());
             return false;
         }
 
