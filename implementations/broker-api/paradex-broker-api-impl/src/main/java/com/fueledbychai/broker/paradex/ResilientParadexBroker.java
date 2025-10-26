@@ -25,6 +25,16 @@ import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fueledbychai.broker.AbstractBasicBroker;
+import com.fueledbychai.broker.BrokerRequestResult;
+import com.fueledbychai.broker.IBroker;
+import com.fueledbychai.broker.IBrokerOrderRegistry;
+import com.fueledbychai.broker.Position;
+import com.fueledbychai.broker.order.OrderTicket;
+import com.fueledbychai.data.FueledByChaiException;
+import com.fueledbychai.data.ResponseException;
+import com.fueledbychai.data.Ticker;
+
 import io.github.resilience4j.bulkhead.Bulkhead;
 import io.github.resilience4j.bulkhead.BulkheadConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -32,14 +42,6 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.decorators.Decorators;
 import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryConfig;
-
-import com.fueledbychai.broker.AbstractBasicBroker;
-import com.fueledbychai.broker.BrokerRequestResult;
-import com.fueledbychai.broker.Position;
-import com.fueledbychai.broker.order.OrderTicket;
-import com.fueledbychai.data.FueledByChaiException;
-import com.fueledbychai.data.ResponseException;
-import com.fueledbychai.data.Ticker;
 
 /**
  * A resilient wrapper around ParadexBroker that adds Resilience4j patterns for
@@ -52,7 +54,8 @@ import com.fueledbychai.data.Ticker;
 public class ResilientParadexBroker extends AbstractBasicBroker {
     private static final Logger logger = LoggerFactory.getLogger(ResilientParadexBroker.class);
 
-    private final ParadexBroker delegate;
+    protected IBroker delegate;
+    protected IBrokerOrderRegistry orderRegistry;
 
     // Resilience4j components for order operations
     private final Retry placeOrderRetry;
@@ -74,6 +77,7 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
      */
     public ResilientParadexBroker(ParadexBroker delegate) {
         this.delegate = delegate;
+        this.orderRegistry = delegate.getOrderRegistry();
 
         // Initialize resilience components
         this.placeOrderRetry = createRetryForOrders("placeOrder");
@@ -252,6 +256,7 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
             if (reconciled) {
                 logger.info("Order reconciliation successful for {} - order was actually placed with ID: {}",
                         order.getTicker().getSymbol(), order.getOrderId());
+
                 // Order was successfully placed despite the exception, so don't rethrow
                 return new BrokerRequestResult();
             } else {
@@ -344,7 +349,8 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
 
     @Override
     protected void onDisconnect() {
-        delegate.onDisconnect();
+        throw new IllegalStateException(
+                "ResilientParadexBroker does not support onDisconnect directly. Call disconnect() instead.");
     }
 
     @Override
@@ -409,7 +415,7 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
      * @return true if reconciliation was successful and order was found, false
      *         otherwise
      */
-    private boolean reconcileOrderStatus(OrderTicket order) {
+    protected boolean reconcileOrderStatus(OrderTicket order) {
         if (order.getClientOrderId() == null || order.getClientOrderId().trim().isEmpty()) {
             logger.debug("Cannot reconcile order - no client order ID available for {}", order.getTicker().getSymbol());
             return false;
@@ -446,7 +452,7 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
      * 
      * @return the wrapped ParadexBroker instance
      */
-    public ParadexBroker getDelegate() {
+    public IBroker getDelegate() {
         return delegate;
     }
 
@@ -485,4 +491,5 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
     public Retry.Metrics getCancelOrderRetryMetrics() {
         return cancelOrderRetry.getMetrics();
     }
+
 }

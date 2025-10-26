@@ -18,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.fueledbychai.data.FueledByChaiException;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
+import com.fueledbychai.data.ResponseException;
 
 @ExtendWith(MockitoExtension.class)
 class ResilientParadexInstrumentLookupTest {
@@ -43,11 +44,13 @@ class ResilientParadexInstrumentLookupTest {
     }
 
     @Test
-    void testRetryOnTemporaryFailure() throws IOException {
+    void testRetryOnTemporaryFailure() {
         // Setup - fail twice with retryable exception, then succeed
         InstrumentDescriptor expectedDescriptor = mock(InstrumentDescriptor.class);
-        when(mockApi.getInstrumentDescriptor("BTC-USD-PERP")).thenThrow(new IOException("HTTP 503 Service Unavailable"))
-                .thenThrow(new IOException("Connection timeout")).thenReturn(expectedDescriptor);
+        when(mockApi.getInstrumentDescriptor("BTC-USD-PERP"))
+                .thenThrow(new ResponseException("HTTP 503 Service Unavailable", 503))
+                .thenThrow(new ResponseException("Connection timeout", new IOException()))
+                .thenReturn(expectedDescriptor);
 
         ParadexInstrumentLookup lookup = new ParadexInstrumentLookup(mockApi);
 
@@ -62,9 +65,10 @@ class ResilientParadexInstrumentLookupTest {
     }
 
     @Test
-    void testNoRetryOnPermanentFailure() throws IOException {
+    void testNoRetryOnPermanentFailure() {
         // Setup - client error (404) should not be retried
-        when(mockApi.getInstrumentDescriptor("INVALID-SYMBOL")).thenThrow(new IOException("HTTP 404 Not Found"));
+        when(mockApi.getInstrumentDescriptor("INVALID-SYMBOL"))
+                .thenThrow(new ResponseException("HTTP 404 Not Found", 404));
 
         ParadexInstrumentLookup lookup = new ParadexInstrumentLookup(mockApi);
 
@@ -78,10 +82,10 @@ class ResilientParadexInstrumentLookupTest {
     }
 
     @Test
-    void testRetryExhaustionThrowsException() throws IOException {
+    void testRetryExhaustionThrowsException() {
         // Setup - always throw retryable exception
         when(mockApi.getInstrumentDescriptor("BTC-USD-PERP"))
-                .thenThrow(new IOException("HTTP 503 Service Unavailable"));
+                .thenThrow(new ResponseException("HTTP 503 Service Unavailable", 503));
 
         ParadexInstrumentLookup lookup = new ParadexInstrumentLookup(mockApi);
 
@@ -90,18 +94,20 @@ class ResilientParadexInstrumentLookupTest {
             lookup.lookupByExchangeSymbol("BTC-USD-PERP");
         });
 
-        // Should have been called 4 times (1 original + 3 retries)
-        verify(mockApi, times(4)).getInstrumentDescriptor("BTC-USD-PERP");
+        // Should have been called 6 times (1 original + 5 retries, based on default
+        // config max attempts = 6)
+        verify(mockApi, times(6)).getInstrumentDescriptor("BTC-USD-PERP");
     }
 
     @Test
-    void testGetAllInstrumentsWithRetry() throws IOException {
+    void testGetAllInstrumentsWithRetry() {
         // Setup
         InstrumentDescriptor[] expectedInstruments = new InstrumentDescriptor[1];
         expectedInstruments[0] = mock(InstrumentDescriptor.class);
 
         when(mockApi.getAllInstrumentsForType(InstrumentType.PERPETUAL_FUTURES))
-                .thenThrow(new IOException("Connection timeout")).thenReturn(expectedInstruments);
+                .thenThrow(new ResponseException("Connection timeout", new IOException()))
+                .thenReturn(expectedInstruments);
 
         ParadexInstrumentLookup lookup = new ParadexInstrumentLookup(mockApi);
 

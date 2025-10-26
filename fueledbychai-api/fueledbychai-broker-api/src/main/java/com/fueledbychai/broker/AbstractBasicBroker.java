@@ -27,6 +27,17 @@ import com.fueledbychai.time.TimeUpdatedListener;
  *  
  */
 public abstract class AbstractBasicBroker implements IBroker {
+
+    protected IBrokerOrderRegistry orderRegistry = new BrokerOrderRegistry();
+
+    public IBrokerOrderRegistry getOrderRegistry() {
+        return orderRegistry;
+    }
+
+    public void setTestOrderRegistry(IBrokerOrderRegistry orderRegistry) {
+        this.orderRegistry = orderRegistry;
+    }
+
     /**
      * Disconnects the broker and releases resources. Subclasses should implement
      * onDisconnect() for custom cleanup. This method is final to guarantee resource
