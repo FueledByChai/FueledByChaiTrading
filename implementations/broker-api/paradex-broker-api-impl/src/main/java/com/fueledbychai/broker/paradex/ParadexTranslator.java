@@ -10,11 +10,15 @@ import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.OrderStatus;
 import com.fueledbychai.broker.order.OrderStatus.Status;
 import com.fueledbychai.broker.order.OrderTicket;
+import com.fueledbychai.broker.order.OrderTicket.Duration;
+import com.fueledbychai.broker.order.OrderTicket.Modifier;
 import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.data.FueledByChaiException;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.paradex.common.ParadexTickerRegistry;
 import com.fueledbychai.paradex.common.api.ParadexUtil;
+import com.fueledbychai.paradex.common.api.order.Flag;
+import com.fueledbychai.paradex.common.api.order.Instruction;
 import com.fueledbychai.paradex.common.api.order.OrderType;
 import com.fueledbychai.paradex.common.api.order.ParadexOrder;
 import com.fueledbychai.paradex.common.api.order.Side;
@@ -141,7 +145,7 @@ public class ParadexTranslator implements IParadexTranslator {
         }
 
         tradeOrder.setOrderId(order.getOrderId());
-        Status currentStatus = null;
+        Status currentStatus = Status.UNKNOWN;
         if (order.getOrderStatus() == ParadexOrderStatus.CLOSED) {
             if (order.getCancelReason() != null && order.getCancelReason().length() > 0) {
                 currentStatus = Status.CANCELED;
@@ -158,8 +162,9 @@ public class ParadexTranslator implements IParadexTranslator {
                 || order.getOrderStatus() == ParadexOrderStatus.UNTRIGGERED) {
             currentStatus = translateStatusCode(order.getOrderStatus(), CancelReason.NONE, order.getSize(),
                     order.getRemainingSize());
-            tradeOrder.setCurrentStatus(currentStatus);
+
         }
+        tradeOrder.setCurrentStatus(currentStatus);
 
         return tradeOrder;
 
@@ -194,6 +199,18 @@ public class ParadexTranslator implements IParadexTranslator {
             BigDecimal limitPrice = ParadexUtil.formatPrice(order.getLimitPrice(),
                     order.getTicker().getMinimumTickSize());
             paradoxOrder.setLimitPrice(limitPrice);
+        }
+
+        if (order.getModifiers().contains(Modifier.POST_ONLY)) {
+            paradoxOrder.setInstruction(Instruction.POST_ONLY);
+        } else if (order.getDuration() == Duration.GOOD_UNTIL_CANCELED) {
+            paradoxOrder.setInstruction(Instruction.GTC);
+        } else if (order.getDuration() == Duration.IMMEDIATE_OR_CANCEL) {
+            paradoxOrder.setInstruction(Instruction.IOC);
+        }
+
+        if (order.getModifiers().contains(Modifier.REDUCE_ONLY)) {
+            paradoxOrder.addFlag(Flag.REDUCE_ONLY);
         }
 
         return paradoxOrder;

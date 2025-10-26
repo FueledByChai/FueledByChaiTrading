@@ -22,9 +22,10 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
     protected ZonedDateTime filledAt;
     protected ZonedDateTime canceledAt;
     protected ZonedDateTime orderTTLExpiration;
-    protected String[] flags;
+    protected Flag[] flags;
     @SerializedName("status")
     protected ParadexOrderStatus orderStatus;
+    protected Instruction instruction;
     // This is used to track when the order was expired, not serialized in JSON
 
     protected long timeToLiveInMs = 0;
@@ -39,9 +40,6 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
 
     @SerializedName("id")
     protected String orderId;
-
-    @SerializedName("instruction")
-    protected OrderTIF timeInForce;
 
     @SerializedName("cancel_reason")
     protected String cancelReason;
@@ -118,14 +116,6 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
 
     public String getChainSide() {
         return side.getChainSide();
-    }
-
-    public OrderTIF getTimeInForce() {
-        return timeInForce;
-    }
-
-    public void setTimeInForce(OrderTIF timeInForce) {
-        this.timeInForce = timeInForce;
     }
 
     public BigInteger getChainLimitPrice() {
@@ -218,25 +208,25 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
 
     }
 
-    public void setFlags(String[] flags) {
+    public void setFlags(Flag[] flags) {
         this.flags = flags;
     }
 
-    public String[] getFlags() {
+    public Flag[] getFlags() {
         return flags;
     }
 
-    public void addFlag(String flag) {
+    public void addFlag(Flag flag) {
         if (this.flags == null) {
-            this.flags = new String[] { flag };
+            this.flags = new Flag[] { flag };
             return;
         }
-        for (String existingFlag : this.flags) {
+        for (Flag existingFlag : this.flags) {
             if (existingFlag.equals(flag)) {
                 return; // already exists
             }
         }
-        String[] newFlags = new String[this.flags.length + 1];
+        Flag[] newFlags = new Flag[this.flags.length + 1];
         System.arraycopy(this.flags, 0, newFlags, 0, this.flags.length);
         newFlags[this.flags.length] = flag;
         this.flags = newFlags;
@@ -248,6 +238,14 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
 
     public void setOrderStatus(ParadexOrderStatus orderStatus) {
         this.orderStatus = orderStatus;
+    }
+
+    public Instruction getInstruction() {
+        return instruction;
+    }
+
+    public void setInstruction(Instruction instruction) {
+        this.instruction = instruction;
     }
 
     @Override
@@ -263,11 +261,11 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
         result = prime * result + ((remainingSize == null) ? 0 : remainingSize.hashCode());
         result = prime * result + ((orderId == null) ? 0 : orderId.hashCode());
         result = prime * result + ((side == null) ? 0 : side.hashCode());
-        result = prime * result + ((timeInForce == null) ? 0 : timeInForce.hashCode());
         result = prime * result + ((cancelReason == null) ? 0 : cancelReason.hashCode());
         result = prime * result + (int) (lastUpdatedAt ^ (lastUpdatedAt >>> 32));
         result = prime * result + Arrays.hashCode(flags);
         result = prime * result + ((orderStatus == null) ? 0 : orderStatus.hashCode());
+        result = prime * result + ((instruction == null) ? 0 : instruction.hashCode());
         return result;
     }
 
@@ -319,8 +317,6 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
             return false;
         if (side != other.side)
             return false;
-        if (timeInForce != other.timeInForce)
-            return false;
         if (cancelReason == null) {
             if (other.cancelReason != null)
                 return false;
@@ -333,6 +329,11 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
                 return false;
         } else if (!orderStatus.equals(other.orderStatus))
             return false;
+        if (instruction == null) {
+            if (other.instruction != null)
+                return false;
+        } else if (!instruction.equals(other.instruction))
+            return false;
         return Arrays.equals(flags, other.flags);
     }
 
@@ -340,8 +341,8 @@ public class ParadexOrder implements Comparable<ParadexOrder> {
     public String toString() {
         return "ParadexOrder [orderType=" + orderType + ", clientId=" + clientId + ", ticker=" + ticker + ", size="
                 + size + ", limitPrice=" + limitPrice + ", stopPrice=" + stopPrice + ", remainingSize=" + remainingSize
-                + ", orderId=" + orderId + ", side=" + side + ", timeInForce=" + timeInForce + ", cancelReason="
-                + cancelReason + ", lastUpdatedAt=" + lastUpdatedAt + ", orderStatus=" + orderStatus + "]"
+                + ", orderId=" + orderId + ", side=" + side + ", cancelReason=" + cancelReason + ", lastUpdatedAt="
+                + lastUpdatedAt + ", orderStatus=" + orderStatus + ", instruction=" + instruction + "]"
                 + Arrays.toString(flags);
     }
 
