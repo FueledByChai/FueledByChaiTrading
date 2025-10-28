@@ -50,19 +50,12 @@ import java.util.concurrent.TimeUnit;
 import org.apache.commons.collections4.map.PassiveExpiringMap;
 import org.apache.log4j.Logger;
 
-import com.ib.client.Contract;
-import com.ib.client.ContractDetails;
-import com.ib.client.Decimal;
-import com.ib.client.EClientSocket;
-import com.ib.client.Execution;
-import com.ib.client.ExecutionFilter;
-import com.ib.client.Order;
-import com.ib.client.OrderState;
 import com.fueledbychai.broker.BrokerAccountInfoListener;
 import com.fueledbychai.broker.BrokerError;
 import com.fueledbychai.broker.BrokerErrorListener;
 import com.fueledbychai.broker.BrokerRequestResult;
 import com.fueledbychai.broker.IBroker;
+import com.fueledbychai.broker.IBrokerOrderRegistry;
 import com.fueledbychai.broker.Position;
 import com.fueledbychai.broker.order.FillEventListener;
 import com.fueledbychai.broker.order.OrderEvent;
@@ -80,6 +73,14 @@ import com.fueledbychai.ib.IBSocket;
 import com.fueledbychai.ib.IbUtils;
 import com.fueledbychai.time.TimeUpdatedListener;
 import com.fueledbychai.util.QuoteUtil;
+import com.ib.client.Contract;
+import com.ib.client.ContractDetails;
+import com.ib.client.Decimal;
+import com.ib.client.EClientSocket;
+import com.ib.client.Execution;
+import com.ib.client.ExecutionFilter;
+import com.ib.client.Order;
+import com.ib.client.OrderState;
 
 /**
  * Supported Order types are: Market, Stop and Limit Supported order parameters
@@ -700,6 +701,12 @@ public class InteractiveBrokersBroker extends BaseIBConnectionDelegate implement
     public OrderTicket requestOrderStatusByClientOrderId(String clientOrderId) {
         throw new UnsupportedOperationException("Not supported yet."); // To change body of generated methods, choose
                                                                        // Tools | Templates.
+    }
+
+    @Override
+    public IBrokerOrderRegistry getOrderRegistry() {
+        throw new UnsupportedOperationException("Not supported yet."); // To change body of generated methods, choose
+                                                                       // Tools | Templates. dO
     }
 
 }

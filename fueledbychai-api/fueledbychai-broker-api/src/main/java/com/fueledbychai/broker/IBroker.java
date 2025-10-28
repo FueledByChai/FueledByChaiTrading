@@ -34,6 +34,8 @@ import com.fueledbychai.time.TimeUpdatedListener;
  */
 public interface IBroker {
 
+    IBrokerOrderRegistry getOrderRegistry();
+
     /**
      * Cancels the order with the specified ID
      *

@@ -8,6 +8,7 @@ import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.paradex.common.api.historical.OHLCBar;
 import com.fueledbychai.paradex.common.api.order.ParadexOrder;
+import com.fueledbychai.paradex.common.api.ws.SystemStatus;
 
 public interface IParadexRestApi {
 
@@ -51,5 +52,7 @@ public interface IParadexRestApi {
     InstrumentDescriptor[] getAllInstrumentsForType(InstrumentType instrumentType);
 
     boolean onboardAccount(String ethereumAddress, String starketAddress, boolean isTestnet) throws Exception;
+
+    SystemStatus getSystemStatus();
 
 }
