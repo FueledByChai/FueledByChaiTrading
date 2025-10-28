@@ -40,4 +40,12 @@ public interface IBrokerOrderRegistry {
 
     OrderTicket getCompletedOrderByClientId(String clientOrderId);
 
+    OrderTicket getOrderById(String orderId);
+
+    OrderTicket getOrderByClientId(String clientOrderId);
+
+    List<OrderTicket> getOpenBuyOrdersByTicker(Ticker ticker);
+
+    List<OrderTicket> getOpenSellOrdersByTicker(Ticker ticker);
+
 }

@@ -84,24 +84,6 @@ public class ParadexBroker extends AbstractBasicBroker {
 
     protected boolean started = false;
 
-    // protected List<Position> positionsList = new ArrayList<>();
-    // protected Map<String, OrderTicket> openOrderMapByOrderId = new HashMap<>();
-    // protected Map<String, OrderTicket> openOrderMapByClientId = new HashMap<>();
-    // protected Map<String, OrderTicket> completedOrderMapByOrderId = new
-    // HashMap<>();
-    // protected Map<String, OrderTicket> completedOrderMapByClientId = new
-    // HashMap<>();
-
-    // protected FillDeduper fillDeduper = new FillDeduper();
-
-    // protected Map<Ticker, Position> positions = new HashMap<>();
-    // protected Map<Ticker, Map<String, OrderTicket>> openOrdersByTickerByCloid =
-    // new HashMap<>();
-    // protected Map<Ticker, Map<String, OrderTicket>>
-    // completedOrdersByTickerByCloid = new HashMap<>();
-    // protected Map<Ticker, List<Fill>> fillsByTicker = new HashMap<>();
-    // protected Map<Ticker, Position> positionByTicker = new HashMap<>();
-
     /**
      * Default constructor - uses centralized configuration for API initialization.
      */
