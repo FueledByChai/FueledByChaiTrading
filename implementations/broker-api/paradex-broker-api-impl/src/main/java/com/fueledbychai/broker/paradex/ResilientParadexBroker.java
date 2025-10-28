@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.broker.AbstractBasicBroker;
 import com.fueledbychai.broker.BrokerRequestResult;
+import com.fueledbychai.broker.ForwardingBroker;
 import com.fueledbychai.broker.IBroker;
 import com.fueledbychai.broker.IBrokerOrderRegistry;
 import com.fueledbychai.broker.Position;
@@ -51,7 +52,7 @@ import io.github.resilience4j.retry.RetryConfig;
  * ParadexBroker while adding retry, circuit breaker, and bulkhead patterns for
  * critical operations like order placement.
  */
-public class ResilientParadexBroker extends AbstractBasicBroker {
+public class ResilientParadexBroker extends ForwardingBroker {
     private static final Logger logger = LoggerFactory.getLogger(ResilientParadexBroker.class);
 
     protected IBroker delegate;
@@ -76,6 +77,7 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
      * @param delegate the ParadexBroker instance to wrap
      */
     public ResilientParadexBroker(ParadexBroker delegate) {
+        super(delegate);
         this.delegate = delegate;
         this.orderRegistry = delegate.getOrderRegistry();
 
@@ -93,8 +95,8 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
         setupEventListeners();
 
         // Forward events from delegate to our listeners
-        delegate.addOrderEventListener(this::fireOrderEvent);
-        delegate.addFillEventListener(this::fireFillEvent);
+        // delegate.addOrderEventListener(this::fireOrderEvent);
+        // delegate.addFillEventListener(this::fireFillEvent);
         // Note: Account equity updates are handled by delegate firing directly,
         // no need to forward since both extend AbstractBasicBroker
 
@@ -161,6 +163,10 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
 
         if (exception instanceof ResponseException) {
             ResponseException responseEx = (ResponseException) exception;
+            if (responseEx.getCause() instanceof IOException) {
+                logger.debug("Retrying due to ResponseException wrapping IOException: {}", exception.getMessage());
+                return true;
+            }
             int statusCode = responseEx.getStatusCode();
             // Retry on server errors (5xx), rate limiting (429), and some client errors
             boolean shouldRetry = statusCode >= 500 || statusCode == 429 || statusCode == 503 || statusCode == 502;
@@ -251,28 +257,41 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
             logger.info("Attempting order reconciliation for {} due to placement failure or uncertainty",
                     order.getTicker().getSymbol());
 
-            boolean reconciled = reconcileOrderStatus(order);
+            ReconciliationResult reconcileResult = reconcileOrderStatus(order);
 
-            if (reconciled) {
+            switch (reconcileResult) {
+            case ORDER_FOUND:
                 logger.info("Order reconciliation successful for {} - order was actually placed with ID: {}",
                         order.getTicker().getSymbol(), order.getOrderId());
-
                 // Order was successfully placed despite the exception, so don't rethrow
                 return new BrokerRequestResult();
-            } else {
-                logger.error("Order reconciliation failed for {} - order was not found on server",
+
+            case ORDER_NOT_FOUND:
+                logger.error("Order reconciliation confirmed for {} - order was definitely not placed on server",
                         order.getTicker().getSymbol());
-                // Order was not placed and reconciliation failed, rethrow the original
-                // exception
+                // We confirmed the order wasn't placed, safe to rethrow original exception
                 if (lastException != null) {
                     if (lastException instanceof RuntimeException) {
                         throw (RuntimeException) lastException;
                     } else {
-                        throw new RuntimeException("Order placement failed and reconciliation unsuccessful",
+                        throw new RuntimeException("Order placement failed - confirmed order not on server",
                                 lastException);
                     }
                 }
                 return new BrokerRequestResult();
+
+            case VERIFICATION_FAILED:
+                logger.error(
+                        "Order reconciliation failed for {} - unable to verify order status due to network/API issues. Order state unknown!",
+                        order.getTicker().getSymbol());
+                // We don't know if the order was placed or not - this is dangerous!
+                // Throw a specific exception to alert calling code
+                throw new RuntimeException("Order placement failed and reconciliation could not verify order status. "
+                        + "Order may or may not have been placed on server. Manual verification required for client order ID: "
+                        + order.getClientOrderId(), lastException);
+
+            default:
+                throw new RuntimeException("Unexpected reconciliation result: " + reconcileResult);
             }
         }
 
@@ -402,12 +421,6 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
     }
 
     @Override
-    protected void onDisconnect() {
-        throw new IllegalStateException(
-                "ResilientParadexBroker does not support onDisconnect directly. Call disconnect() instead.");
-    }
-
-    @Override
     public boolean isConnected() {
         return delegate.isConnected();
     }
@@ -461,18 +474,32 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
     }
 
     /**
+     * Enum representing the possible outcomes of order reconciliation.
+     */
+    protected enum ReconciliationResult {
+        /** Order was found on the server and successfully reconciled */
+        ORDER_FOUND,
+        /**
+         * Order was confirmed NOT to exist on the server (safe to assume placement
+         * failed)
+         */
+        ORDER_NOT_FOUND,
+        /** Unable to verify order status due to network/API issues (unknown state) */
+        VERIFICATION_FAILED
+    }
+
+    /**
      * Attempts to reconcile an order by checking its status via client order ID.
      * This method is used when placeOrder fails to determine if the order was
      * actually placed.
      * 
      * @param order the order ticket to reconcile
-     * @return true if reconciliation was successful and order was found, false
-     *         otherwise
+     * @return ReconciliationResult indicating the outcome of reconciliation
      */
-    protected boolean reconcileOrderStatus(OrderTicket order) {
+    protected ReconciliationResult reconcileOrderStatus(OrderTicket order) {
         if (order.getClientOrderId() == null || order.getClientOrderId().trim().isEmpty()) {
             logger.warn("Cannot reconcile order - no client order ID available for {}", order.getTicker().getSymbol());
-            return false;
+            return ReconciliationResult.VERIFICATION_FAILED;
         }
 
         try {
@@ -488,16 +515,36 @@ public class ResilientParadexBroker extends AbstractBasicBroker {
 
                 logger.info("Successfully reconciled order for client ID {}: Server Order ID = {}, Status = {}",
                         order.getClientOrderId(), order.getOrderId(), order.getCurrentStatus());
-                return true;
+                return ReconciliationResult.ORDER_FOUND;
             } else {
-                logger.info("Order reconciliation failed - no order found on server for client ID: {}",
+                logger.info(
+                        "Order reconciliation completed - confirmed order does not exist on server for client ID: {}",
                         order.getClientOrderId());
-                return false;
+                return ReconciliationResult.ORDER_NOT_FOUND;
+            }
+        } catch (ResponseException e) {
+            // Distinguish between client errors (4xx) and server errors (5xx)
+            if (e.getStatusCode() >= 400 && e.getStatusCode() < 500) {
+                if (e.getStatusCode() == 404) {
+                    logger.info(
+                            "Order reconciliation completed - server confirmed order does not exist for client ID: {}",
+                            order.getClientOrderId());
+                    return ReconciliationResult.ORDER_NOT_FOUND;
+                } else {
+                    logger.warn(
+                            "Client error during reconciliation for client ID {}: {} - treating as verification failure",
+                            order.getClientOrderId(), e.getMessage());
+                    return ReconciliationResult.VERIFICATION_FAILED;
+                }
+            } else {
+                logger.warn("Server error during reconciliation for client ID {}: {} - order status unknown",
+                        order.getClientOrderId(), e.getMessage());
+                return ReconciliationResult.VERIFICATION_FAILED;
             }
         } catch (Exception e) {
-            logger.warn("Failed to reconcile order status for client ID {}: {}", order.getClientOrderId(),
-                    e.getMessage());
-            return false;
+            logger.warn("Unexpected error during reconciliation for client ID {}: {} - order status unknown",
+                    order.getClientOrderId(), e.getMessage());
+            return ReconciliationResult.VERIFICATION_FAILED;
         }
     }
 

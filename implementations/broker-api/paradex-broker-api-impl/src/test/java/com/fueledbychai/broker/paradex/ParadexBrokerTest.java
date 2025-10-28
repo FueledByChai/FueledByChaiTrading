@@ -3,6 +3,7 @@ package com.fueledbychai.broker.paradex;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -171,12 +172,21 @@ public class ParadexBrokerTest {
     }
 
     @Test
-    public void testGetNextOrderId_ReturnsEmptyString() {
+    public void testGetNextOrderId_ReturnsValidUUID() {
         // Act
         String result = broker.getNextOrderId();
 
         // Assert
-        assertEquals("", result);
+        assertNotNull(result);
+        assertFalse(result.isEmpty());
+        // Verify it's a valid UUID format (36 characters with hyphens in correct
+        // positions)
+        assertTrue(result.matches("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"),
+                "Result should be a valid UUID format, but was: " + result);
+
+        // Verify that consecutive calls return different UUIDs
+        String result2 = broker.getNextOrderId();
+        assertNotEquals(result, result2, "Consecutive calls should return different UUIDs");
     }
 
     @Test

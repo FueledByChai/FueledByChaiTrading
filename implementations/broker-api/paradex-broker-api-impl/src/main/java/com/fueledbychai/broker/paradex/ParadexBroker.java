@@ -17,13 +17,10 @@
  */
 package com.fueledbychai.broker.paradex;
 
-import java.math.BigDecimal;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -37,7 +34,6 @@ import com.fueledbychai.broker.Position;
 import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.OrderEvent;
 import com.fueledbychai.broker.order.OrderStatus;
-import com.fueledbychai.broker.order.OrderStatus.CancelReason;
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.paradex.common.api.IParadexRestApi;
@@ -163,45 +159,6 @@ public class ParadexBroker extends AbstractBasicBroker {
         return new BrokerRequestResult();
     }
 
-    // @Override
-    // public BrokerRequestResult cancelOrder(String id) {
-    // checkConnected();
-    // logger.info("Canceling order with ID: {}", id);
-    // RestResponse cancelOrderResponse = restApi.cancelOrder(jwtToken, id);
-    // logger.info("Response code: {}", cancelOrderResponse.getHttpCode());
-
-    // if (!cancelOrderResponse.isSuccessful()) {
-    // String errormessage = cancelOrderResponse.getBody();
-    // logger.error("Failed to cancel order {}: {}", id, errormessage);
-
-    // if (errormessage != null && errormessage.contains("ORDER_IS_CLOSED")) {
-    // logger.error("Removing order {} from active list since it is likely already
-    // closed.", id);
-    // String closedOrderId = errormessage.replaceAll(".*?(\\d+).*", "$1");
-    // OrderTicket order = tradeOrderMap.get(closedOrderId);
-    // if (order != null) {
-    // order.setCurrentStatus(OrderStatus.Status.CANCELED);
-    // OrderStatus status = new OrderStatus(OrderStatus.Status.CANCELED,
-    // order.getOrderId(),
-    // order.getFilledSize(), order.getSize().subtract(order.getFilledSize()),
-    // order.getFilledPrice(), order.getTicker(), getCurrentTime());
-    // status.setCancelReason(CancelReason.USER_CANCELED);
-
-    // OrderEvent event = new OrderEvent(order, status);
-
-    // tradeOrderMap.remove(closedOrderId);
-    // super.fireOrderEvent(event);
-
-    // }
-    // return new BrokerRequestResult(false, errormessage);
-    // }
-    // } else {
-    // logger.info("Cancel order request for {} successful.", id);
-
-    // }
-    // return new BrokerRequestResult();
-    // }
-
     @Override
     public BrokerRequestResult cancelOrderByClientOrderId(String clientOrderId) {
         checkConnected();
@@ -229,46 +186,16 @@ public class ParadexBroker extends AbstractBasicBroker {
             return new BrokerRequestResult();
         }
 
-        // if (!cancelOrderResponse.isSuccessful()) {
-        // String errormessage = cancelOrderResponse.getBody();
-        // logger.error("Failed to cancel order with Client Order ID {}: {}",
-        // clientOrderId, errormessage);
-
-        // if (errormessage != null && errormessage.contains("ORDER_IS_CLOSED")) {
-        // logger.error(
-        // "Removing order with Client Order ID {} from active list since it is likely
-        // already closed.",
-        // clientOrderId);
-        // String closedOrderId = errormessage.replaceAll(".*?(\\d+).*", "$1");
-        // OrderTicket order = tradeOrderMap.get(closedOrderId);
-        // if (order != null) {
-        // order.setCurrentStatus(OrderStatus.Status.CANCELED);
-        // OrderStatus status = new OrderStatus(OrderStatus.Status.CANCELED,
-        // order.getOrderId(),
-        // order.getFilledSize(), order.getSize().subtract(order.getFilledSize()),
-        // order.getFilledPrice(), order.getTicker(), getCurrentTime());
-        // status.setCancelReason(CancelReason.USER_CANCELED);
-
-        // OrderEvent event = new OrderEvent(order, status);
-
-        // tradeOrderMap.remove(closedOrderId);
-        // super.fireOrderEvent(event);
-
-        // }
-        // return new BrokerRequestResult(false, errormessage);
-        // }
-        // } else {
-        // logger.info("Cancel order request for Client Order ID {} successful.",
-        // clientOrderId);
-
-        // }
-        // return new BrokerRequestResult();
     }
 
     @Override
     public BrokerRequestResult cancelOrder(OrderTicket order) {
         checkConnected();
-        return cancelOrder(order.getOrderId());
+        if (order.getClientOrderId() != null && !order.getClientOrderId().isEmpty()) {
+            return cancelOrderByClientOrderId(order.getClientOrderId());
+        } else {
+            return cancelOrder(order.getOrderId());
+        }
     }
 
     @Override
@@ -285,7 +212,8 @@ public class ParadexBroker extends AbstractBasicBroker {
 
     @Override
     public String getNextOrderId() {
-        return "";
+        // generate a unique client order ID
+        return UUID.randomUUID().toString();
     }
 
     @Override

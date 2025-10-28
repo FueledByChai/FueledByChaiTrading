@@ -28,6 +28,7 @@ import com.fueledbychai.paradex.common.api.historical.OHLCBar;
 import com.fueledbychai.paradex.common.api.order.Flag;
 import com.fueledbychai.paradex.common.api.order.OrderType;
 import com.fueledbychai.paradex.common.api.order.ParadexOrder;
+import com.fueledbychai.paradex.common.api.ws.SystemStatus;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
@@ -185,6 +186,33 @@ public class ParadexRestApi implements IParadexRestApi {
         }, 3, 500); // Retry up to 3 times with 500ms backoff
     }
 
+    @Override
+    public SystemStatus getSystemStatus() {
+
+        String path = "/system/state";
+        String url = baseUrl + path;
+        Request request = new Request.Builder().url(url).get().build();
+        logger.info("Request: " + request);
+
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                logger.error("Error response: " + response.body().string());
+                throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                        response.code());
+            }
+
+            String responseBody = response.body().string();
+            logger.info("Response output: " + responseBody);
+
+            return parseSystemStatus(responseBody);
+
+        } catch (IOException e) {
+            logger.error(e.getMessage(), e);
+            throw new ResponseException("Network error: " + e.getMessage(), e);
+        }
+
+    }
+
     /**
      * Supported resolutions
      * 
@@ -238,7 +266,7 @@ public class ParadexRestApi implements IParadexRestApi {
 
             } catch (IOException e) {
                 logger.error(e.getMessage(), e);
-                throw new RuntimeException(e);
+                throw new ResponseException("Network error getting OHLC bars: " + e.getMessage(), e);
             }
         }, 3, 500); // Retry up to 3 times with 500ms backoff
     }
@@ -274,7 +302,7 @@ public class ParadexRestApi implements IParadexRestApi {
 
             } catch (IOException e) {
                 logger.error(e.getMessage(), e);
-                throw new RuntimeException(e);
+                throw new ResponseException("Network error getting open orders: " + e.getMessage(), e);
             }
         }, 3, 500); // Retry up to 3 times with 500ms backoff
     }
@@ -305,7 +333,7 @@ public class ParadexRestApi implements IParadexRestApi {
             return new RestResponse(response.code(), responseBody);
         } catch (IOException e) {
             logger.error("IO error in cancelOrder: " + e.getMessage(), e);
-            throw new FueledByChaiException("Network error canceling order: " + e.getMessage(), e);
+            throw new ResponseException("Network error canceling order " + e.getMessage(), e);
         }
     }
 
@@ -335,7 +363,7 @@ public class ParadexRestApi implements IParadexRestApi {
             return new RestResponse(response.code(), responseBody);
         } catch (IOException e) {
             logger.error("IO error in cancelOrderByClientOrderId: " + e.getMessage(), e);
-            throw new FueledByChaiException("Network error canceling order by client ID: " + e.getMessage(), e);
+            throw new ResponseException("Network error canceling order by client ID: " + e.getMessage(), e);
         }
     }
 
@@ -368,7 +396,7 @@ public class ParadexRestApi implements IParadexRestApi {
             return parseParadexOrder(responseBody);
         } catch (IOException e) {
             logger.error("IO error in getOrderByClientOrderId: " + e.getMessage(), e);
-            throw new FueledByChaiException("Network error getting order by client ID: " + e.getMessage(), e);
+            throw new ResponseException("Network error getting order by client ID: " + e.getMessage(), e);
         }
     }
 
@@ -396,7 +424,7 @@ public class ParadexRestApi implements IParadexRestApi {
 
             } catch (IOException e) {
                 logger.error(e.getMessage(), e);
-                throw new RuntimeException(e);
+                throw new ResponseException("Network error getting all instruments for type: " + e.getMessage(), e);
             }
         }, 3, 500);
     }
@@ -428,7 +456,7 @@ public class ParadexRestApi implements IParadexRestApi {
 
             } catch (IOException e) {
                 logger.error(e.getMessage(), e);
-                throw new RuntimeException(e);
+                throw new ResponseException("Network error canceling order: " + e.getMessage(), e);
             }
 
         }, 3, 500); // Retry up to 3 times with 500ms backoff
@@ -1025,6 +1053,17 @@ public class ParadexRestApi implements IParadexRestApi {
         JsonArray resultsArray = jsonObject.getAsJsonArray("results");
         ParadexOrder order = gson.fromJson(resultsArray.get(0), ParadexOrder.class);
         return order;
+    }
+
+    protected SystemStatus parseSystemStatus(String responseBody) {
+        JsonObject jsonObject = JsonParser.parseString(responseBody).getAsJsonObject();
+        if (jsonObject.has("status")) {
+            // Direct status format: {"status": "ok"}
+            String statusString = jsonObject.get("status").getAsString();
+            return SystemStatus.fromString(statusString);
+        } else {
+            throw new FueledByChaiException("Unexpected system status response format: " + responseBody);
+        }
     }
 
     private class ZonedDateTimeAdapter extends TypeAdapter<ZonedDateTime> {
