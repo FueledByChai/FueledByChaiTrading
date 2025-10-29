@@ -50,6 +50,11 @@ public class DyDxLevel1QuoteEngine extends QuoteEngine implements Runnable {
         this.objectMapper = new ObjectMapper();
     }
 
+    @Override
+    public String getDataProviderName() {
+        return "dYdX";
+    }
+
     public OrderBookResponse getOrderBook(String market) {
         String url = ORDER_BOOK_URL + market;
         Request request = new Request.Builder().url(url).get().build();

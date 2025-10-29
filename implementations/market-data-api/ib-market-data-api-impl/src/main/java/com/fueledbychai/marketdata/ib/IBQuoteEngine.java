@@ -86,6 +86,11 @@ public class IBQuoteEngine extends AbstractIBQuoteEngine {
     }
 
     @Override
+    public String getDataProviderName() {
+        return "Interactive Brokers";
+    }
+
+    @Override
     public boolean isConnected() {
         return ibSocket.isConnected();
     }

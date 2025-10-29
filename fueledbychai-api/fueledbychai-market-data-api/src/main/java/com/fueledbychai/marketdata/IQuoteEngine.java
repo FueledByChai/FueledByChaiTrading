@@ -28,7 +28,7 @@ import com.fueledbychai.data.Ticker;
 /**
  * The QuoteEngine is used to subscribe to Level1 and Level2 quotes
  * 
- *  
+ * 
  */
 public interface IQuoteEngine {
 
@@ -45,6 +45,8 @@ public interface IQuoteEngine {
     public static enum Side {
         BID, ASK
     };
+
+    String getDataProviderName();
 
     /**
      * Subscribe to level 1 market data

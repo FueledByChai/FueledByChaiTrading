@@ -321,6 +321,11 @@ public class QuoteEngineTest {
         return new QuoteEngine() {
 
             @Override
+            public String getDataProviderName() {
+                return "MockDataProvider";
+            }
+
+            @Override
             public boolean isConnected() {
                 throw new UnsupportedOperationException("Not supported yet.");
             }

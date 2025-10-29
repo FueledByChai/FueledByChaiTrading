@@ -114,6 +114,11 @@ public class ParadexBroker extends AbstractBasicBroker {
     }
 
     @Override
+    public String getBrokerName() {
+        return "Paradex";
+    }
+
+    @Override
     public BrokerRequestResult cancelOrder(String id) {
         checkConnected();
         logger.info("Canceling order with ID: {}", id);

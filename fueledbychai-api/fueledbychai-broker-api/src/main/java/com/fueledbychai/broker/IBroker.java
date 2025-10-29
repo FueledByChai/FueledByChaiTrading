@@ -34,6 +34,8 @@ import com.fueledbychai.time.TimeUpdatedListener;
  */
 public interface IBroker {
 
+    String getBrokerName();
+
     IBrokerOrderRegistry getOrderRegistry();
 
     /**
