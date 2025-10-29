@@ -48,6 +48,11 @@ public class HyperliquidQuoteEngine extends QuoteEngine implements OrderBookUpda
     }
 
     @Override
+    public String getDataProviderName() {
+        return "Hyperliquid";
+    }
+
+    @Override
     public Date getServerTime() {
         // TODO Auto-generated method stub
         return null;

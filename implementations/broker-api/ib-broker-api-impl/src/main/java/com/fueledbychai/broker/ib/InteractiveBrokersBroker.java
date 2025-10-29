@@ -148,6 +148,11 @@ public class InteractiveBrokersBroker extends BaseIBConnectionDelegate implement
     }
 
     @Override
+    public String getBrokerName() {
+        return "Interactive Brokers";
+    }
+
+    @Override
     public void addTimeUpdateListener(TimeUpdatedListener listener) {
         throw new UnsupportedOperationException("Not supported yet."); // To change body of generated methods, choose
                                                                        // Tools | Templates.

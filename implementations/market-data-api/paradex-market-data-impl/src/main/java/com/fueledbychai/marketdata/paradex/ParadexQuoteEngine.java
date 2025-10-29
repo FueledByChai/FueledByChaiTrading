@@ -42,6 +42,11 @@ public class ParadexQuoteEngine extends QuoteEngine
     }
 
     @Override
+    public String getDataProviderName() {
+        return "Paradex";
+    }
+
+    @Override
     public Date getServerTime() {
         return null;
     }

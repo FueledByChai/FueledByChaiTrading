@@ -161,6 +161,11 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         }
     }
 
+    @Override
+    public String getBrokerName() {
+        return "PaperBroker-" + quoteEngine.getDataProviderName();
+    }
+
     protected void startAccountUpdateTask() {
         logger.warn("PaperBroker @PostConstruct startAccountUpdateTask called: {}", System.identityHashCode(this));
         // Read starting balance from file

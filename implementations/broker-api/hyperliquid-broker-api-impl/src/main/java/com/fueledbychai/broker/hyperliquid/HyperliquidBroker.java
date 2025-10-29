@@ -146,6 +146,11 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
     }
 
     @Override
+    public String getBrokerName() {
+        return "Hyperliquid";
+    }
+
+    @Override
     public BrokerRequestResult cancelOrder(String id) {
         checkConnected();
         throw new UnsupportedOperationException("Cancel order by ID not implemented yet");
@@ -160,7 +165,6 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
     @Override
     public BrokerRequestResult placeOrder(OrderTicket order) {
         checkConnected();
-        order.setClientOrderId(getNextOrderId());
         BestBidOffer bbo = bestBidOfferMap.get(order.getTicker().getSymbol());
         int tries = 0;
         int maxTries = 30; // Wait up to 30 seconds for market data
