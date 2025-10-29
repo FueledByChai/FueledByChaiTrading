@@ -437,10 +437,7 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
             if (fill.isSnapshot() || fillDeduper.firstTime(fill.getFillId())) {
 
                 logger.info("Fill received: {}", fill);
-                String clientOrderId = exchangeIdToCloidMap.get(fill.getOrderId());
-                logger.info("Client order ID for exchange order ID {} is {}", fill.getOrderId(), clientOrderId);
-                fill.setClientOrderId(clientOrderId != null ? clientOrderId : "");
-                OrderTicket orderTicket = pendingOrderMapByCloid.get(clientOrderId);
+                OrderTicket orderTicket = pendingOrderMapByCloid.get(fill.getClientOrderId());
                 if (orderTicket != null) {
                     orderTicket.setFilledSize(orderTicket.getFilledSize().add(fill.getSize()));
                     orderTicket.setCommission(fill.getCommission().add(orderTicket.getCommission()));

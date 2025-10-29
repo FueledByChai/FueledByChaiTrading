@@ -163,7 +163,7 @@ public class Translator implements ITranslator {
             fill.setSide("B".equalsIgnoreCase(wsFill.getSide()) ? TradeDirection.BUY : TradeDirection.SELL);
             fill.setTime(Util.convertEpochToZonedDateTime(wsFill.getTime()));
             fill.setTaker(wsFill.isTaker());
-            fill.setClientOrderId("");
+            fill.setClientOrderId(wsFill.getCloid());
             fills.add(fill);
         }
         return fills;
