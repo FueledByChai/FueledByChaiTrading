@@ -17,6 +17,7 @@ public class WsFill {
     protected long tradeId;
     protected String feeToken;
     protected String builderFee;
+    protected String cloid;
 
     public String getCoin() {
         return coin;
@@ -138,6 +139,14 @@ public class WsFill {
         this.builderFee = builderFee;
     }
 
+    public String getCloid() {
+        return cloid;
+    }
+
+    public void setCloid(String cloid) {
+        this.cloid = cloid;
+    }
+
     @Override
     public int hashCode() {
         final int prime = 31;
@@ -157,6 +166,7 @@ public class WsFill {
         result = prime * result + (int) (tradeId ^ (tradeId >>> 32));
         result = prime * result + ((feeToken == null) ? 0 : feeToken.hashCode());
         result = prime * result + ((builderFee == null) ? 0 : builderFee.hashCode());
+        result = prime * result + ((cloid == null) ? 0 : cloid.hashCode());
         return result;
     }
 
@@ -232,6 +242,11 @@ public class WsFill {
                 return false;
         } else if (!builderFee.equals(other.builderFee))
             return false;
+        if (cloid == null) {
+            if (other.cloid != null)
+                return false;
+        } else if (!cloid.equals(other.cloid))
+            return false;
         return true;
     }
 
@@ -240,7 +255,7 @@ public class WsFill {
         return "WsFill [coin=" + coin + ", price=" + price + ", size=" + size + ", side=" + side + ", time=" + time
                 + ", startPosition=" + startPosition + ", dir=" + dir + ", closedPnl=" + closedPnl + ", hash=" + hash
                 + ", orderId=" + orderId + ", taker=" + taker + ", fee=" + fee + ", tradeId=" + tradeId + ", feeToken="
-                + feeToken + ", builderFee=" + builderFee + "]";
+                + feeToken + ", builderFee=" + builderFee + ", cloid=" + cloid + "]";
     }
 
 }

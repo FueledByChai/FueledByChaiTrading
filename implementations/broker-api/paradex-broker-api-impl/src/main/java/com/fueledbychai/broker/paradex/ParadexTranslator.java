@@ -118,6 +118,7 @@ public class ParadexTranslator implements IParadexTranslator {
         fill.setOrderId(String.valueOf(paradexFill.getOrderId()));
         fill.setTaker(paradexFill.getLiquidity() == ParadexFill.LiquidityType.TAKER);
         fill.setCommission(new BigDecimal(paradexFill.getFee()));
+        fill.setClientOrderId(paradexFill.getClientId());
         return fill;
     }
 
