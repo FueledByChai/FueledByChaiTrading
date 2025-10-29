@@ -168,4 +168,42 @@ class WsUserFillsWebSocketProcessorTest {
         assertEquals("testuser", userFill.getUser());
         assertFalse(userFill.isSnapshot(), "isSnapshot should be false when set to false in root object");
     }
+
+    @Test
+    void testParseMessage_ensureCloidPropertyIsSet() {
+        // Test with the specific JSON sample provided to ensure cloid property gets set
+        String json = "{\"channel\":\"userFills\",\"data\":{\"user\":\"0xb6248a6ab8fd53f247a0b68553ff49a63caa8af2\",\"fills\":[{\"coin\":\"AVNT\",\"px\":\"0.63886\",\"sz\":\"80.0\",\"side\":\"B\",\"time\":1761758185452,\"startPosition\":\"0.0\",\"dir\":\"Open Long\",\"closedPnl\":\"0.0\",\"hash\":\"0x4f31880b814d7df750ab042e71d0e00202ac00f11c409cc9f2fa335e404157e1\",\"oid\":216153865826,\"crossed\":true,\"fee\":\"0.022998\",\"tid\":512163892829842,\"cloid\":\"0xc4ca4238a0b923820dcc509a6f75849b\",\"feeToken\":\"USDC\",\"twapId\":null}]}}";
+
+        WsUserFillsWebSocketProcessor processor = new WsUserFillsWebSocketProcessor(null);
+        WsUserFill userFill = processor.parseMessage(json);
+
+        // Basic assertions
+        assertNotNull(userFill, "UserFill should not be null");
+        assertEquals("0xb6248a6ab8fd53f247a0b68553ff49a63caa8af2", userFill.getUser(), "User should match");
+        assertNotNull(userFill.getFills(), "Fills list should not be null");
+        assertEquals(1, userFill.getFills().size(), "Should have exactly 1 fill");
+
+        // Get the fill and verify all properties including cloid
+        WsFill fill = userFill.getFills().get(0);
+        assertNotNull(fill, "Fill object should not be null");
+
+        // Verify the cloid property is properly set
+        assertEquals("0xc4ca4238a0b923820dcc509a6f75849b", fill.getCloid(), "cloid property should be set correctly");
+
+        // Verify other important properties for completeness
+        assertEquals("AVNT", fill.getCoin());
+        assertEquals("0.63886", fill.getPrice());
+        assertEquals("80.0", fill.getSize());
+        assertEquals("B", fill.getSide());
+        assertEquals(1761758185452L, fill.getTime());
+        assertEquals("0.0", fill.getStartPosition());
+        assertEquals("Open Long", fill.getDir());
+        assertEquals("0.0", fill.getClosedPnl());
+        assertEquals("0x4f31880b814d7df750ab042e71d0e00202ac00f11c409cc9f2fa335e404157e1", fill.getHash());
+        assertEquals(216153865826L, fill.getOrderId());
+        assertTrue(fill.isTaker(), "crossed should be true, meaning isTaker is true");
+        assertEquals("0.022998", fill.getFee());
+        assertEquals(512163892829842L, fill.getTradeId());
+        assertEquals("USDC", fill.getFeeToken());
+    }
 }
