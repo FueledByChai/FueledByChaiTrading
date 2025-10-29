@@ -25,7 +25,6 @@ import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.fueledbychai.broker.AbstractBasicBroker;
 import com.fueledbychai.broker.BrokerRequestResult;
 import com.fueledbychai.broker.ForwardingBroker;
 import com.fueledbychai.broker.IBroker;
@@ -591,6 +590,76 @@ public class ResilientParadexBroker extends ForwardingBroker {
      */
     public Retry.Metrics getCancelOrderRetryMetrics() {
         return cancelOrderRetry.getMetrics();
+    }
+
+    // Circuit Breaker Management Methods
+
+    /**
+     * Manually resets the place order circuit breaker to CLOSED state. Use this
+     * when you know the service is healthy and want to bypass the circuit breaker
+     * protection.
+     */
+    public void resetPlaceOrderCircuitBreaker() {
+        placeOrderCircuitBreaker.reset();
+        logger.info("Place order circuit breaker manually reset to CLOSED state");
+    }
+
+    /**
+     * Manually resets the cancel order circuit breaker to CLOSED state. Use this
+     * when you know the service is healthy and want to bypass the circuit breaker
+     * protection.
+     */
+    public void resetCancelOrderCircuitBreaker() {
+        cancelOrderCircuitBreaker.reset();
+        logger.info("Cancel order circuit breaker manually reset to CLOSED state");
+    }
+
+    /**
+     * Manually resets the order status circuit breaker to CLOSED state. Use this
+     * when you know the service is healthy and want to bypass the circuit breaker
+     * protection.
+     */
+    public void resetOrderStatusCircuitBreaker() {
+        orderStatusCircuitBreaker.reset();
+        logger.info("Order status circuit breaker manually reset to CLOSED state");
+    }
+
+    /**
+     * Resets all circuit breakers to CLOSED state. Use this after confirming the
+     * remote service is operational.
+     */
+    public void resetAllCircuitBreakers() {
+        resetPlaceOrderCircuitBreaker();
+        resetCancelOrderCircuitBreaker();
+        resetOrderStatusCircuitBreaker();
+        logger.info("All circuit breakers manually reset to CLOSED state");
+    }
+
+    /**
+     * Gets detailed metrics for the place order circuit breaker.
+     * 
+     * @return circuit breaker metrics
+     */
+    public CircuitBreaker.Metrics getPlaceOrderCircuitBreakerMetrics() {
+        return placeOrderCircuitBreaker.getMetrics();
+    }
+
+    /**
+     * Gets detailed metrics for the cancel order circuit breaker.
+     * 
+     * @return circuit breaker metrics
+     */
+    public CircuitBreaker.Metrics getCancelOrderCircuitBreakerMetrics() {
+        return cancelOrderCircuitBreaker.getMetrics();
+    }
+
+    /**
+     * Gets detailed metrics for the order status circuit breaker.
+     * 
+     * @return circuit breaker metrics
+     */
+    public CircuitBreaker.Metrics getOrderStatusCircuitBreakerMetrics() {
+        return orderStatusCircuitBreaker.getMetrics();
     }
 
 }

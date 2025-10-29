@@ -63,6 +63,7 @@ public class WsUserFillsWebSocketProcessor extends AbstractWebSocketProcessor<Ws
                     fill.setTradeId(fillObj.optLong("tid", 0));
                     fill.setFeeToken(fillObj.optString("feeToken", null));
                     fill.setBuilderFee(fillObj.optString("builderFee", null));
+                    fill.setCloid(fillObj.optString("cloid", null));
                     // Ignore liquidation field
                     userFill.addFill(fill);
                 }
