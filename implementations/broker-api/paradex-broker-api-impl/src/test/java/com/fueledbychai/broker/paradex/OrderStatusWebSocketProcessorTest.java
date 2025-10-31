@@ -138,6 +138,15 @@ public class OrderStatusWebSocketProcessorTest {
         public String getTickerString() {
             return null;
         }
+
+        @Override
+        public String getClientOrderId() {
+            return null;
+        }
+
+        @Override
+        public void setClientOrderId(String clientOrderId) {
+        }
     }
 
     // ==================== Listener Management Tests ====================

@@ -24,3 +24,6 @@ implementations/broker-api/paradex-broker-api-impl/src/test/java/com/fueledbycha
 .vscode/launch.json
 .gitignore
 
+logs/*
+logs/latency.log
+logs/latency.log

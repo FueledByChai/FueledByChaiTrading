@@ -1,8 +1,10 @@
 package com.fueledbychai.paradex.example.trading;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 import com.fueledbychai.broker.IBroker;
+import com.fueledbychai.broker.Position;
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.broker.order.OrderTicket.Modifier;
 import com.fueledbychai.broker.order.OrderTicket.Type;
@@ -42,6 +44,28 @@ public class ParadexLatencyTest {
 
         Thread.sleep(5000);
 
+        List<Position> allPositions = broker.getAllPositions();
+        Position activePosition = null;
+        for (Position position : allPositions) {
+            if (position.getTicker().equals(btcTicker) && position.getStatus() == Position.Status.OPEN) {
+                log.info("Current BTC Position: {}", position);
+                activePosition = position;
+            }
+        }
+
+        if (activePosition != null) {
+            log.info("Closing existing position of size: {}", activePosition.getSize());
+            OrderTicket closeOrder = new OrderTicket();
+            TradeDirection direction = TradeDirection.SELL;
+            if (activePosition.getSide() == com.fueledbychai.data.Side.SHORT) {
+                direction = TradeDirection.BUY;
+            }
+            closeOrder.setTicker(btcTicker).setSize(activePosition.getSize().abs()).setDirection(direction)
+                    .setType(Type.MARKET).setClientOrderId(broker.getNextOrderId());
+            broker.placeOrder(closeOrder);
+            Thread.sleep(5000);
+        }
+
         while (true) {
             OrderTicket order = new OrderTicket();
 
@@ -50,12 +74,12 @@ public class ParadexLatencyTest {
             order.setTicker(btcTicker).setSize(BigDecimal.valueOf(0.01)).setDirection(TradeDirection.BUY)
                     .setType(Type.LIMIT).setLimitPrice(BigDecimal.valueOf(106000)).setClientOrderId(orderId);
 
-            try (var s = Span.start("CREATING_ORDER", order.getClientOrderId())) {
+            try (var s = Span.start("PD_CREATING_ORDER", order.getClientOrderId())) {
                 broker.placeOrder(order);
             }
             Thread.sleep(3000);
 
-            try (var s = Span.start("CANCELING_ORDER", order.getClientOrderId())) {
+            try (var s = Span.start("PD_CANCELING_ORDER", order.getClientOrderId())) {
                 broker.cancelOrderByClientOrderId(orderId);
             }
 

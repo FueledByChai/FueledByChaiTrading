@@ -8,14 +8,15 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -29,6 +30,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.fueledbychai.broker.BrokerAccountInfoListener;
 import com.fueledbychai.broker.BrokerErrorListener;
 import com.fueledbychai.broker.IBrokerOrderRegistry;
+import com.fueledbychai.broker.Position;
 import com.fueledbychai.broker.order.OrderEvent;
 import com.fueledbychai.broker.order.OrderEventListener;
 import com.fueledbychai.broker.order.OrderStatus;
@@ -69,6 +71,9 @@ public class ParadexBrokerTest {
 
     @Mock
     private ParadexOrder mockParadexOrder;
+
+    @Mock
+    private Position mockPosition;
 
     @Mock
     private OrderEventListener mockOrderEventListener;
@@ -139,6 +144,7 @@ public class ParadexBrokerTest {
         broker.jwtToken = jwtToken;
         broker.connected = true;
         when(mockTradeOrder.getOrderId()).thenReturn(orderId);
+
         RestResponse mockResponse = mock(RestResponse.class);
 
         when(mockRestApi.cancelOrder(jwtToken, orderId)).thenReturn(mockResponse);
@@ -149,7 +155,7 @@ public class ParadexBrokerTest {
 
         // Assert
         verify(mockRestApi).cancelOrder(jwtToken, orderId);
-        verify(mockTradeOrder).getOrderId();
+        verify(mockTradeOrder, times(2)).getOrderId();
     }
 
     @Test
@@ -214,11 +220,12 @@ public class ParadexBrokerTest {
     }
 
     @Test
-    public void testGetAllPositions_ThrowsUnsupportedOperationException() {
-        // Act & Assert
-        assertThrows(UnsupportedOperationException.class, () -> {
-            broker.getAllPositions();
-        });
+    public void testGetAllPositions_ReturnsListOfPositions() {
+        when(mockRestApi.getPositionInfo(broker.jwtToken)).thenReturn(List.of(mockPosition));
+        List<Position> positions = broker.getAllPositions();
+        assertEquals(1, positions.size());
+        assertEquals(mockPosition, positions.get(0));
+
     }
 
     // ==================== Connection Management Tests ====================

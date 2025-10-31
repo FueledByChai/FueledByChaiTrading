@@ -34,6 +34,7 @@ import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.data.FueledByChaiException;
 import com.fueledbychai.data.ResponseException;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.time.Span;
 
 import io.github.resilience4j.bulkhead.Bulkhead;
 import io.github.resilience4j.bulkhead.BulkheadConfig;
@@ -213,13 +214,37 @@ public class ResilientParadexBroker extends ForwardingBroker {
                 .onCallRejected(event -> logger.warn("PlaceOrder bulkhead call rejected - too many concurrent calls"));
     }
 
+    /**
+     * Resets all circuit breakers to CLOSED state. This can be useful for recovery
+     * when circuit breakers are stuck in OPEN state due to transient issues that
+     * have been resolved.
+     */
+    public void resetCircuitBreakers() {
+        logger.info("Resetting all circuit breakers to CLOSED state");
+        placeOrderCircuitBreaker.reset();
+        cancelOrderCircuitBreaker.reset();
+        orderStatusCircuitBreaker.reset();
+        logger.info("All circuit breakers have been reset");
+    }
+
+    /**
+     * Gets the current state of all circuit breakers for monitoring purposes.
+     */
+    public String getCircuitBreakerStatus() {
+        return String.format("Circuit Breaker Status - PlaceOrder: %s, CancelOrder: %s, OrderStatus: %s",
+                placeOrderCircuitBreaker.getState(), cancelOrderCircuitBreaker.getState(),
+                orderStatusCircuitBreaker.getState());
+    }
+
     @Override
     public BrokerRequestResult placeOrder(OrderTicket order) {
         // Ensure order has a client order ID for reconciliation
         if (order.getClientOrderId() == null || order.getClientOrderId().trim().isEmpty()) {
-            String clientOrderId = generateClientOrderId(order);
-            order.setClientOrderId(clientOrderId);
-            logger.debug("Generated client order ID {} for order {}", clientOrderId, order.getTicker().getSymbol());
+            try (var s = Span.start("PD_GENERATE_CLIENT_ORDER_ID", order.getTicker().getSymbol())) {
+                String clientOrderId = generateClientOrderId(order);
+                order.setClientOrderId(clientOrderId);
+                logger.debug("Generated client order ID {} for order {}", clientOrderId, order.getTicker().getSymbol());
+            }
         }
 
         boolean orderPlaced = false;
@@ -314,6 +339,47 @@ public class ResilientParadexBroker extends ForwardingBroker {
         Supplier<BrokerRequestResult> cancelOrderSupplier = () -> {
             try {
                 return delegate.cancelOrder(id);
+            } catch (ResponseException e) {
+                // Check if this is the "ORDER_IS_CLOSED" error
+                if (e.getStatusCode() == 400 && e.getMessage() != null
+                        && e.getMessage().toLowerCase().contains("order is closed")) {
+                    logger.info(
+                            "Order {} is already closed, checking actual order status to determine if canceled or filled",
+                            id);
+
+                    try {
+                        // Check the actual order status to see if it was canceled or filled
+                        OrderTicket orderStatus = requestOrderStatus(id);
+                        if (orderStatus != null && orderStatus.getCurrentStatus() != null) {
+                            String status = orderStatus.getCurrentStatus().toString().toUpperCase();
+                            if (status.contains("CANCEL")) {
+                                logger.info(
+                                        "Order {} was already canceled, treating cancellation request as successful",
+                                        id);
+                                return new BrokerRequestResult(true, "Order already canceled");
+                            } else if (status.contains("FILLED") || status.contains("COMPLETE")) {
+                                logger.warn("Order {} was already filled, cannot cancel a filled order", id);
+                                return new BrokerRequestResult(false, "Cannot cancel order - order was already filled");
+                            } else {
+                                logger.warn("Order {} is closed with status {}, treating as cancellation failure", id,
+                                        status);
+                                return new BrokerRequestResult(false, "Order is closed with status: " + status);
+                            }
+                        } else {
+                            logger.warn("Could not retrieve order status for closed order {}, assuming it was canceled",
+                                    id);
+                            return new BrokerRequestResult(true, "Order is closed (status unknown, assuming canceled)");
+                        }
+                    } catch (Exception statusException) {
+                        logger.warn("Failed to check order status for closed order {}: {}", id,
+                                statusException.getMessage());
+                        // If we can't check the status, we should not assume it was successfully
+                        // canceled
+                        throw e; // Re-throw the original exception
+                    }
+                }
+                logger.error("Error canceling order {}: {}", id, e.getMessage(), e);
+                throw e;
             } catch (Exception e) {
                 logger.error("Error canceling order {}: {}", id, e.getMessage(), e);
                 throw e;
@@ -334,6 +400,50 @@ public class ResilientParadexBroker extends ForwardingBroker {
         Supplier<BrokerRequestResult> cancelOrderSupplier = () -> {
             try {
                 return delegate.cancelOrderByClientOrderId(clientOrderId);
+            } catch (ResponseException e) {
+                // Check if this is the "ORDER_IS_CLOSED" error
+                if (e.getStatusCode() == 400 && e.getMessage() != null
+                        && e.getMessage().toLowerCase().contains("order is closed")) {
+                    logger.info(
+                            "Order with client ID {} is already closed, checking actual order status to determine if canceled or filled",
+                            clientOrderId);
+
+                    try {
+                        // Check the actual order status to see if it was canceled or filled
+                        OrderTicket orderStatus = requestOrderStatusByClientOrderId(clientOrderId);
+                        if (orderStatus != null && orderStatus.getCurrentStatus() != null) {
+                            String status = orderStatus.getCurrentStatus().toString().toUpperCase();
+                            if (status.contains("CANCEL")) {
+                                logger.info(
+                                        "Order with client ID {} was already canceled, treating cancellation request as successful",
+                                        clientOrderId);
+                                return new BrokerRequestResult(true, "Order already canceled");
+                            } else if (status.contains("FILLED") || status.contains("COMPLETE")) {
+                                logger.warn("Order with client ID {} was already filled, cannot cancel a filled order",
+                                        clientOrderId);
+                                return new BrokerRequestResult(false, "Cannot cancel order - order was already filled");
+                            } else {
+                                logger.warn(
+                                        "Order with client ID {} is closed with status {}, treating as cancellation failure",
+                                        clientOrderId, status);
+                                return new BrokerRequestResult(false, "Order is closed with status: " + status);
+                            }
+                        } else {
+                            logger.warn(
+                                    "Could not retrieve order status for closed order with client ID {}, assuming it was canceled",
+                                    clientOrderId);
+                            return new BrokerRequestResult(true, "Order is closed (status unknown, assuming canceled)");
+                        }
+                    } catch (Exception statusException) {
+                        logger.warn("Failed to check order status for closed order with client ID {}: {}",
+                                clientOrderId, statusException.getMessage());
+                        // If we can't check the status, we should not assume it was successfully
+                        // canceled
+                        throw e; // Re-throw the original exception
+                    }
+                }
+                logger.error("Error canceling order by client ID {}: {}", clientOrderId, e.getMessage(), e);
+                throw e;
             } catch (Exception e) {
                 logger.error("Error canceling order by client ID {}: {}", clientOrderId, e.getMessage(), e);
                 throw e;

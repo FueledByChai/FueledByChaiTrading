@@ -16,6 +16,7 @@ import com.fueledbychai.hyperliquid.ws.json.SignatureFields;
 import com.fueledbychai.hyperliquid.ws.json.SubmitExchangeRequest;
 import com.fueledbychai.hyperliquid.ws.json.WebServicePostMessage;
 import com.fueledbychai.hyperliquid.ws.json.ws.SubmitPostResponse;
+import com.fueledbychai.time.Span;
 import com.fueledbychai.websocket.IWebSocketEventListener;
 
 public class HyperliquidWebsocketApi implements IWebSocketEventListener<SubmitPostResponse>, IHyperliquidWebsocketApi {
@@ -50,6 +51,7 @@ public class HyperliquidWebsocketApi implements IWebSocketEventListener<SubmitPo
 
     @Override
     public SubmitPostResponse submitOrders(OrderAction orderAction) {
+        String clientOrderId = orderAction.orders.get(0).clientOrderId;
         SignableExchangeOrderRequest signable = new SignableExchangeOrderRequest();
         signable.action = orderAction;
         signable.nonceMs = System.currentTimeMillis();
@@ -57,7 +59,11 @@ public class HyperliquidWebsocketApi implements IWebSocketEventListener<SubmitPo
             signable.vaultAddress = subAccountAddress;
         }
         logger.info("Built order request");
-        SubmitExchangeRequest request = getSignedRequest(signable);
+        SubmitExchangeRequest request;
+        try (var s = Span.start("HL_SIGN_SUBMIT_ORDER_REQUEST", clientOrderId)) {
+            request = getSignedRequest(signable);
+        }
+
         logger.info("Signed order request");
         WebServicePostMessage wsRequest = new WebServicePostMessage();
         wsRequest.id = requestId++;
@@ -66,29 +72,31 @@ public class HyperliquidWebsocketApi implements IWebSocketEventListener<SubmitPo
         pendingRequests.put(wsRequest.id, future);
         wsRequest.setPayload(request);
 
-        try {
-            logger.info("writing to json");
-            String jsonToSend = Mappers.JSON.writeValueAsString(wsRequest);
-            logger.info("Posting to websocket");
-            client.postMessage(jsonToSend);
-            logger.info("Posted to websocket");
-        } catch (Exception e) {
-            pendingRequests.remove(wsRequest.id);
-            logger.error("Error sending WebSocket request id " + wsRequest.id, e);
+        try (var s = Span.start("HL_SENDING_ORDER_WS_MESSAGE", clientOrderId)) {
+            try {
+                logger.info("writing to json");
+                String jsonToSend = Mappers.JSON.writeValueAsString(wsRequest);
+                logger.info("Posting to websocket");
+                client.postMessage(jsonToSend);
+                logger.info("Posted to websocket");
+            } catch (Exception e) {
+                pendingRequests.remove(wsRequest.id);
+                logger.error("Error sending WebSocket request id " + wsRequest.id, e);
+                return null;
+            }
+
+            try {
+                // Block until response arrives or timeout
+                return future.get(2000, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException e) {
+                pendingRequests.remove(wsRequest.id);
+                logger.error("Timeout waiting for response to request id " + wsRequest.id, e);
+            } catch (Exception e) {
+                pendingRequests.remove(wsRequest.id);
+                logger.error("Error waiting for response to request id " + wsRequest.id, e);
+            }
             return null;
         }
-
-        try {
-            // Block until response arrives or timeout
-            return future.get(2000, TimeUnit.MILLISECONDS);
-        } catch (TimeoutException e) {
-            pendingRequests.remove(wsRequest.id);
-            logger.error("Timeout waiting for response to request id " + wsRequest.id, e);
-        } catch (Exception e) {
-            pendingRequests.remove(wsRequest.id);
-            logger.error("Error waiting for response to request id " + wsRequest.id, e);
-        }
-        return null;
     }
 
     @Override

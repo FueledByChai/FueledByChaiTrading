@@ -5,6 +5,7 @@ import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fueledbychai.time.WsLatency;
 import com.fueledbychai.websocket.AbstractWebSocketProcessor;
 import com.fueledbychai.websocket.IWebSocketClosedListener;
 
@@ -18,6 +19,7 @@ public class WsUserFillsWebSocketProcessor extends AbstractWebSocketProcessor<Ws
 
     @Override
     protected WsUserFill parseMessage(String message) {
+        long recvMs = System.currentTimeMillis();
         logger.info("Received user fill message: {}", message);
         try {
             JSONObject jsonObject = new JSONObject(message);
@@ -38,12 +40,15 @@ public class WsUserFillsWebSocketProcessor extends AbstractWebSocketProcessor<Ws
             JSONObject dataObject = jsonObject.has("data") ? jsonObject.getJSONObject("data") : jsonObject;
 
             WsUserFill userFill = new WsUserFill();
+            boolean isSnapshot = false;
             if (dataObject.has("isSnapshot")) {
                 userFill.setSnapshot(dataObject.getBoolean("isSnapshot"));
+                isSnapshot = true;
             }
             userFill.setUser(dataObject.optString("user", null));
 
             JSONArray fillsArray = dataObject.optJSONArray("fills");
+            String cloid = "";
             if (fillsArray != null) {
                 for (int i = 0; i < fillsArray.length(); i++) {
                     JSONObject fillObj = fillsArray.getJSONObject(i);
@@ -63,10 +68,19 @@ public class WsUserFillsWebSocketProcessor extends AbstractWebSocketProcessor<Ws
                     fill.setTradeId(fillObj.optLong("tid", 0));
                     fill.setFeeToken(fillObj.optString("feeToken", null));
                     fill.setBuilderFee(fillObj.optString("builderFee", null));
-                    fill.setCloid(fillObj.optString("cloid", null));
+                    cloid = fillObj.optString("cloid", null);
+                    fill.setCloid(cloid);
                     // Ignore liquidation field
                     userFill.addFill(fill);
                 }
+            }
+            if (!isSnapshot) {
+                try {
+                    WsLatency.onMessage("HL-UserFill", cloid, recvMs, userFill.getFills().get(0).getTime());
+                } catch (Exception e) {
+                    logger.error("Error processing latency for user fill: " + message, e);
+                }
+
             }
             return userFill;
         } catch (Exception e) {

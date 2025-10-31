@@ -41,4 +41,8 @@ public interface IParadexOrderStatusUpdate {
 
     long getTimestamp();
 
+    String getClientOrderId();
+
+    void setClientOrderId(String clientOrderId);
+
 }

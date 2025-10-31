@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.data.FueledByChaiException;
+import com.fueledbychai.time.WsLatency;
 import com.fueledbychai.websocket.AbstractWebSocketProcessor;
 import com.fueledbychai.websocket.IWebSocketClosedListener;
 
@@ -22,6 +23,7 @@ public class ParadexFillsWebSocketProcessor extends AbstractWebSocketProcessor<P
 
     @Override
     protected ParadexFill parseMessage(String message) {
+        long recvMs = System.currentTimeMillis();
         logger.info("Received user fill message: {}", message);
         try {
             JSONObject jsonObject = new JSONObject(message);
@@ -44,6 +46,7 @@ public class ParadexFillsWebSocketProcessor extends AbstractWebSocketProcessor<P
     }
 
     private ParadexFill parseFillData(JSONObject data) throws FueledByChaiException {
+        long recvMs = System.currentTimeMillis();
         ParadexFill fill = new ParadexFill();
         fill.account = data.optString("account", null);
         fill.clientId = data.optString("client_id", null);
@@ -71,6 +74,12 @@ public class ParadexFillsWebSocketProcessor extends AbstractWebSocketProcessor<P
         fill.side = ParadexFill.Side.valueOf(data.optString("side", null));
         fill.size = data.optString("size", null);
         fill.underlyingPrice = data.optString("underlying_price", null);
+
+        try {
+            WsLatency.onMessage("PD-Fill", fill.clientId, recvMs, fill.createdAt);
+        } catch (Exception e) {
+            logger.error("Error processing latency for fill: " + e.getMessage(), e);
+        }
         return fill;
     }
 
