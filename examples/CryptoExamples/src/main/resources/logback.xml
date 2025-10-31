@@ -6,10 +6,32 @@
         </encoder>
     </appender>
 
+   <appender name="LAT_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+  <file>logs/latency.log</file>
+  <encoder>
+    <pattern>%date %-5level %logger %msg%n</pattern>
+  </encoder>
+  <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+    <fileNamePattern>logs/latency-%d{yyyy-MM-dd}.gz</fileNamePattern>
+    <maxHistory>7</maxHistory>
+  </rollingPolicy>
+</appender>
+
+<appender name="ASYNC_LAT" class="ch.qos.logback.classic.AsyncAppender">
+  <queueSize>8192</queueSize>
+  <discardingThreshold>0</discardingThreshold>
+  <neverBlock>true</neverBlock>
+  <appender-ref ref="LAT_FILE"/>
+</appender>
+
     <root level="INFO">
         <appender-ref ref="STDOUT" />
     </root>
 
     <!-- Enable DEBUG for HLSigner performance analysis -->
     <logger name="com.fueledbychai.hyperliquid.ws.json.HLSigner" level="DEBUG" />
+
+    <logger name="latency" level="INFO" additivity="false">
+  <appender-ref ref="ASYNC_LAT"/>
+</logger>
 </configuration>

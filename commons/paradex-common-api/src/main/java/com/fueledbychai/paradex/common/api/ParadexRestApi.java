@@ -29,6 +29,7 @@ import com.fueledbychai.paradex.common.api.order.Flag;
 import com.fueledbychai.paradex.common.api.order.OrderType;
 import com.fueledbychai.paradex.common.api.order.ParadexOrder;
 import com.fueledbychai.paradex.common.api.ws.SystemStatus;
+import com.fueledbychai.time.Span;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
@@ -52,6 +53,7 @@ import okhttp3.Response;
 
 public class ParadexRestApi implements IParadexRestApi {
     protected static Logger logger = LoggerFactory.getLogger(ParadexRestApi.class);
+    protected static Logger latencyLogger = LoggerFactory.getLogger(Span.LATENCY_LOGGER_NAME);
     private final Gson gson;
 
     protected static IParadexRestApi publicOnlyApi;
@@ -468,11 +470,12 @@ public class ParadexRestApi implements IParadexRestApi {
         String path = "/orders";
         String url = baseUrl + path;
         long timestamp = System.currentTimeMillis();
-        // BigInteger chainID = new
-        // BigInteger("8458834024819506728615521019831122032732688838300957472069977523540");
         String chainIdHex = "0x" + chainID.toString(16).toUpperCase();
         String orderMessage = createOrderMessage(timestamp, chainIdHex, order);
-        String signatureString = getOrderMessageSignature(orderMessage);
+        String signatureString = "";
+        try (var s = Span.start("SIGN_HTTP_REQUEST", order.getClientId())) {
+            signatureString = getOrderMessageSignature(orderMessage);
+        }
 
         JsonObject orderJson = new JsonObject();
         orderJson.addProperty("client_id", order.getClientId());
@@ -495,6 +498,7 @@ public class ParadexRestApi implements IParadexRestApi {
             }
             orderJson.add("flags", flagsArray);
         }
+
         orderJson.addProperty("signature", signatureString);
 
         RequestBody requestBody = RequestBody.create(orderJson.toString(),
@@ -507,25 +511,27 @@ public class ParadexRestApi implements IParadexRestApi {
         logger.info("Request: " + request);
         logger.info("Request body: " + orderJson.toString());
 
-        try (Response response = client.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                logger.error("Error response: " + response.body().string());
-                throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
-                        response.code());
-            }
+        try (var s = Span.start("SEND_HTTP_REQUEST", order.getClientId())) {
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    logger.error("Error response: " + response.body().string());
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
+                }
 
-            String responseBody = response.body().string();
-            logger.info("Response output: " + responseBody);
-            JsonObject jsonResponse = JsonParser.parseString(responseBody).getAsJsonObject();
-            if (jsonResponse.has("id")) {
-                return jsonResponse.get("id").getAsString();
-            } else {
-                return "";
-            }
+                String responseBody = response.body().string();
+                logger.info("Response output: " + responseBody);
+                JsonObject jsonResponse = JsonParser.parseString(responseBody).getAsJsonObject();
+                if (jsonResponse.has("id")) {
+                    return jsonResponse.get("id").getAsString();
+                } else {
+                    return "";
+                }
 
-        } catch (IOException e) {
-            logger.error(e.getMessage(), e);
-            throw new RuntimeException(e);
+            } catch (IOException e) {
+                logger.error(e.getMessage(), e);
+                throw new RuntimeException(e);
+            }
         }
     }
 
