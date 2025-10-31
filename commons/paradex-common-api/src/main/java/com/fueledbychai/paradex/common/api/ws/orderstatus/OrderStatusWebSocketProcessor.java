@@ -9,12 +9,16 @@ import com.fueledbychai.websocket.IWebSocketClosedListener;
 
 public class OrderStatusWebSocketProcessor extends AbstractWebSocketProcessor<IParadexOrderStatusUpdate> {
 
+    protected static final org.slf4j.Logger logger = org.slf4j.LoggerFactory
+            .getLogger(OrderStatusWebSocketProcessor.class);
+
     public OrderStatusWebSocketProcessor(IWebSocketClosedListener closedListener) {
         super(closedListener);
     }
 
     @Override
     protected IParadexOrderStatusUpdate parseMessage(String message) {
+        logger.info("Paradex OrderStatus WSProcessor: " + message);
         try {
             JSONObject jsonObject = new JSONObject(message);
             if (!jsonObject.has("method")) {
