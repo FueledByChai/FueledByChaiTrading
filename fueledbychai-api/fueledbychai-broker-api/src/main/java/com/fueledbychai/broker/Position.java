@@ -23,21 +23,29 @@ package com.fueledbychai.broker;
 import java.io.Serializable;
 import java.math.BigDecimal;
 
+import com.fueledbychai.broker.order.TradeDirection;
+import com.fueledbychai.data.Side;
 import com.fueledbychai.data.Ticker;
 
 /**
  * Defines a Position held at the broker.
  * 
- *  
+ * 
  */
 public class Position implements Serializable {
 
     public static final long serialVersionUID = 1L;
 
+    public enum Status {
+        OPEN, CLOSED
+    }
+
     protected Ticker ticker;
     protected BigDecimal size;
     protected BigDecimal averageCost;
     protected BigDecimal liquidationPrice;
+    protected Side side;
+    protected Status status;
 
     /**
      * The ticker and the position size. Negative position sizes indicate a short
@@ -47,16 +55,20 @@ public class Position implements Serializable {
      * @param size        The size of the position
      * @param averageCost the average price the position was acquired at.
      */
-    public Position(Ticker ticker, BigDecimal size, BigDecimal averageCost) {
+    public Position(Ticker ticker, Side side, BigDecimal size, BigDecimal averageCost, Status status) {
         this.ticker = ticker;
+        this.side = side;
         this.size = size;
         this.averageCost = averageCost;
+        this.status = status;
     }
 
     public Position(Ticker ticker) {
         this.ticker = ticker;
         this.size = BigDecimal.ZERO;
         this.averageCost = BigDecimal.ZERO;
+        this.side = Side.LONG;
+        this.status = Status.OPEN;
     }
 
     public Position setSize(BigDecimal size) {
@@ -71,6 +83,16 @@ public class Position implements Serializable {
 
     public Position setLiquidationPrice(BigDecimal liquidationPrice) {
         this.liquidationPrice = liquidationPrice;
+        return this;
+    }
+
+    public Position setStatus(Status status) {
+        this.status = status;
+        return this;
+    }
+
+    public Position setSide(Side side) {
+        this.side = side;
         return this;
     }
 
@@ -105,6 +127,14 @@ public class Position implements Serializable {
         return liquidationPrice;
     }
 
+    public Side getSide() {
+        return side;
+    }
+
+    public Status getStatus() {
+        return status;
+    }
+
     @Override
     public int hashCode() {
         final int prime = 31;
@@ -113,6 +143,8 @@ public class Position implements Serializable {
         result = prime * result + ((size == null) ? 0 : size.hashCode());
         result = prime * result + ((averageCost == null) ? 0 : averageCost.hashCode());
         result = prime * result + ((liquidationPrice == null) ? 0 : liquidationPrice.hashCode());
+        result = prime * result + ((side == null) ? 0 : side.hashCode());
+        result = prime * result + ((status == null) ? 0 : status.hashCode());
         return result;
     }
 
@@ -145,13 +177,17 @@ public class Position implements Serializable {
                 return false;
         } else if (!liquidationPrice.equals(other.liquidationPrice))
             return false;
+        if (side != other.side)
+            return false;
+        if (status != other.status)
+            return false;
         return true;
     }
 
     @Override
     public String toString() {
         return "Position [ticker=" + ticker + ", size=" + size + ", averageCost=" + averageCost + ", liquidationPrice="
-                + liquidationPrice + "]";
+                + liquidationPrice + ", side=" + side + ", status=" + status + "]";
     }
 
 }

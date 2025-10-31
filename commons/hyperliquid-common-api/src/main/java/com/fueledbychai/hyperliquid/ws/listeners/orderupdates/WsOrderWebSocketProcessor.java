@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.data.FueledByChaiException;
+import com.fueledbychai.time.WsLatency;
 import com.fueledbychai.websocket.AbstractWebSocketProcessor;
 import com.fueledbychai.websocket.IWebSocketClosedListener;
 
@@ -22,6 +23,7 @@ public class WsOrderWebSocketProcessor extends AbstractWebSocketProcessor<List<W
 
     @Override
     protected List<WsOrderUpdate> parseMessage(String message) {
+        long recvMs = System.currentTimeMillis();
         logger.info("Received order update message: {}", message);
         try {
             JSONObject jsonObject = new JSONObject(message);
@@ -39,6 +41,13 @@ public class WsOrderWebSocketProcessor extends AbstractWebSocketProcessor<List<W
                     JSONObject data = dataArray.getJSONObject(i);
                     WsOrderUpdate orderUpdate = parseOrderUpdate(data);
                     orderUpdates.add(orderUpdate);
+                    try {
+                        WsLatency.onMessage("HL-OrderUpdate", orderUpdate.getClientOrderId(), recvMs,
+                                orderUpdate.getStatusTimestamp());
+                    } catch (Exception e) {
+                        logger.error("Error processing latency for order update: " + message, e);
+
+                    }
                 }
                 return orderUpdates;
             } else {

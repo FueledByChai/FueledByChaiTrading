@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 
 import org.json.JSONObject;
 
+import com.fueledbychai.time.WsLatency;
 import com.fueledbychai.websocket.AbstractWebSocketProcessor;
 import com.fueledbychai.websocket.IWebSocketClosedListener;
 
@@ -18,6 +19,7 @@ public class OrderStatusWebSocketProcessor extends AbstractWebSocketProcessor<IP
 
     @Override
     protected IParadexOrderStatusUpdate parseMessage(String message) {
+        long recvMs = System.currentTimeMillis();
         logger.info("Paradex OrderStatus WSProcessor: " + message);
         try {
             JSONObject jsonObject = new JSONObject(message);
@@ -39,18 +41,27 @@ public class OrderStatusWebSocketProcessor extends AbstractWebSocketProcessor<IP
                 long timestamp = data.getLong("timestamp");
                 String side = data.getString("side");
                 String tickerString = data.getString("market");
+                String clientOrderId = data.optString("client_id", "");
                 if (averageFillPriceStr.equals("")) {
                     averageFillPriceStr = "0";
                 }
 
+                try {
+                    WsLatency.onMessage("PD-OrderStatus", clientOrderId, recvMs, timestamp);
+                } catch (Exception e) {
+                    logger.error("Error processing latency for order status: " + message, e);
+                }
+
                 ParadoxOrderStatusUpdate orderStatus = new ParadoxOrderStatusUpdate(tickerString, orderId,
-                        new BigDecimal(remainingSizeStr), new BigDecimal(originalSizeStr), status, cancelReason,
-                        new BigDecimal(averageFillPriceStr), orderType, side, timestamp);
+                        clientOrderId, new BigDecimal(remainingSizeStr), new BigDecimal(originalSizeStr), status,
+                        cancelReason, new BigDecimal(averageFillPriceStr), orderType, side, timestamp);
                 return orderStatus;
             } else {
                 return null;
             }
-        } catch (Exception e) {
+        } catch (
+
+        Exception e) {
             logger.error("Error parsing message: " + message, e);
             return null;
         }

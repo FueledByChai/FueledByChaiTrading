@@ -24,6 +24,9 @@ import com.fueledbychai.data.FueledByChaiException;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.ResponseException;
+import com.fueledbychai.data.Side;
+import com.fueledbychai.data.Ticker;
+import com.fueledbychai.paradex.common.ParadexTickerRegistry;
 import com.fueledbychai.paradex.common.api.historical.OHLCBar;
 import com.fueledbychai.paradex.common.api.order.Flag;
 import com.fueledbychai.paradex.common.api.order.OrderType;
@@ -322,11 +325,14 @@ public class ParadexRestApi implements IParadexRestApi {
             Request request = requestBuilder.build();
             logger.info("Request: " + request);
 
-            Response response = client.newCall(request).execute();
-            if (!response.isSuccessful()) {
-                logger.error("Error response: " + response.body().string());
-                throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
-                        response.code());
+            Response response;
+            try (var s = Span.start("PD_CANCEL_ORDER_BY_ID_REST_CALL", orderId)) {
+                response = client.newCall(request).execute();
+                if (!response.isSuccessful()) {
+                    logger.error("Error response: " + response.body().string());
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
+                }
             }
 
             String responseBody = response.body().string();
@@ -352,11 +358,14 @@ public class ParadexRestApi implements IParadexRestApi {
             Request request = requestBuilder.build();
             logger.info("Request: " + request);
 
-            Response response = client.newCall(request).execute();
-            if (!response.isSuccessful()) {
-                logger.error("Error response: " + response.body().string());
-                throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
-                        response.code());
+            Response response;
+            try (var s = Span.start("PD_CANCEL_ORDER_BY_CLIENT_ID_REST_CALL", clientOrderId)) {
+                response = client.newCall(request).execute();
+                if (!response.isSuccessful()) {
+                    logger.error("Error response: " + response.body().string());
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
+                }
             }
 
             String responseBody = response.body().string();
@@ -473,7 +482,7 @@ public class ParadexRestApi implements IParadexRestApi {
         String chainIdHex = "0x" + chainID.toString(16).toUpperCase();
         String orderMessage = createOrderMessage(timestamp, chainIdHex, order);
         String signatureString = "";
-        try (var s = Span.start("SIGN_HTTP_REQUEST", order.getClientId())) {
+        try (var s = Span.start("PD_SIGN_HTTP_REQUEST", order.getClientId())) {
             signatureString = getOrderMessageSignature(orderMessage);
         }
 
@@ -511,7 +520,7 @@ public class ParadexRestApi implements IParadexRestApi {
         logger.info("Request: " + request);
         logger.info("Request body: " + orderJson.toString());
 
-        try (var s = Span.start("SEND_HTTP_REQUEST", order.getClientId())) {
+        try (var s = Span.start("PD_SEND_PLACE_ORDER_REST_REQUEST", order.getClientId())) {
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
                     logger.error("Error response: " + response.body().string());
@@ -1029,7 +1038,7 @@ public class ParadexRestApi implements IParadexRestApi {
         for (int i = 0; i < resultsArray.size(); i++) {
             JsonObject positionObject = resultsArray.get(i).getAsJsonObject();
             String tickerString = positionObject.get("market").getAsString();
-            double inventory = positionObject.get("size").getAsDouble();
+            String inventory = positionObject.get("size").getAsString();
             double liquidationPrice = 0;
             double cost_usd = 0;
             try {
@@ -1044,10 +1053,16 @@ public class ParadexRestApi implements IParadexRestApi {
                 logger.info("Can't parse average_entry_price_usd: " + e.getMessage());
             }
 
-            Position position = new Position(ParadexTickerBuilder.getTicker(tickerString));
+            String side = positionObject.get("side").getAsString();
+            String status = positionObject.get("status").getAsString();
+
+            Ticker ticker = ParadexTickerRegistry.getInstance().lookupByBrokerSymbol(tickerString);
+            Position position = new Position(ticker);
             position.setSize(new BigDecimal(inventory));
             position.setLiquidationPrice(new BigDecimal(liquidationPrice));
             position.setAverageCost(new BigDecimal(cost_usd));
+            position.setSide(Side.valueOf(side.toUpperCase()));
+            position.setStatus(Position.Status.valueOf(status.toUpperCase()));
             positionInfoList.add(position);
         }
 

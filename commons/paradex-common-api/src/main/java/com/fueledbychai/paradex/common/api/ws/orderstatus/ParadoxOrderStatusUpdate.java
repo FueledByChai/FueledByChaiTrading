@@ -9,6 +9,7 @@ public class ParadoxOrderStatusUpdate implements IParadexOrderStatusUpdate {
 
     protected String tickerString;
     protected String orderId;
+    protected String clientOrderId;
     protected BigDecimal originalSize;
     protected BigDecimal remainingSize;
     protected ParadexOrderStatus status;
@@ -19,11 +20,12 @@ public class ParadoxOrderStatusUpdate implements IParadexOrderStatusUpdate {
     protected Side side;
     protected long timestamp;
 
-    public ParadoxOrderStatusUpdate(String tickerString, String orderId, BigDecimal remainingSize,
+    public ParadoxOrderStatusUpdate(String tickerString, String orderId, String clientOrderId, BigDecimal remainingSize,
             BigDecimal originalSize, String status, String cancelReasonAsString, BigDecimal averageFillPrice,
             String orderType, String side, long timestamp) {
         this.tickerString = tickerString;
         this.orderId = orderId;
+        this.clientOrderId = clientOrderId;
         this.remainingSize = remainingSize;
         this.status = ParadexOrderStatus.valueOf(status);
         this.originalSize = originalSize;
@@ -130,11 +132,21 @@ public class ParadoxOrderStatusUpdate implements IParadexOrderStatusUpdate {
     }
 
     @Override
+    public String getClientOrderId() {
+        return clientOrderId;
+    }
+
+    @Override
+    public void setClientOrderId(String clientOrderId) {
+        this.clientOrderId = clientOrderId;
+    }
+
+    @Override
     public String toString() {
         return "ParadoxOrderStatus [tickerString=" + tickerString + ", orderId=" + orderId + ", originalSize="
                 + originalSize + ", remainingSize=" + remainingSize + ", status=" + status + ", cancelReasonString="
                 + cancelReasonString + ", cancelReason=" + cancelReason + ", averageFillPrice=" + averageFillPrice
-                + ", orderType=" + orderType + ", side=" + side + "]";
+                + ", orderType=" + orderType + ", side=" + side + ", clientOrderId=" + clientOrderId + "]";
     }
 
 }

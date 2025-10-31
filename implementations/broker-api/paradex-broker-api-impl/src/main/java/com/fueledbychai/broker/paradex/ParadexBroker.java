@@ -49,6 +49,7 @@ import com.fueledbychai.paradex.common.api.ws.fills.ParadexFill;
 import com.fueledbychai.paradex.common.api.ws.fills.ParadexFillsWebSocketProcessor;
 import com.fueledbychai.paradex.common.api.ws.orderstatus.IParadexOrderStatusUpdate;
 import com.fueledbychai.paradex.common.api.ws.orderstatus.OrderStatusWebSocketProcessor;
+import com.fueledbychai.time.Span;
 import com.fueledbychai.util.FillDeduper;
 
 /**
@@ -122,7 +123,10 @@ public class ParadexBroker extends AbstractBasicBroker {
     public BrokerRequestResult cancelOrder(String id) {
         checkConnected();
         logger.info("Canceling order with ID: {}", id);
-        RestResponse cancelOrderResponse = restApi.cancelOrder(jwtToken, id);
+        RestResponse cancelOrderResponse;
+        try (var s = Span.start("PD_CANCEL_ORDER_BY_ID_API_CALL", id)) {
+            cancelOrderResponse = restApi.cancelOrder(jwtToken, id);
+        }
         logger.info("Response code: {}", cancelOrderResponse.getHttpCode());
         if (cancelOrderResponse.isSuccessful()) {
             logger.info("Cancel order request for {} successful.", id);
@@ -150,7 +154,10 @@ public class ParadexBroker extends AbstractBasicBroker {
     public BrokerRequestResult cancelOrderByClientOrderId(String clientOrderId) {
         checkConnected();
         logger.info("Canceling order with Client Order ID: {}", clientOrderId);
-        RestResponse cancelOrderResponse = restApi.cancelOrderByClientOrderId(jwtToken, clientOrderId);
+        RestResponse cancelOrderResponse;
+        try (var s = Span.start("PD_CANCEL_ORDER_BY_CLIENT_ID_API_CALL", clientOrderId)) {
+            cancelOrderResponse = restApi.cancelOrderByClientOrderId(jwtToken, clientOrderId);
+        }
         logger.info("Response code: {}", cancelOrderResponse.getHttpCode());
 
         if (!cancelOrderResponse.isSuccessful()) {
@@ -179,9 +186,13 @@ public class ParadexBroker extends AbstractBasicBroker {
     public BrokerRequestResult cancelOrder(OrderTicket order) {
         checkConnected();
         if (order.getClientOrderId() != null && !order.getClientOrderId().isEmpty()) {
-            return cancelOrderByClientOrderId(order.getClientOrderId());
+            try (var s = Span.start("PD_CANCEL_ORDER_BY_CLIENT_ID", order.getClientOrderId())) {
+                return cancelOrderByClientOrderId(order.getClientOrderId());
+            }
         } else {
-            return cancelOrder(order.getOrderId());
+            try (var s = Span.start("PD_CANCEL_ORDER_BY_ID", order.getOrderId())) {
+                return cancelOrder(order.getOrderId());
+            }
         }
     }
 
@@ -190,7 +201,11 @@ public class ParadexBroker extends AbstractBasicBroker {
         checkConnected();
         order.setOrderEntryTime(getCurrentTime());
         ParadexOrder paradexOrder = translator.translateOrder(order);
-        String orderId = restApi.placeOrder(jwtToken, paradexOrder);
+
+        String orderId;
+        try (var s = Span.start("PD_PLACE_ORDER_WITH_API", order.getClientOrderId())) {
+            orderId = restApi.placeOrder(jwtToken, paradexOrder);
+        }
         logger.info("{} Order for {} placed with ID: {}", order.getDirection(), order.getTicker().getSymbol(), orderId);
         order.setOrderId(orderId);
         orderRegistry.addOpenOrder(order);
@@ -200,7 +215,9 @@ public class ParadexBroker extends AbstractBasicBroker {
     @Override
     public String getNextOrderId() {
         // generate a unique client order ID
-        return UUID.randomUUID().toString();
+        try (var s = Span.start("PD_GENERATE_CLIENT_ORDER_ID", "N/A")) {
+            return UUID.randomUUID().toString();
+        }
     }
 
     @Override
@@ -292,8 +309,7 @@ public class ParadexBroker extends AbstractBasicBroker {
 
     @Override
     public List<Position> getAllPositions() {
-        throw new UnsupportedOperationException("Not supported yet."); // To change body of generated methods, choose
-                                                                       // Tools | Templates.
+        return restApi.getPositionInfo(jwtToken);
     }
 
     protected void checkConnected() {

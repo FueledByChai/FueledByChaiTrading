@@ -68,6 +68,7 @@ import com.fueledbychai.marketdata.Level1QuoteListener;
 import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.QuoteType;
 import com.fueledbychai.marketdata.hyperliquid.HyperliquidQuoteEngine;
+import com.fueledbychai.time.Span;
 import com.fueledbychai.util.FillDeduper;
 
 /**
@@ -191,9 +192,11 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
         HyperliquidOrderTicket hyperliquidOrderTicket = new HyperliquidOrderTicket(bbo, order);
         pendingOrderMapByCloid.put(order.getClientOrderId(), order);
         logger.info("Created order ticket: ");
-        SubmitPostResponse submittedOrders = websocketApi
-                .submitOrders(translator.translateOrderTickets(hyperliquidOrderTicket));
-        updateOrderIds(order, submittedOrders);
+        try (var s = Span.start("HL_BROKER_PLACE_ORDER", order.getClientOrderId())) {
+            SubmitPostResponse submittedOrders = websocketApi
+                    .submitOrders(translator.translateOrderTickets(hyperliquidOrderTicket));
+            updateOrderIds(order, submittedOrders);
+        }
 
         return new BrokerRequestResult();
 

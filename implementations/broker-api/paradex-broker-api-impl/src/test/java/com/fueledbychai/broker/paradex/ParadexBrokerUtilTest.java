@@ -62,6 +62,7 @@ public class ParadexBrokerUtilTest {
         // Arrange
         String tickerString = "BTC-USD";
         String orderId = "order123";
+        String clientOrderId = "clientOrder123";
         BigDecimal originalSize = new BigDecimal("10.0");
         BigDecimal remainingSize = new BigDecimal("10.0"); // No fill yet
         BigDecimal averageFillPrice = BigDecimal.ZERO;
@@ -69,8 +70,8 @@ public class ParadexBrokerUtilTest {
 
         when(mockTickerRegistry.lookupByBrokerSymbol(tickerString)).thenReturn(mockTicker);
 
-        ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, remainingSize,
-                originalSize, "NEW", "NONE", averageFillPrice, "LIMIT", "BUY", timestamp);
+        ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId,
+                remainingSize, originalSize, "NEW", "NONE", averageFillPrice, "LIMIT", "BUY", timestamp);
 
         // Act
         OrderStatus result = translator.translateOrderStatus(orderUpdate);
@@ -92,6 +93,7 @@ public class ParadexBrokerUtilTest {
         // Arrange
         String tickerString = "ETH-USD";
         String orderId = "order456";
+        String clientOrderId = "clientOrder456";
         BigDecimal originalSize = new BigDecimal("5.0");
         BigDecimal remainingSize = new BigDecimal("2.0"); // Partially filled
         BigDecimal averageFillPrice = new BigDecimal("2000.50");
@@ -99,8 +101,8 @@ public class ParadexBrokerUtilTest {
 
         when(mockTickerRegistry.lookupByBrokerSymbol(tickerString)).thenReturn(mockTicker);
 
-        ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, remainingSize,
-                originalSize, "OPEN", "NONE", averageFillPrice, "MARKET", "SELL", timestamp);
+        ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId,
+                remainingSize, originalSize, "OPEN", "NONE", averageFillPrice, "MARKET", "SELL", timestamp);
 
         // Act
         OrderStatus result = translator.translateOrderStatus(orderUpdate);
@@ -116,6 +118,7 @@ public class ParadexBrokerUtilTest {
         // Arrange
         String tickerString = "SOL-USD";
         String orderId = "order789";
+        String clientOrderId = "clientOrder789";
         BigDecimal originalSize = new BigDecimal("100.0");
         BigDecimal remainingSize = BigDecimal.ZERO; // Fully filled
         BigDecimal averageFillPrice = new BigDecimal("45.25");
@@ -123,8 +126,8 @@ public class ParadexBrokerUtilTest {
 
         when(mockTickerRegistry.lookupByBrokerSymbol(tickerString)).thenReturn(mockTicker);
 
-        ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, remainingSize,
-                originalSize, "CLOSED", "NONE", averageFillPrice, "LIMIT", "BUY", timestamp);
+        ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId,
+                remainingSize, originalSize, "CLOSED", "NONE", averageFillPrice, "LIMIT", "BUY", timestamp);
 
         // Act
         OrderStatus result = translator.translateOrderStatus(orderUpdate);
@@ -140,6 +143,7 @@ public class ParadexBrokerUtilTest {
         // Arrange
         String tickerString = "AVAX-USD";
         String orderId = "order999";
+        String clientOrderId = "clientOrder999";
         BigDecimal originalSize = new BigDecimal("50.0");
         BigDecimal remainingSize = new BigDecimal("30.0"); // Partially filled before cancel
         BigDecimal averageFillPrice = new BigDecimal("12.50");
@@ -147,8 +151,8 @@ public class ParadexBrokerUtilTest {
 
         when(mockTickerRegistry.lookupByBrokerSymbol(tickerString)).thenReturn(mockTicker);
 
-        ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, remainingSize,
-                originalSize, "CLOSED", "USER_CANCELED", averageFillPrice, "STOP", "SELL", timestamp);
+        ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId,
+                remainingSize, originalSize, "CLOSED", "USER_CANCELED", averageFillPrice, "STOP", "SELL", timestamp);
 
         // Act
         OrderStatus result = translator.translateOrderStatus(orderUpdate);
@@ -163,14 +167,15 @@ public class ParadexBrokerUtilTest {
         // Arrange
         String tickerString = "DOT-USD";
         String orderId = "order000";
+        String clientOrderId = "clientOrder000";
         BigDecimal originalSize = new BigDecimal("25.0");
         BigDecimal remainingSize = new BigDecimal("25.0");
         BigDecimal averageFillPrice = BigDecimal.ZERO;
 
         when(mockTickerRegistry.lookupByBrokerSymbol(tickerString)).thenReturn(mockTicker);
 
-        ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, remainingSize,
-                originalSize, "NEW", "NONE", averageFillPrice, "LIMIT", "BUY", 0L // Zero timestamp
+        ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId,
+                remainingSize, originalSize, "NEW", "NONE", averageFillPrice, "LIMIT", "BUY", 0L // Zero timestamp
         );
 
         ZonedDateTime beforeCall = ZonedDateTime.now();

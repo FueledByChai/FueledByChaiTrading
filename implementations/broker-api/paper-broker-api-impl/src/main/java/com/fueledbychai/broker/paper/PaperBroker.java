@@ -35,17 +35,18 @@ import com.fueledbychai.broker.BrokerAccountInfoListener;
 import com.fueledbychai.broker.BrokerErrorListener;
 import com.fueledbychai.broker.BrokerRequestResult;
 import com.fueledbychai.broker.Position;
+import com.fueledbychai.broker.Position.Status;
 import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.OrderEvent;
 import com.fueledbychai.broker.order.OrderEventListener;
 import com.fueledbychai.broker.order.OrderStatus;
 import com.fueledbychai.broker.order.OrderStatus.CancelReason;
-import com.fueledbychai.broker.order.OrderStatus.Status;
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.broker.order.OrderTicket.Modifier;
 import com.fueledbychai.broker.order.OrderTicket.Type;
 import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.data.ComboTicker;
+import com.fueledbychai.data.Side;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.Level1QuoteListener;
@@ -338,10 +339,15 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         delay(); // Simulate network delay
         List<Position> positions = new ArrayList<>(); // List to hold position info
         if (!currentPosition.equals(BigDecimal.ZERO)) { // Only add position if there is an inventory
-            Position position = new Position(ticker, currentPosition, BigDecimal.valueOf(averageEntryPrice));
+            Side side = currentPosition.compareTo(BigDecimal.ZERO) > 0 ? Side.LONG : Side.SHORT;
+            Position.Status status = Position.Status.OPEN;
+            Position position = new Position(ticker, side, currentPosition, BigDecimal.valueOf(averageEntryPrice),
+                    status);
             positions.add(position);
         }
+
         return positions; // Return the list of positions
+
     }
 
     @Override
@@ -576,7 +582,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         BigDecimal averageFillPrice = BigDecimal.valueOf(price); // Use the fill price
         order.setFilledPrice(averageFillPrice);
         order.setFilledSize(originalSize);
-        order.setCurrentStatus(Status.FILLED);
+        order.setCurrentStatus(OrderStatus.Status.FILLED);
         order.setOrderFilledTime(getCurrentTime());
         // Increment the total number of orders placed
 
@@ -588,8 +594,8 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
             logger.error(e.getLocalizedMessage(), e);
         }
 
-        OrderStatus orderStatus = new OrderStatus(Status.FILLED, orderId, orderId, originalSize, remainingSize,
-                averageFillPrice, ticker, getCurrentTime());
+        OrderStatus orderStatus = new OrderStatus(OrderStatus.Status.FILLED, orderId, orderId, originalSize,
+                remainingSize, averageFillPrice, ticker, getCurrentTime());
         OrderEvent event = new OrderEvent(order, orderStatus);
 
         executedOrders.add(order);
@@ -620,7 +626,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         OrderTicket order = openOrders.remove(orderId);
         BigDecimal remainingSize = BigDecimal.ZERO;
 
-        Status status = OrderStatus.Status.CANCELED;
+        OrderStatus.Status status = OrderStatus.Status.CANCELED;
         String cancelReasonAsString = reason.name(); // Use the name of the cancel reason enum
         BigDecimal averageFillPrice = BigDecimal.ZERO; // No fill price since it's cancelled
 
