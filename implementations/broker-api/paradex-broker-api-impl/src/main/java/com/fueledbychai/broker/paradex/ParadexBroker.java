@@ -213,6 +213,15 @@ public class ParadexBroker extends AbstractBasicBroker {
     }
 
     @Override
+    public BrokerRequestResult modifyOrder(OrderTicket order) {
+        try (var s = Span.start("PD_MODIFY_ORDER_WITH_API", order.getClientOrderId())) {
+            order.setOrderEntryTime(getCurrentTime());
+            restApi.modifyOrder(jwtToken, translator.translateOrder(order));
+            return new BrokerRequestResult();
+        }
+    }
+
+    @Override
     public String getNextOrderId() {
         // generate a unique client order ID
         try (var s = Span.start("PD_GENERATE_CLIENT_ORDER_ID", "N/A")) {

@@ -174,6 +174,9 @@ public class ParadexTranslator implements IParadexTranslator {
     @Override
     public ParadexOrder translateOrder(OrderTicket order) {
         ParadexOrder paradoxOrder = new ParadexOrder();
+        if (order.getOrderId() != null && !order.getOrderId().isEmpty()) {
+            paradoxOrder.setOrderId(order.getOrderId());
+        }
         paradoxOrder.setClientId(order.getClientOrderId());
         paradoxOrder.setTicker(order.getTicker().getSymbol());
 

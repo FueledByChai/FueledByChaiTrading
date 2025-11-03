@@ -269,4 +269,10 @@ public abstract class AbstractBasicBroker implements IBroker {
         throw new UnsupportedOperationException("Not supported"); // To change body of generated methods, choose Tools |
                                                                   // Templates.
     }
+
+    @Override
+    public BrokerRequestResult modifyOrder(OrderTicket order) {
+        throw new UnsupportedOperationException("Not supported"); // To change body of generated methods, choose Tools |
+                                                                  // Templates.
+    }
 }

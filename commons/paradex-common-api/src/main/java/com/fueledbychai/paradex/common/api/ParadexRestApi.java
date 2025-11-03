@@ -64,6 +64,9 @@ public class ParadexRestApi implements IParadexRestApi {
 
     protected String starkPublicKeyHex = null;
 
+    // Dedicated message signer for optimized cryptographic operations
+    private ParadexMessageSigner messageSigner = null;
+
     public static IParadexRestApi getPublicOnlyApi(String baseUrl, boolean isTestnet) {
         if (publicOnlyApi == null) {
             publicOnlyApi = new ParadexRestApi(baseUrl, isTestnet);
@@ -112,6 +115,12 @@ public class ParadexRestApi implements IParadexRestApi {
         publicApiOnly = accountAddressString == null || privateKeyString == null;
         if (isTestnet) {
             chainID = testnetChainId;
+        }
+
+        // Initialize message signer if we have credentials
+        if (!publicApiOnly) {
+            messageSigner = new ParadexMessageSigner(accountAddressString, privateKeyString, chainID);
+            warmup();
         }
     }
 
@@ -479,11 +488,12 @@ public class ParadexRestApi implements IParadexRestApi {
         String path = "/orders";
         String url = baseUrl + path;
         long timestamp = System.currentTimeMillis();
-        String chainIdHex = "0x" + chainID.toString(16).toUpperCase();
-        String orderMessage = createOrderMessage(timestamp, chainIdHex, order);
         String signatureString = "";
-        try (var s = Span.start("PD_SIGN_HTTP_REQUEST", order.getClientId())) {
-            signatureString = getOrderMessageSignature(orderMessage);
+        try (var s = Span.start("PD_SIGN_PLACE_ORDER_HTTP_REQUEST", order.getClientId())) {
+            // Use optimized direct signing method to avoid JSON parsing overhead
+            signatureString = getOrderMessageSignatureDirect(timestamp, order.getTicker(),
+                    order.getSide().getChainSide(), order.getOrderType().toString(), order.getChainSize().toString(),
+                    order.getChainLimitPrice().toString());
         }
 
         JsonObject orderJson = new JsonObject();
@@ -521,6 +531,67 @@ public class ParadexRestApi implements IParadexRestApi {
         logger.info("Request body: " + orderJson.toString());
 
         try (var s = Span.start("PD_SEND_PLACE_ORDER_REST_REQUEST", order.getClientId())) {
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    logger.error("Error response: " + response.body().string());
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
+                }
+
+                String responseBody = response.body().string();
+                logger.info("Response output: " + responseBody);
+                JsonObject jsonResponse = JsonParser.parseString(responseBody).getAsJsonObject();
+                if (jsonResponse.has("id")) {
+                    return jsonResponse.get("id").getAsString();
+                } else {
+                    return "";
+                }
+
+            } catch (IOException e) {
+                logger.error(e.getMessage(), e);
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    @Override
+    public String modifyOrder(String jwtToken, ParadexOrder order) {
+        checkPrivateApi();
+        String path = "/orders/" + order.getOrderId();
+        String url = baseUrl + path;
+
+        long timestamp = System.currentTimeMillis();
+        String signatureString = "";
+        try (var s = Span.start("PD_SIGN_MODIFY_ORDER_HTTP_REQUEST", order.getClientId())) {
+            // Use optimized direct signing method for modify orders
+            signatureString = getModifyOrderMessageSignatureDirect(timestamp, order.getTicker(),
+                    order.getSide().getChainSide(), order.getOrderType().toString(), order.getChainSize().toString(),
+                    order.getChainLimitPrice().toString(), order.getOrderId());
+        }
+
+        JsonObject orderJson = new JsonObject();
+        orderJson.addProperty("id", order.getOrderId());
+        orderJson.addProperty("market", order.getTicker());
+        if (order.getOrderType().equals(OrderType.LIMIT)) {
+            orderJson.addProperty("price", order.getLimitPrice().toString());
+        }
+        orderJson.addProperty("side", order.getSide().toString());
+        orderJson.addProperty("signature", signatureString);
+        orderJson.addProperty("signature_timestamp", timestamp);
+        orderJson.addProperty("size", order.getSize().toString());
+        orderJson.addProperty("type", order.getOrderType().toString());
+
+        RequestBody requestBody = RequestBody.create(orderJson.toString(),
+                MediaType.get("application/json; charset=utf-8"));
+
+        Request.Builder requestBuilder = new Request.Builder().url(url).put(requestBody).addHeader("Authorization",
+                "Bearer " + jwtToken);
+
+        Request request = requestBuilder.build();
+        logger.info("Request: " + request);
+        logger.info("Request body: " + orderJson.toString());
+
+        try (var s = Span.start("PD_SEND_MODIFY_ORDER_REST_REQUEST", order.getClientId())) {
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
                     logger.error("Error response: " + response.body().string());
@@ -721,32 +792,62 @@ public class ParadexRestApi implements IParadexRestApi {
 
     @Override
     public String getOrderMessageSignature(String orderMessage) {
+        if (messageSigner == null) {
+            throw new IllegalStateException("Message signer not initialized - API in public-only mode");
+        }
 
-        // Convert the account address and private key to Felt types
-        Felt accountAddress = Felt.fromHex(accountAddressString);
-        Felt privateKey = Felt.fromHex(privateKeyString);
+        // Use the optimized message signer
+        String signature = messageSigner.signMessage(orderMessage);
 
-        logger.info("Using account: " + accountAddressString.toString());
-        logger.info("Chain ID: " + chainID);
-        // System.out.println("Key value: " + privateKey.getValue());
+        // Update the public key hex if not already set
+        if (starkPublicKeyHex == null) {
+            starkPublicKeyHex = messageSigner.getPublicKeyHex();
+        }
 
-        // Convert the auth message to a typed data object
-        TypedData typedData = TypedData.fromJsonString(orderMessage);
+        return signature;
+    }
 
-        // Create new StarkCurveSigner with the private key
-        StarkCurveSigner scSigner = new StarkCurveSigner(privateKey);
+    /**
+     * Optimized direct signing method that avoids JSON parsing overhead. This
+     * method constructs the signature directly from order parameters.
+     */
+    public String getOrderMessageSignatureDirect(long timestamp, String market, String side, String orderType,
+            String size, String price) {
+        if (messageSigner == null) {
+            throw new IllegalStateException("Message signer not initialized - API in public-only mode");
+        }
 
-        Felt publicKey = scSigner.getPublicKey();
-        starkPublicKeyHex = publicKey.hexString();
+        // Use the optimized direct signing method
+        String signature = messageSigner.signOrderMessageDirect(timestamp, market, side, orderType, size, price);
 
-        // Sign the typed data
-        List<Felt> signature = scSigner.signTypedData(typedData, accountAddress);
+        // Update the public key hex if not already set
+        if (starkPublicKeyHex == null) {
+            starkPublicKeyHex = messageSigner.getPublicKeyHex();
+        }
 
-        // Convert the signature to a string
-        List<BigInteger> signatureBigInt = signature.stream().map(Felt::getValue).collect(Collectors.toList());
-        String signatureStr = convertBigIntListToString(signatureBigInt);
+        return signature;
+    }
 
-        return signatureStr;
+    /**
+     * Optimized direct signing method for modify orders that avoids JSON parsing
+     * overhead.
+     */
+    public String getModifyOrderMessageSignatureDirect(long timestamp, String market, String side, String orderType,
+            String size, String price, String orderId) {
+        if (messageSigner == null) {
+            throw new IllegalStateException("Message signer not initialized - API in public-only mode");
+        }
+
+        // Use the optimized direct signing method for modify orders
+        String signature = messageSigner.signModifyOrderMessageDirect(timestamp, market, side, orderType, size, price,
+                orderId);
+
+        // Update the public key hex if not already set
+        if (starkPublicKeyHex == null) {
+            starkPublicKeyHex = messageSigner.getPublicKeyHex();
+        }
+
+        return signature;
     }
 
     @Override
@@ -754,10 +855,33 @@ public class ParadexRestApi implements IParadexRestApi {
         return publicApiOnly;
     }
 
+    /**
+     * Clears cached cryptographic objects. Call this if account credentials change.
+     */
+    public void clearSigningCache() {
+        if (messageSigner != null) {
+            messageSigner.clearCache();
+        }
+        starkPublicKeyHex = null;
+    }
+
+    /**
+     * Legacy method - kept for backwards compatibility but now calls optimized
+     * version
+     */
     private static String convertBigIntListToString(List<BigInteger> list) {
-        String jsonArray = list.stream().map(bigInt -> "\"" + bigInt.toString() + "\"")
-                .collect(Collectors.joining(","));
-        return "[" + jsonArray + "]";
+        StringBuilder sb = new StringBuilder(256);
+        sb.append('[');
+
+        for (int i = 0; i < list.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append('"').append(list.get(i).toString()).append('"');
+        }
+
+        sb.append(']');
+        return sb.toString();
     }
 
     private static String createAuthMessage(long timestamp, long expiration, String chainIdHex) {
@@ -851,6 +975,51 @@ public class ParadexRestApi implements IParadexRestApi {
 
                                          """, chainIdHex, timestamp, order.getTicker(), order.getSide().getChainSide(),
                 order.getOrderType().toString(), order.getChainSize(), order.getChainLimitPrice());
+    }
+
+    private static String createModifyOrderMessage(long timestamp, String chainIdHex, ParadexOrder order) {
+        return String.format("""
+                            {
+                                "domain": {"name": "Paradex", "chainId": "%s", "version": "1"},
+                                "primaryType": "ModifyOrder",
+                                "types": {
+                                    "StarkNetDomain": [
+                                        {"name": "name", "type": "felt"},
+                                        {"name": "chainId", "type": "felt"},
+                                        {"name": "version", "type": "felt"}
+                                    ],
+                                    "ModifyOrder": [
+                                        {
+                                            "name": "timestamp",
+                                            "type": "felt"
+                                        },
+                                        {"name": "market", "type": "felt"},
+                                        {"name": "side", "type": "felt"},
+                                        {"name": "orderType", "type": "felt"},
+                                        {"name": "size", "type": "felt"},
+                                        {
+                                            "name": "price",
+                                            "type": "felt"
+                                        },
+                                        {
+                                        "name": "id",
+                                        "type": "felt"
+                                        }
+                                    ]
+                                },
+                                "message": {
+                                    "timestamp": %s,
+                                    "market": "%s",
+                                    "side": "%s",
+                                    "orderType": "%s",
+                                    "size": "%s",
+                                    "price": "%s",
+                                    "id": "%s"
+                                }
+                }
+
+                                         """, chainIdHex, timestamp, order.getTicker(), order.getSide().getChainSide(),
+                order.getOrderType().toString(), order.getChainSize(), order.getChainLimitPrice(), order.getOrderId());
     }
 
     protected List<ParadexOrder> parseParadoxOrders(String responseBody) {
@@ -1105,6 +1274,14 @@ public class ParadexRestApi implements IParadexRestApi {
     protected void checkPrivateApi() {
         if (privateKeyString == null || privateKeyString.isEmpty()) {
             throw new FueledByChaiException("Private key not set, public API only mode enabled.");
+        }
+    }
+
+    protected void warmup() {
+
+        for (int i = 0; i < 100; i++) {
+            // Warm up the signing process
+            getOrderMessageSignatureDirect(System.currentTimeMillis() / 1000, "BTC-USD", "BUY", "LIMIT", "1", "30000");
         }
     }
 

@@ -714,4 +714,11 @@ public class InteractiveBrokersBroker extends BaseIBConnectionDelegate implement
                                                                        // Tools | Templates. dO
     }
 
+    @Override
+    public BrokerRequestResult modifyOrder(OrderTicket order) {
+        throw new UnsupportedOperationException("ModifyOrder Not supported"); // To change body of generated methods,
+                                                                              // choose Tools |
+        // Templates.
+    }
+
 }

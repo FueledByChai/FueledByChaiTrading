@@ -27,3 +27,4 @@ implementations/broker-api/paradex-broker-api-impl/src/test/java/com/fueledbycha
 logs/*
 logs/latency.log
 logs/latency.log
+logs/latency.log

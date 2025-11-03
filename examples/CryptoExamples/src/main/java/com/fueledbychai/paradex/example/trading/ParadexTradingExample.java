@@ -44,7 +44,7 @@ public class ParadexTradingExample {
         String orderId = System.currentTimeMillis() + "";
 
         order.setTicker(btcTicker).setSize(BigDecimal.valueOf(0.01)).setDirection(TradeDirection.BUY)
-                .setType(Type.LIMIT).setLimitPrice(BigDecimal.valueOf(120000)).setClientOrderId(orderId);
+                .setType(Type.LIMIT).setLimitPrice(BigDecimal.valueOf(108000)).setClientOrderId(orderId);
 
         broker.placeOrder(order);
         Thread.sleep(3000);
@@ -103,8 +103,8 @@ public class ParadexTradingExample {
         // System.setProperty("paradex.config.file",
         // "/path/to/your/paradex-trading-example.properties");
         ParadexTradingExample example = new ParadexTradingExample();
-        // example.executeTrade();
-        example.cancelMultipleTimes();
+        example.executeTrade();
+        // example.cancelMultipleTimes();
         // example.onBoard();
     }
 }
