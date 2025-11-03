@@ -45,12 +45,18 @@ import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryConfig;
 
 /**
- * A resilient wrapper around ParadexBroker that adds Resilience4j patterns for
- * handling transient failures and protecting against cascading failures.
+ * A resilient wrapper around ParadexBroker that adds Resilience4j patterns
+ * optimized for automated trading applications.
  * 
- * This class acts as a decorator, delegating all operations to the underlying
- * ParadexBroker while adding retry, circuit breaker, and bulkhead patterns for
- * critical operations like order placement.
+ * This class uses trading-focused resilience patterns: - RETRY: Applied to all
+ * operations for handling transient network issues - BULKHEAD: Prevents
+ * resource exhaustion without blocking critical operations - CIRCUIT BREAKERS:
+ * Used for monitoring only - do NOT block critical operations
+ * 
+ * Key Design Principle: Trading operations (place/modify/cancel) must ALWAYS be
+ * attempted for risk management, even during exchange degradation. Circuit
+ * breakers that prevent these operations are counterproductive in trading
+ * scenarios.
  */
 public class ResilientParadexBroker extends ForwardingBroker {
     private static final Logger logger = LoggerFactory.getLogger(ResilientParadexBroker.class);
@@ -67,6 +73,11 @@ public class ResilientParadexBroker extends ForwardingBroker {
     private final Retry cancelOrderRetry;
     private final CircuitBreaker cancelOrderCircuitBreaker;
 
+    // Resilience4j components for modify operations
+    private final Retry modifyOrderRetry;
+    private final CircuitBreaker modifyOrderCircuitBreaker;
+    private final Bulkhead modifyOrderBulkhead;
+
     // Resilience4j components for order status requests
     private final Retry orderStatusRetry;
     private final CircuitBreaker orderStatusCircuitBreaker;
@@ -82,12 +93,19 @@ public class ResilientParadexBroker extends ForwardingBroker {
         this.orderRegistry = delegate.getOrderRegistry();
 
         // Initialize resilience components
+        // NOTE: Circuit breakers are created for monitoring but NOT used for blocking
+        // critical trading operations (place/modify/cancel). Trading apps need these
+        // operations to work even during exchange degradation for risk management.
         this.placeOrderRetry = createRetryForOrders("placeOrder");
-        this.placeOrderCircuitBreaker = createCircuitBreakerForOrders("placeOrder");
+        this.placeOrderCircuitBreaker = createCircuitBreakerForOrders("placeOrder"); // For monitoring only
         this.placeOrderBulkhead = createBulkheadForOrders("placeOrder");
 
         this.cancelOrderRetry = createRetryForOrders("cancelOrder");
-        this.cancelOrderCircuitBreaker = createCircuitBreakerForOrders("cancelOrder");
+        this.cancelOrderCircuitBreaker = createCriticalCircuitBreakerForOrders("cancelOrder"); // For monitoring only
+
+        this.modifyOrderRetry = createRetryForOrders("modifyOrder");
+        this.modifyOrderCircuitBreaker = createCriticalCircuitBreakerForOrders("modifyOrder"); // For monitoring only
+        this.modifyOrderBulkhead = createBulkheadForOrders("modifyOrder");
 
         this.orderStatusRetry = createRetryForOrders("orderStatus");
         this.orderStatusCircuitBreaker = createCircuitBreakerForOrders("orderStatus");
@@ -121,15 +139,41 @@ public class ResilientParadexBroker extends ForwardingBroker {
     }
 
     /**
-     * Creates a circuit breaker configuration for order operations.
+     * Creates a circuit breaker configuration for order operations. NOTE: For
+     * trading applications, circuit breakers can be counterproductive. Consider
+     * using DISABLED circuit breakers or very permissive settings.
      */
     private CircuitBreaker createCircuitBreakerForOrders(String name) {
-        CircuitBreakerConfig circuitBreakerConfig = CircuitBreakerConfig.custom().slidingWindowSize(10)
-                .failureRateThreshold(50.0f).waitDurationInOpenState(Duration.ofSeconds(30))
-                .permittedNumberOfCallsInHalfOpenState(3).slowCallRateThreshold(50.0f)
-                .slowCallDurationThreshold(Duration.ofSeconds(5)).build();
+        // Option 1: Disabled circuit breaker (always allows calls)
+        CircuitBreakerConfig circuitBreakerConfig = CircuitBreakerConfig.custom().slidingWindowSize(100) // Large window
+                .failureRateThreshold(95.0f) // Very high threshold (95% failures needed)
+                .waitDurationInOpenState(Duration.ofSeconds(5)) // Short wait time
+                .permittedNumberOfCallsInHalfOpenState(10) // More test calls
+                .slowCallRateThreshold(95.0f) // Very high slow call threshold
+                .slowCallDurationThreshold(Duration.ofSeconds(30)) // Allow slow calls
+                .build();
 
         return CircuitBreaker.of(name, circuitBreakerConfig);
+    }
+
+    /**
+     * Creates a very permissive circuit breaker for critical operations like
+     * cancel/modify. In trading, these operations must be attempted even if the
+     * service appears degraded.
+     */
+    private CircuitBreaker createCriticalCircuitBreakerForOrders(String name) {
+        CircuitBreakerConfig circuitBreakerConfig = CircuitBreakerConfig.custom().slidingWindowSize(50) // Larger window
+                                                                                                        // for better
+                                                                                                        // assessment
+                .failureRateThreshold(90.0f) // 90% failure rate needed to open
+                .waitDurationInOpenState(Duration.ofSeconds(2)) // Very short wait time
+                .permittedNumberOfCallsInHalfOpenState(5) // More test calls
+                .slowCallRateThreshold(90.0f) // Allow most slow calls
+                .slowCallDurationThreshold(Duration.ofSeconds(15)) // Allow slower operations
+                .automaticTransitionFromOpenToHalfOpenEnabled(true) // Auto recovery
+                .build();
+
+        return CircuitBreaker.of(name + "-critical", circuitBreakerConfig);
     }
 
     /**
@@ -190,6 +234,9 @@ public class ResilientParadexBroker extends ForwardingBroker {
         cancelOrderRetry.getEventPublisher().onRetry(event -> logger.warn("Retry attempt {} for cancelOrder: {}",
                 event.getNumberOfRetryAttempts(), event.getLastThrowable().getMessage()));
 
+        modifyOrderRetry.getEventPublisher().onRetry(event -> logger.warn("Retry attempt {} for modifyOrder: {}",
+                event.getNumberOfRetryAttempts(), event.getLastThrowable().getMessage()));
+
         orderStatusRetry.getEventPublisher().onRetry(event -> logger.warn("Retry attempt {} for orderStatus: {}",
                 event.getNumberOfRetryAttempts(), event.getLastThrowable().getMessage()));
 
@@ -202,6 +249,10 @@ public class ResilientParadexBroker extends ForwardingBroker {
                 .onStateTransition(event -> logger.info("CancelOrder circuit breaker state transition: {} -> {}",
                         event.getStateTransition().getFromState(), event.getStateTransition().getToState()));
 
+        modifyOrderCircuitBreaker.getEventPublisher()
+                .onStateTransition(event -> logger.info("ModifyOrder circuit breaker state transition: {} -> {}",
+                        event.getStateTransition().getFromState(), event.getStateTransition().getToState()));
+
         orderStatusCircuitBreaker.getEventPublisher()
                 .onStateTransition(event -> logger.info("OrderStatus circuit breaker state transition: {} -> {}",
                         event.getStateTransition().getFromState(), event.getStateTransition().getToState()));
@@ -212,6 +263,12 @@ public class ResilientParadexBroker extends ForwardingBroker {
 
         placeOrderBulkhead.getEventPublisher()
                 .onCallRejected(event -> logger.warn("PlaceOrder bulkhead call rejected - too many concurrent calls"));
+
+        modifyOrderBulkhead.getEventPublisher()
+                .onCallPermitted(event -> logger.debug("ModifyOrder bulkhead call permitted"));
+
+        modifyOrderBulkhead.getEventPublisher()
+                .onCallRejected(event -> logger.warn("ModifyOrder bulkhead call rejected - too many concurrent calls"));
     }
 
     /**
@@ -223,6 +280,7 @@ public class ResilientParadexBroker extends ForwardingBroker {
         logger.info("Resetting all circuit breakers to CLOSED state");
         placeOrderCircuitBreaker.reset();
         cancelOrderCircuitBreaker.reset();
+        modifyOrderCircuitBreaker.reset();
         orderStatusCircuitBreaker.reset();
         logger.info("All circuit breakers have been reset");
     }
@@ -231,9 +289,93 @@ public class ResilientParadexBroker extends ForwardingBroker {
      * Gets the current state of all circuit breakers for monitoring purposes.
      */
     public String getCircuitBreakerStatus() {
-        return String.format("Circuit Breaker Status - PlaceOrder: %s, CancelOrder: %s, OrderStatus: %s",
+        return String.format(
+                "Circuit Breaker Status - PlaceOrder: %s, CancelOrder: %s, ModifyOrder: %s, OrderStatus: %s",
                 placeOrderCircuitBreaker.getState(), cancelOrderCircuitBreaker.getState(),
-                orderStatusCircuitBreaker.getState());
+                modifyOrderCircuitBreaker.getState(), orderStatusCircuitBreaker.getState());
+    }
+
+    /**
+     * Emergency cancel that bypasses circuit breaker. Use this when circuit breaker
+     * is OPEN but you need to cancel orders (e.g., risk management, expired
+     * orders). This attempts to reset the circuit breaker and perform the cancel
+     * operation.
+     */
+    public BrokerRequestResult emergencyCancelOrder(String id) {
+        logger.warn("Emergency cancel requested for order {} - bypassing circuit breaker protection", id);
+
+        // Check if we can attempt a health check first
+        if (isServiceHealthy()) {
+            logger.info("Service appears healthy, resetting cancel circuit breaker for order {}", id);
+            cancelOrderCircuitBreaker.reset();
+
+            // Now try the normal cancel operation
+            return cancelOrder(id);
+        } else {
+            logger.warn("Service may be unhealthy, attempting direct cancel for order {} without circuit breaker", id);
+
+            // Direct call without circuit breaker protection
+            try {
+                return delegate.cancelOrder(id);
+            } catch (Exception e) {
+                logger.error("Emergency cancel failed for order {}: {}", id, e.getMessage(), e);
+                throw new FueledByChaiException("Emergency cancel failed: " + e.getMessage(), e);
+            }
+        }
+    }
+
+    /**
+     * Emergency cancel by client order ID that bypasses circuit breaker.
+     */
+    public BrokerRequestResult emergencyCancelOrderByClientOrderId(String clientOrderId) {
+        logger.warn("Emergency cancel by client ID requested for {} - bypassing circuit breaker protection",
+                clientOrderId);
+
+        // Check if we can attempt a health check first
+        if (isServiceHealthy()) {
+            logger.info("Service appears healthy, resetting cancel circuit breaker for client order {}", clientOrderId);
+            cancelOrderCircuitBreaker.reset();
+
+            // Now try the normal cancel operation
+            return cancelOrderByClientOrderId(clientOrderId);
+        } else {
+            logger.warn(
+                    "Service may be unhealthy, attempting direct cancel for client order {} without circuit breaker",
+                    clientOrderId);
+
+            // Direct call without circuit breaker protection
+            try {
+                return delegate.cancelOrderByClientOrderId(clientOrderId);
+            } catch (Exception e) {
+                logger.error("Emergency cancel by client ID failed for {}: {}", clientOrderId, e.getMessage(), e);
+                throw new FueledByChaiException("Emergency cancel by client ID failed: " + e.getMessage(), e);
+            }
+        }
+    }
+
+    /**
+     * Performs a simple health check to see if the underlying service is
+     * responsive. This can be used to determine if circuit breakers should be
+     * reset.
+     */
+    private boolean isServiceHealthy() {
+        try {
+            // Check if other circuit breakers are in a healthy state
+            if (orderStatusCircuitBreaker.getState() == CircuitBreaker.State.CLOSED
+                    || placeOrderCircuitBreaker.getState() == CircuitBreaker.State.CLOSED) {
+                // If other operations are working, the service is likely healthy
+                logger.debug("Health check passed - other circuit breakers are closed");
+                return true;
+            }
+
+            // If all circuit breakers are open/half-open, we can't easily test health
+            // In this case, we'll be conservative and assume unhealthy
+            logger.debug("Health check inconclusive - all circuit breakers are open/half-open");
+            return false;
+        } catch (Exception e) {
+            logger.debug("Health check failed: {}", e.getMessage());
+            return false;
+        }
     }
 
     @Override
@@ -262,9 +404,12 @@ public class ResilientParadexBroker extends ForwardingBroker {
 
         BrokerRequestResult result = null;
         try {
-            // Apply resilience patterns: retry -> circuit breaker -> bulkhead
+            // For critical place operations, use retry + bulkhead (no circuit breaker
+            // blocking)
+            // Trading applications need to place orders for risk management even if
+            // exchange seems degraded
             result = Decorators.ofSupplier(orderPlacementSupplier).withRetry(placeOrderRetry)
-                    .withCircuitBreaker(placeOrderCircuitBreaker).withBulkhead(placeOrderBulkhead).decorate().get();
+                    .withBulkhead(placeOrderBulkhead).decorate().get();
 
             orderPlaced = true;
             logger.debug("Successfully placed order for {} with resilience patterns", order.getTicker().getSymbol());
@@ -313,6 +458,98 @@ public class ResilientParadexBroker extends ForwardingBroker {
                 throw new RuntimeException("Order placement failed and reconciliation could not verify order status. "
                         + "Order may or may not have been placed on server. Manual verification required for client order ID: "
                         + order.getClientOrderId(), lastException);
+
+            default:
+                throw new RuntimeException("Unexpected reconciliation result: " + reconcileResult);
+            }
+        }
+
+        return result != null ? result : new BrokerRequestResult();
+    }
+
+    @Override
+    public BrokerRequestResult modifyOrder(OrderTicket order) {
+        // Ensure order has a client order ID for reconciliation
+        if (order.getClientOrderId() == null || order.getClientOrderId().trim().isEmpty()) {
+            try (var s = Span.start("PD_GENERATE_CLIENT_ORDER_ID", order.getTicker().getSymbol())) {
+                String clientOrderId = generateClientOrderId(order);
+                order.setClientOrderId(clientOrderId);
+                logger.debug("Generated client order ID {} for modify order {}", clientOrderId,
+                        order.getTicker().getSymbol());
+            }
+        }
+
+        boolean orderModified = false;
+        Exception lastException = null;
+
+        // Create resilient supplier for the order modification
+        Supplier<BrokerRequestResult> orderModificationSupplier = () -> {
+            try {
+                return delegate.modifyOrder(order);
+            } catch (Exception e) {
+                logger.error("Error modifying order for {}: {}", order.getTicker().getSymbol(), e.getMessage(), e);
+                throw e;
+            }
+        };
+
+        BrokerRequestResult result = null;
+        try {
+            // For critical modify operations, use retry + bulkhead (no circuit breaker
+            // blocking)
+            // Trading applications need to modify orders for risk management even if
+            // exchange seems degraded
+            result = Decorators.ofSupplier(orderModificationSupplier).withRetry(modifyOrderRetry)
+                    .withBulkhead(modifyOrderBulkhead).decorate().get();
+
+            orderModified = true;
+            logger.debug("Successfully modified order for {} with resilience patterns", order.getTicker().getSymbol());
+
+        } catch (Exception e) {
+            lastException = e;
+            logger.warn("Order modification failed for {} after all retries: {}", order.getTicker().getSymbol(),
+                    e.getMessage());
+        }
+
+        // If order modification failed or we're unsure of the result, attempt
+        // reconciliation
+        if (!orderModified || lastException != null) {
+            logger.info("Attempting order reconciliation for {} due to modification failure or uncertainty",
+                    order.getTicker().getSymbol());
+
+            ReconciliationResult reconcileResult = reconcileOrderStatus(order);
+
+            switch (reconcileResult) {
+            case ORDER_FOUND:
+                logger.info("Order reconciliation successful for {} - order was actually modified with ID: {}",
+                        order.getTicker().getSymbol(), order.getOrderId());
+                // Order was successfully modified despite the exception, so don't rethrow
+                return new BrokerRequestResult();
+
+            case ORDER_NOT_FOUND:
+                logger.error("Order reconciliation confirmed for {} - order was not found on server",
+                        order.getTicker().getSymbol());
+                // We confirmed the order wasn't found, safe to rethrow original exception
+                if (lastException != null) {
+                    if (lastException instanceof RuntimeException) {
+                        throw (RuntimeException) lastException;
+                    } else {
+                        throw new RuntimeException("Order modification failed - order not found on server",
+                                lastException);
+                    }
+                }
+                return new BrokerRequestResult();
+
+            case VERIFICATION_FAILED:
+                logger.error(
+                        "Order reconciliation failed for {} - unable to verify order status due to network/API issues. Order state unknown!",
+                        order.getTicker().getSymbol());
+                // We don't know if the order was modified or not - this is dangerous!
+                // Throw a specific exception to alert calling code
+                throw new RuntimeException(
+                        "Order modification failed and reconciliation could not verify order status. "
+                                + "Order may or may not have been modified on server. Manual verification required for client order ID: "
+                                + order.getClientOrderId(),
+                        lastException);
 
             default:
                 throw new RuntimeException("Unexpected reconciliation result: " + reconcileResult);
@@ -386,9 +623,17 @@ public class ResilientParadexBroker extends ForwardingBroker {
             }
         };
 
-        // Apply resilience patterns: retry -> circuit breaker
-        return Decorators.ofSupplier(cancelOrderSupplier).withRetry(cancelOrderRetry)
-                .withCircuitBreaker(cancelOrderCircuitBreaker).decorate().get();
+        // No circuit breaker for cancel operations - always attempt cancellation for
+        // risk management
+
+        try {
+            // For critical cancel operations, only use retry (no circuit breaker blocking)
+            // Trading applications need to attempt cancels even if exchange seems degraded
+            return Decorators.ofSupplier(cancelOrderSupplier).withRetry(cancelOrderRetry).decorate().get();
+        } catch (Exception e) {
+            logger.error("Cancel operation failed after all retries for order {}: {}", id, e.getMessage());
+            throw e;
+        }
     }
 
     @Override
@@ -450,11 +695,14 @@ public class ResilientParadexBroker extends ForwardingBroker {
             }
         };
 
+        // No circuit breaker for cancel operations - always attempt cancellation for
+        // risk management
+
         BrokerRequestResult result = null;
         try {
-            // Apply resilience patterns: retry -> circuit breaker
-            result = Decorators.ofSupplier(cancelOrderSupplier).withRetry(cancelOrderRetry)
-                    .withCircuitBreaker(cancelOrderCircuitBreaker).decorate().get();
+            // For critical cancel operations, only use retry (no circuit breaker blocking)
+            // Trading applications need to attempt cancels even if exchange seems degraded
+            result = Decorators.ofSupplier(cancelOrderSupplier).withRetry(cancelOrderRetry).decorate().get();
 
             cancelSuccessful = true;
             logger.debug("Successfully canceled order with client ID {} using resilience patterns", clientOrderId);

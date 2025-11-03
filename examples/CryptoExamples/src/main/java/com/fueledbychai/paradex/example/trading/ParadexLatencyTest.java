@@ -88,7 +88,43 @@ public class ParadexLatencyTest {
 
     }
 
-    public void executeTrade() throws Exception {
+    public void executeMultipleTrades() throws Exception {
+        int trades = 3;
+        Ticker btcTicker = ParadexTickerRegistry.getInstance().lookupByBrokerSymbol("BTC-USD-PERP");
+
+        QuoteEngine engine = QuoteEngine.getInstance(ParadexQuoteEngine.class);
+        engine.startEngine();
+
+        engine.subscribeLevel1(btcTicker, (level1Quote) -> {
+            // System.out.println("Level 1 Quote Updated : " + level1Quote);
+        });
+
+        ParadexBroker broker = new ParadexBroker();
+        broker.connect();
+
+        broker.addOrderEventListener((event) -> {
+            log.info("Order Event Received : {}", event);
+        });
+
+        broker.addFillEventListener(fill -> {
+            log.info("Order Fill Received : {}", fill);
+        });
+
+        Thread.sleep(2000);
+
+        for (int i = 0; i < trades; i++) {
+            OrderTicket order = new OrderTicket();
+
+            order.setTicker(btcTicker).setSize(BigDecimal.valueOf(0.01)).setDirection(TradeDirection.BUY)
+                    .setType(Type.LIMIT).setLimitPrice(BigDecimal.valueOf(110000)).addModifier(Modifier.POST_ONLY)
+                    .setClientOrderId("123");
+            broker.placeOrder(order);
+            Thread.sleep(1000);
+        }
+
+    }
+
+    public void testModifyOrder() throws Exception {
         Ticker btcTicker = ParadexTickerRegistry.getInstance().lookupByBrokerSymbol("BTC-USD-PERP");
 
         QuoteEngine engine = QuoteEngine.getInstance(ParadexQuoteEngine.class);
@@ -114,20 +150,16 @@ public class ParadexLatencyTest {
         OrderTicket order = new OrderTicket();
 
         order.setTicker(btcTicker).setSize(BigDecimal.valueOf(0.01)).setDirection(TradeDirection.BUY)
-                .setType(Type.LIMIT).setLimitPrice(BigDecimal.valueOf(110000)).addModifier(Modifier.POST_ONLY)
+                .setType(Type.LIMIT).setLimitPrice(BigDecimal.valueOf(108000)).addModifier(Modifier.POST_ONLY)
                 .setClientOrderId("123");
 
         broker.placeOrder(order);
-        Thread.sleep(1000);
+        Thread.sleep(5000);
 
-        OrderTicket order2 = new OrderTicket();
+        order.setLimitPrice(BigDecimal.valueOf(109000));
+        broker.modifyOrder(order);
 
-        order2.setTicker(btcTicker).setSize(BigDecimal.valueOf(0.01)).setDirection(TradeDirection.BUY)
-                .setType(Type.LIMIT).setLimitPrice(BigDecimal.valueOf(110000)).addModifier(Modifier.POST_ONLY)
-                .setClientOrderId("123");
-
-        broker.placeOrder(order2);
-
+        Thread.sleep(5000);
     }
 
     public static void main(String[] args) throws Exception {
@@ -135,8 +167,9 @@ public class ParadexLatencyTest {
         // System.setProperty("paradex.config.file",
         // "/path/to/your/paradex-trading-example.properties");
         ParadexLatencyTest example = new ParadexLatencyTest();
-        // example.executeTrade();
-        example.cancelMultipleTimes();
+        example.executeMultipleTrades();
+        // example.cancelMultipleTimes();
+        // example.testModifyOrder();
         // example.onBoard();
     }
 }

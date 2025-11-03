@@ -82,7 +82,7 @@ public class HyperliquidClient {
     }
 
     public void submitOrder(boolean useWebSocket) throws Exception {
-        startMethodMillis = System.currentTimeMillis();
+
         // Example private key; DO NOT USE IN PRODUCTION
         String privKey = "";
 
@@ -92,22 +92,13 @@ public class HyperliquidClient {
         buy.price = "113100";
         buy.size = "0.01";
         buy.reduceOnly = false;
-        buy.type = new LimitType(LimitType.TimeInForce.ALO);
+        buy.type = new LimitType(LimitType.TimeInForce.GTC);
         // buy.clientOrderId = EncodeUtil.encode128BitHex("Hello World 123");
         // buy.clientOrderId =
         // "289c505c8da38d9d0bb8d43aace34d89a1f96ca2d6963bdba552b195604f0bb";
 
-        OrderJson buy2 = new OrderJson();
-        buy2.assetId = 3;
-        buy2.isBuy = true;
-        buy2.price = "111200";
-        buy2.size = "0.005";
-        buy2.reduceOnly = false;
-        buy2.type = new LimitType(LimitType.TimeInForce.GTC);
-        buy2.clientOrderId = HyperliquidUtil.encode128BitHex("Another Order 456");
-
         OrderAction action = new OrderAction();
-        action.orders = java.util.Arrays.asList(buy, buy2);
+        action.orders = java.util.Arrays.asList(buy);
 
         SignableExchangeOrderRequest signable = new SignableExchangeOrderRequest();
         signable.action = action;
@@ -116,6 +107,7 @@ public class HyperliquidClient {
         logger.info("json: {}", Mappers.JSON.writeValueAsString(signable));
 
         SubmitExchangeRequest reqest = getJson(signable);
+        startMethodMillis = System.currentTimeMillis();
 
         try {
             String resp;
@@ -127,9 +119,14 @@ public class HyperliquidClient {
             }
             completedMillis = System.currentTimeMillis();
 
+            logger.info("Response: {}", resp);
+            logger.info("Timings: totalMillis={}", (completedMillis - startMethodMillis));
+            logger.info("Timings: startMethodMillis={}, presendMillis={}, completedMillis={}", startMethodMillis,
+                    presendMillis, completedMillis);
+
         } catch (Exception e) {
-            System.err.println("Submit failed:");
-            e.printStackTrace();
+            logger.error("Error submitting order: ", e);
+
         }
     }
 
@@ -144,7 +141,7 @@ public class HyperliquidClient {
 
     }
 
-    public static void main(String[] args) throws Exception {
+    public void submitViaApi() throws Exception {
 
         IHyperliquidWebsocketApi api = new HyperliquidWebsocketApi();
 
@@ -155,20 +152,11 @@ public class HyperliquidClient {
         buy.price = "113100";
         buy.size = "0.01";
         buy.reduceOnly = false;
-        buy.type = new LimitType(LimitType.TimeInForce.ALO);
+        buy.type = new LimitType(LimitType.TimeInForce.GTC);
         buy.clientOrderId = HyperliquidUtil.encode128BitHex("Hello World 123");
 
-        OrderJson buy2 = new OrderJson();
-        buy2.assetId = 3;
-        buy2.isBuy = true;
-        buy2.price = "111200";
-        buy2.size = "0.005";
-        buy2.reduceOnly = false;
-        buy2.type = new LimitType(LimitType.TimeInForce.GTC);
-        buy2.clientOrderId = HyperliquidUtil.encode128BitHex("Another Order 456");
-
         OrderAction action = new OrderAction();
-        action.orders = java.util.Arrays.asList(buy, buy2);
+        action.orders = java.util.Arrays.asList(buy);
 
         SubmitPostResponse
 
@@ -177,5 +165,10 @@ public class HyperliquidClient {
         logger.info("Submit response: {}", submitOrders);
 
         Thread.sleep(3000000);
+    }
+
+    public static void main(String[] args) throws Exception {
+        HyperliquidClient client = new HyperliquidClient("123");
+        client.submitOrder(false);
     }
 }

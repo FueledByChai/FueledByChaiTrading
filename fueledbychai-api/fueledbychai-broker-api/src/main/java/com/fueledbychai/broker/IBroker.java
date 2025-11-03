@@ -73,6 +73,8 @@ public interface IBroker {
      */
     public abstract BrokerRequestResult placeOrder(OrderTicket order);
 
+    public abstract BrokerRequestResult modifyOrder(OrderTicket order);
+
     /**
      * Gets the next order ID, or -1 if there was a problem getting the orderId
      *

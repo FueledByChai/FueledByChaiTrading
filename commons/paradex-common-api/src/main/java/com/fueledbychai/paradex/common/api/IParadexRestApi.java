@@ -39,11 +39,13 @@ public interface IParadexRestApi {
 
     String placeOrder(String jwtToken, ParadexOrder tradeOrder);
 
+    String modifyOrder(String jwtToken, ParadexOrder tradeOrder);
+
     String getJwtToken();
 
     String getJwtToken(Map<String, String> headers);
 
-    String getOrderMessageSignature(String orderMessage) throws Exception;
+    String getOrderMessageSignature(String orderMessage);
 
     boolean isPublicApiOnly();
 
