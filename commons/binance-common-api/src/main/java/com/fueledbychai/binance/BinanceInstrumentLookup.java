@@ -1,5 +1,14 @@
 package com.fueledbychai.binance;
 
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
+
+import com.fueledbychai.binance.model.BinanceInstrumentDescriptorResult;
+import com.fueledbychai.binance.model.BinanceSymbol;
+import com.fueledbychai.binance.model.BinanceSymbol.LotSizeFilterInfo;
+import com.fueledbychai.binance.model.BinanceSymbol.PriceFilterInfo;
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.IInstrumentLookup;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
@@ -7,7 +16,7 @@ import com.fueledbychai.data.Ticker;
 
 public class BinanceInstrumentLookup implements IInstrumentLookup {
 
-    // IBinanceRestApi api = BinanceApiFactory.getRestApi();
+    protected IBinanceRestApi api = BinanceApiFactory.getApi();
 
     @Override
     public InstrumentDescriptor lookupByCommonSymbol(String commonSymbol) {
@@ -27,12 +36,38 @@ public class BinanceInstrumentLookup implements IInstrumentLookup {
 
     @Override
     public InstrumentDescriptor[] getAllInstrumentsForType(InstrumentType instrumentType) {
-        // if (instrumentType != InstrumentType.PERPETUAL_FUTURES) {
-        // throw new IllegalArgumentException("Only perpetual futures are supported at
-        // this time.");
-        // }
-        // return api.getAllInstrumentsForType(instrumentType);
-        return null;
+        if (instrumentType != InstrumentType.CRYPTO_SPOT) {
+            throw new IllegalArgumentException("Only crypto spot is supported at this time.");
+        }
+
+        BinanceInstrumentDescriptorResult result = api.getAllInstrumentsForType(instrumentType);
+        return convertBinanceResultsToInstrumentDescriptors(result);
     }
 
+    protected InstrumentDescriptor[] convertBinanceResultsToInstrumentDescriptors(
+            BinanceInstrumentDescriptorResult result) {
+        List<BinanceSymbol> tradingSymbols = result.getTradingSymbols();
+        List<InstrumentDescriptor> descriptors = new ArrayList<>();
+        for (BinanceSymbol symbol : tradingSymbols) {
+
+            InstrumentDescriptor descriptor = convertBinanceSymbolToInstrumentDescriptor(symbol);
+            descriptors.add(descriptor);
+        }
+        return descriptors.toArray(new InstrumentDescriptor[0]);
+    }
+
+    protected InstrumentDescriptor convertBinanceSymbolToInstrumentDescriptor(BinanceSymbol symbol) {
+        PriceFilterInfo priceFilter = symbol.getPriceFilter();
+        LotSizeFilterInfo lotSizeFilter = symbol.getLotSizeFilter();
+        // get tick size and strip trailing zeros
+        BigDecimal priceTickSize = new BigDecimal(priceFilter.getTickSize()).stripTrailingZeros();
+        BigDecimal orderSizeIncrement = new BigDecimal(lotSizeFilter.getStepSize()).stripTrailingZeros();
+        BigDecimal minOrderSize = new BigDecimal(lotSizeFilter.getMinQty()).stripTrailingZeros();
+
+        InstrumentDescriptor descriptor = new InstrumentDescriptor(InstrumentType.CRYPTO_SPOT, Exchange.BINANCE_SPOT,
+                symbol.getSymbol(), symbol.getSymbol(), symbol.getBaseAsset(), symbol.getQuoteAsset(),
+                orderSizeIncrement, priceTickSize, 0, minOrderSize, 0, BigDecimal.ZERO, 0, "");
+
+        return descriptor;
+    }
 }

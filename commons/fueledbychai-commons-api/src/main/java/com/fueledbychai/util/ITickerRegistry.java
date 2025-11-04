@@ -8,4 +8,8 @@ public interface ITickerRegistry {
 
     Ticker lookupByCommonSymbol(String commonSymbol);
 
+    // Common symbol is like BTC/USDT, exchange symbol is like BTCUSDT or
+    // BTC-USD-PERP
+    String commonSymbolToExchangeSymbol(String commonSymbol);
+
 }

@@ -52,10 +52,11 @@ public class Exchange implements Serializable {
     public static final Exchange DYDX = new Exchange("DYDX");
     public static final Exchange HYPERLIQUID = new Exchange("HYPERLIQUID");
     public static final Exchange PARADEX = new Exchange("PARADEX");
+    public static final Exchange BINANCE_SPOT = new Exchange("BINANCE_SPOT");
 
     public static final Exchange[] ALL_EXCHANGES = { ARCA, GLOBEX, NYMEX, CBOE, ECBOT, NYBOT, CFE, NYSE_LIFFE, IDEALPRO,
             PSE, INTERACTIVE_BROKERS_SMART, NASDAQ, TSEJ, SEHKNTL, SEHK, HKFE, OSE, SGX, BOX, DYDX, HYPERLIQUID,
-            PARADEX };
+            PARADEX, BINANCE_SPOT };
 
     protected String exchangeName;
 
