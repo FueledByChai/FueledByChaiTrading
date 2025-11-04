@@ -57,8 +57,10 @@ class ParadexApiFactoryTest {
     void testSystemPropertiesConfiguration() {
         // Set system properties with valid StarkNet credentials
         System.setProperty(ParadexConfiguration.PARADEX_ENVIRONMENT, "prod");
-        System.setProperty(ParadexConfiguration.PARADEX_ACCOUNT_ADDRESS, "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7");
-        System.setProperty(ParadexConfiguration.PARADEX_PRIVATE_KEY, "0x0000000000000000000000000000000000000000000000000000000000000001");
+        System.setProperty(ParadexConfiguration.PARADEX_ACCOUNT_ADDRESS,
+                "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7");
+        System.setProperty(ParadexConfiguration.PARADEX_PRIVATE_KEY,
+                "0x0000000000000000000000000000000000000000000000000000000000000001");
 
         // Reset to pick up new properties
         ParadexApiFactory.reset();
@@ -87,8 +89,10 @@ class ParadexApiFactoryTest {
     void testProgrammaticConfiguration() {
         ParadexConfiguration config = ParadexConfiguration.getInstance();
         config.setProperty(ParadexConfiguration.PARADEX_ENVIRONMENT, "testnet");
-        config.setProperty(ParadexConfiguration.PARADEX_ACCOUNT_ADDRESS, "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7");
-        config.setProperty(ParadexConfiguration.PARADEX_PRIVATE_KEY, "0x0000000000000000000000000000000000000000000000000000000000000001");
+        config.setProperty(ParadexConfiguration.PARADEX_ACCOUNT_ADDRESS,
+                "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7");
+        config.setProperty(ParadexConfiguration.PARADEX_PRIVATE_KEY,
+                "0x0000000000000000000000000000000000000000000000000000000000000001");
 
         // Don't call reset since that would clear programmatic changes
         // Programmatic changes should be immediately available
