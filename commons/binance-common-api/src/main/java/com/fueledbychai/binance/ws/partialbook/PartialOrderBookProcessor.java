@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fueledbychai.data.Ticker;
 import com.fueledbychai.websocket.AbstractWebSocketProcessor;
 import com.fueledbychai.websocket.IWebSocketClosedListener;
 
@@ -19,7 +20,8 @@ public class PartialOrderBookProcessor extends AbstractWebSocketProcessor<OrderB
     @Override
     protected OrderBookSnapshot parseMessage(String message) {
         try {
-            return objectMapper.readValue(message, OrderBookSnapshot.class);
+            OrderBookSnapshot obs = objectMapper.readValue(message, OrderBookSnapshot.class);
+            return obs;
         } catch (Exception e) {
             logger.error("Error parsing message: " + message, e);
             return null;

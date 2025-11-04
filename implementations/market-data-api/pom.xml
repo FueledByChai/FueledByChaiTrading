@@ -46,16 +46,11 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
   
   
   <modules>
-            
     <module>ib-market-data-api-impl</module>
-      
-        
+    <module>binance-market-data-impl</module>
     <module>dydx-market-data-impl</module>
-
     <module>hyperliquid-market-data-impl</module>
-
     <module>paradex-market-data-impl</module>
-      
   </modules>
   
 </project>
