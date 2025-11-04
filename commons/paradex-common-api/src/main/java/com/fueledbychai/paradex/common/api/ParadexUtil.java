@@ -1,19 +1,12 @@
 package com.fueledbychai.paradex.common.api;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import com.fueledbychai.broker.order.TradeDirection;
-import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.data.BarData;
 import com.fueledbychai.paradex.common.api.historical.OHLCBar;
-import com.fueledbychai.paradex.common.api.order.OrderType;
-import com.fueledbychai.paradex.common.api.order.ParadexOrder;
-import com.fueledbychai.paradex.common.api.order.Side;
 
 public class ParadexUtil {
 

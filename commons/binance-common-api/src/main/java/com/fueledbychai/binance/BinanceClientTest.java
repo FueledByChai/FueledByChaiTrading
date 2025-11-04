@@ -7,6 +7,7 @@ import com.fueledbychai.binance.ws.partialbook.PartialOrderBookProcessor;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.util.ITickerRegistry;
 import com.fueledbychai.websocket.IWebSocketProcessor;
+import com.fueledbychai.websocket.ProxyConfig;
 
 public class BinanceClientTest {
 
@@ -17,6 +18,7 @@ public class BinanceClientTest {
         System.setProperty("socksProxyHost", "127.0.0.1");
         System.setProperty("socksProxyPort", "1080");
         System.setProperty("binance.run.proxy", "true");
+        ProxyConfig.getInstance().setRunningLocally(true);
 
         // IBinanceRestApi api =
         // BinanceRestApi.getPublicOnlyApi("https://api.binance.com/api/v3");
