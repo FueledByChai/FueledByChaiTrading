@@ -1,32 +1,18 @@
 package com.fueledbychai.binance;
 
 import java.io.IOException;
-import java.math.BigDecimal;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.Callable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.fueledbychai.binance.model.BinanceInstrumentDescriptorResult;
+import com.fueledbychai.data.InstrumentType;
 import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
-import com.fueledbychai.binance.model.BinanceInstrumentDescriptorResult;
-import com.fueledbychai.broker.Position;
-import com.fueledbychai.data.Exchange;
-import com.fueledbychai.data.InstrumentDescriptor;
-import com.fueledbychai.data.InstrumentType;
-import com.fueledbychai.data.FueledByChaiException;
-import com.fueledbychai.data.Ticker;
 
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
@@ -35,24 +21,21 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
-public class BinanceRestApi {
+public class BinanceRestApi implements IBinanceRestApi {
     protected static Logger logger = LoggerFactory.getLogger(BinanceRestApi.class);
-    private final Gson gson;
     private final ObjectMapper objectMapper;
 
-    protected static BinanceRestApi publicOnlyApi;
-    protected static BinanceRestApi privateApi;
+    protected static IBinanceRestApi publicOnlyApi;
+    protected static IBinanceRestApi privateApi;
 
-    // https://api.binance.com/api/v3/
-
-    public static BinanceRestApi getPublicOnlyApi(String baseUrl) {
+    public static IBinanceRestApi getPublicOnlyApi(String baseUrl) {
         if (publicOnlyApi == null) {
             publicOnlyApi = new BinanceRestApi(baseUrl);
         }
         return publicOnlyApi;
     }
 
-    public static BinanceRestApi getPrivateApi(String baseUrl, String accountAddress, String privateKey) {
+    public static IBinanceRestApi getPrivateApi(String baseUrl, String accountAddress, String privateKey) {
         if (privateApi == null) {
             privateApi = new BinanceRestApi(baseUrl, accountAddress, privateKey);
         }
@@ -82,21 +65,21 @@ public class BinanceRestApi {
         // Initialize ObjectMapper for JSON processing
         this.objectMapper = new ObjectMapper();
         // Register the custom adapter
-        this.gson = new GsonBuilder().registerTypeAdapter(ZonedDateTime.class, new ZonedDateTimeAdapter()).create();
+        // this.gson = new GsonBuilder().registerTypeAdapter(ZonedDateTime.class, new
+        // ZonedDateTimeAdapter()).create();
         publicApiOnly = accountAddressString == null || privateKeyString == null;
     }
 
+    @Override
     public BinanceInstrumentDescriptorResult getAllInstrumentsForType(InstrumentType instrumentType) {
-        if (instrumentType != InstrumentType.PERPETUAL_FUTURES) {
-            throw new IllegalArgumentException("Only perpetual futures are supported at this time.");
+        if (instrumentType != InstrumentType.CRYPTO_SPOT) {
+            throw new IllegalArgumentException("Only crypto spot is supported at this time.");
         }
 
         String path = "/exchangeInfo";
         String url = baseUrl + path;
         HttpUrl.Builder urlBuilder = HttpUrl.parse(url).newBuilder();
         String newUrl = urlBuilder.build().toString();
-        RequestBody body = RequestBody.create("{\"type\":\"meta\"}", MediaType.parse("application/json"));
-
         Request request = new Request.Builder().url(newUrl).get().build();
         logger.info("Request: " + request);
 
