@@ -40,7 +40,7 @@ public class BinanceConfiguration {
     private static final String DEFAULT_TESTNET_REST_URL = "https://testnet.binance.vision/api/v3";
     private static final String DEFAULT_TESTNET_WS_URL = "wss://ws-api.testnet.binance.vision/ws-api/v3";
     private static final String DEFAULT_PROD_REST_URL = "https://api.binance.com/api/v3";
-    private static final String DEFAULT_PROD_WS_URL = "wss://ws-api.binance.com:443/ws-api/v3";
+    private static final String DEFAULT_PROD_WS_URL = "wss://stream.binance.com:443/ws";
     private static final int DEFAULT_JWT_REFRESH_SECONDS = 60;
     private static final boolean DEFAULT_RUN_PROXY = false;
 

@@ -1,6 +1,7 @@
 package com.fueledbychai.marketdata.hyperliquid;
 
 import java.math.BigDecimal;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Date;
@@ -11,10 +12,10 @@ import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.binance.BinanceConfiguration;
 import com.fueledbychai.binance.BinanceTickerRegistry;
+import com.fueledbychai.binance.ws.BinanceWebSocketClient;
+import com.fueledbychai.binance.ws.BinanceWebSocketClientBuilder;
 import com.fueledbychai.binance.ws.partialbook.OrderBookSnapshot;
-import com.fueledbychai.binance.ws.partialbook.OrderBookSnapshot.DepthUpdateData;
 import com.fueledbychai.binance.ws.partialbook.PartialOrderBookProcessor;
-import com.fueledbychai.binance.ws.partialbook.PriceLevel;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.Level1Quote;
 import com.fueledbychai.marketdata.Level1QuoteListener;
@@ -23,7 +24,6 @@ import com.fueledbychai.marketdata.OrderFlowListener;
 import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.QuoteType;
 import com.fueledbychai.util.ITickerRegistry;
-import com.fueledbychai.util.Util;
 
 public class BinanceQuoteEngine extends QuoteEngine {
 
@@ -42,6 +42,7 @@ public class BinanceQuoteEngine extends QuoteEngine {
 
     public BinanceQuoteEngine() {
         wsUrl = BinanceConfiguration.getInstance().getWebSocketUrl();
+        logger.info("Binance WebSocket URL: {}", wsUrl);
         tickerRegistry = BinanceTickerRegistry.getInstance();
     }
 
@@ -145,7 +146,7 @@ public class BinanceQuoteEngine extends QuoteEngine {
         super.fireLevel1Quote(quote);
     }
 
-    protected void startPartialOrderBookClient(Ticker ticker) {
+    protected void startPartialOrderBookClient(final Ticker ticker) {
         try {
             logger.info("Starting Partial Order Book WebSocket client");
             PartialOrderBookProcessor processor = new PartialOrderBookProcessor(() -> {
@@ -153,15 +154,14 @@ public class BinanceQuoteEngine extends QuoteEngine {
                 startPartialOrderBookClient(ticker);
             });
             processor.addEventListener((OrderBookSnapshot obs) -> {
-                DepthUpdateData data = obs.getData();
-                ZonedDateTime eventTime = Util.convertEpochToZonedDateTime(data.getEventTime());
-                String symbol = data.getSymbol();
-                Ticker reqTicker = tickerRegistry.lookupByBrokerSymbol(symbol);
-                PriceLevel bid = data.getBids().get(0);
-                PriceLevel ask = data.getAsks().get(0);
-                onBBOUpdate(reqTicker, new BigDecimal(bid.getPrice()), new BigDecimal(bid.getQuantity()),
-                        new BigDecimal(ask.getPrice()), new BigDecimal(ask.getQuantity()), eventTime);
+                ZonedDateTime eventTime = ZonedDateTime.now(ZoneId.of("UTC"));
+                onBBOUpdate(ticker, obs.getBestBid().getPriceAsDecimal(), obs.getBestBid().getQuantityAsDecimal(),
+                        obs.getBestAsk().getPriceAsDecimal(), obs.getBestAsk().getQuantityAsDecimal(), eventTime);
             });
+
+            BinanceWebSocketClient partialBookDepthClient = BinanceWebSocketClientBuilder.buildPartialBookDepth(wsUrl,
+                    ticker, processor);
+            partialBookDepthClient.connect();
 
         } catch (Exception e) {
             throw new IllegalStateException(e);

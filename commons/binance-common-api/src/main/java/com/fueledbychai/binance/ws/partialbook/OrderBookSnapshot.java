@@ -4,156 +4,93 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 /**
- * Represents a Binance WebSocket depth update message. This corresponds to
- * the @depth streams which provide order book updates.
+ * Represents a Binance order book snapshot. This corresponds to the REST API
+ * /api/v3/depth endpoint or similar orderbook data.
  */
 public class OrderBookSnapshot {
 
-    @JsonProperty("stream")
-    private String stream;
+    @JsonProperty("lastUpdateId")
+    private long lastUpdateId;
 
-    @JsonProperty("data")
-    private DepthUpdateData data;
+    @JsonProperty("bids")
+    private List<PriceLevel> bids;
+
+    @JsonProperty("asks")
+    private List<PriceLevel> asks;
 
     // Default constructor for Jackson
     public OrderBookSnapshot() {
     }
 
-    public String getStream() {
-        return stream;
+    public long getLastUpdateId() {
+        return lastUpdateId;
     }
 
-    public void setStream(String stream) {
-        this.stream = stream;
+    public void setLastUpdateId(long lastUpdateId) {
+        this.lastUpdateId = lastUpdateId;
     }
 
-    public DepthUpdateData getData() {
-        return data;
+    public List<PriceLevel> getBids() {
+        return bids;
     }
 
-    public void setData(DepthUpdateData data) {
-        this.data = data;
+    public void setBids(List<PriceLevel> bids) {
+        this.bids = bids;
+    }
+
+    public List<PriceLevel> getAsks() {
+        return asks;
+    }
+
+    public void setAsks(List<PriceLevel> asks) {
+        this.asks = asks;
+    }
+
+    /**
+     * Get the best bid price (highest bid).
+     */
+    public PriceLevel getBestBid() {
+        return bids != null && !bids.isEmpty() ? bids.get(0) : null;
+    }
+
+    /**
+     * Get the best ask price (lowest ask).
+     */
+    public PriceLevel getBestAsk() {
+        return asks != null && !asks.isEmpty() ? asks.get(0) : null;
+    }
+
+    /**
+     * Calculate the spread between best bid and best ask.
+     */
+    public String getSpread() {
+        PriceLevel bestBid = getBestBid();
+        PriceLevel bestAsk = getBestAsk();
+
+        if (bestBid == null || bestAsk == null) {
+            return null;
+        }
+
+        return bestAsk.getPriceAsDecimal().subtract(bestBid.getPriceAsDecimal()).toPlainString();
+    }
+
+    /**
+     * Get the mid-point price between best bid and best ask.
+     */
+    public String getMidPrice() {
+        PriceLevel bestBid = getBestBid();
+        PriceLevel bestAsk = getBestAsk();
+
+        if (bestBid == null || bestAsk == null) {
+            return null;
+        }
+
+        return bestBid.getPriceAsDecimal().add(bestAsk.getPriceAsDecimal()).divide(new java.math.BigDecimal("2"))
+                .toPlainString();
     }
 
     @Override
     public String toString() {
-        return "OrderBookSnapshot{" + "stream='" + stream + '\'' + ", data=" + data + '}';
-    }
-
-    /**
-     * Represents the depth update data within a WebSocket message.
-     */
-    public static class DepthUpdateData {
-
-        @JsonProperty("e")
-        private String eventType;
-
-        @JsonProperty("E")
-        private long eventTime;
-
-        @JsonProperty("T")
-        private long transactionTime;
-
-        @JsonProperty("s")
-        private String symbol;
-
-        @JsonProperty("U")
-        private long firstUpdateId;
-
-        @JsonProperty("u")
-        private long finalUpdateId;
-
-        @JsonProperty("pu")
-        private long previousUpdateId;
-
-        @JsonProperty("b")
-        private List<PriceLevel> bids;
-
-        @JsonProperty("a")
-        private List<PriceLevel> asks;
-
-        // Default constructor for Jackson
-        public DepthUpdateData() {
-        }
-
-        public String getEventType() {
-            return eventType;
-        }
-
-        public void setEventType(String eventType) {
-            this.eventType = eventType;
-        }
-
-        public long getEventTime() {
-            return eventTime;
-        }
-
-        public void setEventTime(long eventTime) {
-            this.eventTime = eventTime;
-        }
-
-        public long getTransactionTime() {
-            return transactionTime;
-        }
-
-        public void setTransactionTime(long transactionTime) {
-            this.transactionTime = transactionTime;
-        }
-
-        public String getSymbol() {
-            return symbol;
-        }
-
-        public void setSymbol(String symbol) {
-            this.symbol = symbol;
-        }
-
-        public long getFirstUpdateId() {
-            return firstUpdateId;
-        }
-
-        public void setFirstUpdateId(long firstUpdateId) {
-            this.firstUpdateId = firstUpdateId;
-        }
-
-        public long getFinalUpdateId() {
-            return finalUpdateId;
-        }
-
-        public void setFinalUpdateId(long finalUpdateId) {
-            this.finalUpdateId = finalUpdateId;
-        }
-
-        public long getPreviousUpdateId() {
-            return previousUpdateId;
-        }
-
-        public void setPreviousUpdateId(long previousUpdateId) {
-            this.previousUpdateId = previousUpdateId;
-        }
-
-        public List<PriceLevel> getBids() {
-            return bids;
-        }
-
-        public void setBids(List<PriceLevel> bids) {
-            this.bids = bids;
-        }
-
-        public List<PriceLevel> getAsks() {
-            return asks;
-        }
-
-        public void setAsks(List<PriceLevel> asks) {
-            this.asks = asks;
-        }
-
-        @Override
-        public String toString() {
-            return "DepthUpdateData{" + "eventType='" + eventType + '\'' + ", eventTime=" + eventTime
-                    + ", transactionTime=" + transactionTime + ", symbol='" + symbol + '\'' + ", firstUpdateId="
-                    + firstUpdateId + ", finalUpdateId=" + finalUpdateId + ", previousUpdateId=" + previousUpdateId
-                    + ", bids=" + bids + ", asks=" + asks + '}';
-        }
+        return "OrderBookSnapshot{" + "lastUpdateId=" + lastUpdateId + ", bids=" + bids + ", asks=" + asks + '}';
     }
 }
