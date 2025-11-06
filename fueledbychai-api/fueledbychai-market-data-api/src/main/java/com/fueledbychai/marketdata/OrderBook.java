@@ -420,6 +420,94 @@ public class OrderBook implements IOrderBook {
         return BigDecimal.valueOf(vwmid).setScale(tickSize.scale(), RoundingMode.HALF_UP);
     }
 
+    /**
+     * VWAP midpoint where each side is integrated until 'targetUnits' is filled.
+     */
+    public synchronized BigDecimal getImpactVwapMidpoint(double targetUnits, DepthVwapParams p) {
+        if (targetUnits <= 0)
+            return getDepthVwapMidpoint(p);
+
+        BidSizePair bidPair = getBestBid(tickSize);
+        BidSizePair askPair = getBestAsk(tickSize);
+        if (bidPair == null || askPair == null)
+            return BigDecimal.ZERO;
+        final double bestBid = bidPair.price.doubleValue();
+        final double bestAsk = askPair.price.doubleValue();
+        final double midTouch = (bestBid + bestAsk) * 0.5;
+        final double bpPerTickNear = (tickSize.doubleValue() / midTouch) * 1e4;
+
+        Map<BigDecimal, Double> bidsAgg = buySide.aggregateOrders(tickSize);
+        Map<BigDecimal, Double> asksAgg = sellSide.aggregateOrders(tickSize);
+
+        java.util.List<Map.Entry<BigDecimal, Double>> bids = bidsAgg.entrySet().stream()
+                .sorted((a, b) -> b.getKey().compareTo(a.getKey())).collect(Collectors.toList());
+        java.util.List<Map.Entry<BigDecimal, Double>> asks = asksAgg.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey()).collect(Collectors.toList());
+
+        double vwapBid = vwapToFill(bids, /* isBid */true, bestBid, midTouch, bpPerTickNear, targetUnits, p.bpCap,
+                p.tickCap, p.Lmax);
+        double vwapAsk = vwapToFill(asks, /* isBid */false, bestAsk, midTouch, bpPerTickNear, targetUnits, p.bpCap,
+                p.tickCap, p.Lmax);
+
+        if (Double.isNaN(vwapBid))
+            vwapBid = bestBid;
+        if (Double.isNaN(vwapAsk))
+            vwapAsk = bestAsk;
+
+        double vwmid = 0.5 * (vwapBid + vwapAsk);
+        return BigDecimal.valueOf(vwmid).setScale(tickSize.scale(), RoundingMode.HALF_UP);
+    }
+
+    public synchronized BigDecimal getDepthVwapMidpoint() {
+        return getDepthVwapMidpoint(new DepthVwapParams());
+    }
+
+    /** Depth-first VWAP midpoint using slice×multiple coverage and bp/tick caps. */
+    public synchronized BigDecimal getDepthVwapMidpoint(DepthVwapParams params) {
+        // Safety: ensure we have a book
+        BidSizePair bidPair = getBestBid(tickSize);
+        BidSizePair askPair = getBestAsk(tickSize);
+        if (bidPair == null || askPair == null)
+            return BigDecimal.ZERO;
+        BigDecimal bestBidPx = bidPair.price;
+        BigDecimal bestAskPx = askPair.price;
+        if (bestBidPx == null || bestAskPx == null || bestBidPx.signum() == 0 || bestAskPx.signum() == 0) {
+            return BigDecimal.ZERO;
+        }
+
+        final double bestBid = bestBidPx.doubleValue();
+        final double bestAsk = bestAskPx.doubleValue();
+        final double midTouch = (bestBid + bestAsk) * 0.5;
+        final double bpPerTickNear = (tickSize.doubleValue() / midTouch) * 1e4;
+        final double bpCap = Math.max(0.0, params.bpCap);
+        final int tickCap = Math.max(0, params.tickCap);
+        final int Lmax = Math.max(1, params.Lmax);
+        final double targetDepth = Math.max(0.0, params.MxSlice * params.slice);
+
+        // Aggregate maps at current tick size and sort
+        Map<BigDecimal, Double> bidsAgg = buySide.aggregateOrders(tickSize);
+        Map<BigDecimal, Double> asksAgg = sellSide.aggregateOrders(tickSize);
+        java.util.List<Map.Entry<BigDecimal, Double>> bids = bidsAgg.entrySet().stream()
+                .sorted((e1, e2) -> e2.getKey().compareTo(e1.getKey())) // best → worse
+                .collect(Collectors.toList());
+        java.util.List<Map.Entry<BigDecimal, Double>> asks = asksAgg.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey()) // best → worse
+                .collect(Collectors.toList());
+
+        // Select depth per side
+        SideAccum bidSel = selectDepthSide(bids, /* isBid */ true, bestBid, midTouch, bpPerTickNear, targetDepth, bpCap,
+                tickCap, Lmax, params.lambdaDecay);
+        SideAccum askSel = selectDepthSide(asks, /* isBid */ false, bestAsk, midTouch, bpPerTickNear, targetDepth,
+                bpCap, tickCap, Lmax, params.lambdaDecay);
+
+        // Fallbacks if a side selected nothing
+        double vwapBid = (bidSel.sumWQ > 0.0) ? (bidSel.sumWP / bidSel.sumWQ) : bestBid;
+        double vwapAsk = (askSel.sumWQ > 0.0) ? (askSel.sumWP / askSel.sumWQ) : bestAsk;
+
+        double vwmid = 0.5 * (vwapBid + vwapAsk);
+        return BigDecimal.valueOf(vwmid).setScale(tickSize.scale(), RoundingMode.HALF_UP);
+    }
+
     @Override
     public void printTopLevels(int levels) {
         printTopLevels(levels, tickSize);
@@ -691,5 +779,85 @@ public class OrderBook implements IOrderBook {
             return sb.toString();
         }
 
+    }
+
+    public static final class DepthVwapParams {
+        /** cumulative depth multiple of your per-level slice (e.g., 3–8) */
+        public double MxSlice = 5.0;
+        /** your per-level quote size (units) */
+        public double slice = 1.0;
+        /** hard cap on levels inspected per side */
+        public int Lmax = 10;
+        /** max distance from touch to include (basis points) */
+        public double bpCap = 15.0;
+        /** max ticks from touch to include */
+        public int tickCap = 6;
+        /** level decay: 0 = none; else exp(-lambda*i) */
+        public double lambdaDecay = 0.0;
+    }
+
+    private static final class SideAccum {
+        double sumWP = 0.0; // Σ (w * price * qty)
+        double sumWQ = 0.0; // Σ (w * qty)
+        double cumQ = 0.0; // cumulative qty (unweighted)
+    }
+
+    private SideAccum selectDepthSide(java.util.List<Map.Entry<BigDecimal, Double>> levels, boolean isBid,
+            double bestPx, double midTouch, double bpPerTickNear, double targetDepth, double bpCap, int tickCap,
+            int Lmax, double lambdaDecay) {
+        SideAccum a = new SideAccum();
+        int used = 0;
+        for (Map.Entry<BigDecimal, Double> e : levels) {
+            if (used >= Lmax)
+                break;
+            double px = e.getKey().doubleValue();
+            double qty = e.getValue();
+
+            double ticksFromTouch = Math.abs((px - bestPx) / (tickSize.doubleValue()));
+            if (ticksFromTouch > tickCap)
+                break;
+            double bpFromTouch = Math.abs(px - bestPx) / midTouch * 1e4;
+            if (bpFromTouch > bpCap)
+                break;
+
+            double w = (lambdaDecay <= 0.0) ? 1.0 : Math.exp(-lambdaDecay * used);
+            a.sumWP += w * px * qty;
+            a.sumWQ += w * qty;
+            a.cumQ += qty;
+            used++;
+
+            if (a.cumQ >= targetDepth)
+                break;
+        }
+        return a;
+    }
+
+    private double vwapToFill(java.util.List<Map.Entry<BigDecimal, Double>> levels, boolean isBid, double bestPx,
+            double midTouch, double bpPerTickNear, double targetUnits, double bpCap, int tickCap, int Lmax) {
+        double rem = targetUnits;
+        double sumPQ = 0.0;
+        double sumQ = 0.0;
+        int used = 0;
+
+        for (Map.Entry<BigDecimal, Double> e : levels) {
+            if (used >= Lmax || rem <= 0.0)
+                break;
+            double px = e.getKey().doubleValue();
+            double qtyAvail = e.getValue();
+
+            double ticksFromTouch = Math.abs((px - bestPx) / (tickSize.doubleValue()));
+            if (ticksFromTouch > tickCap)
+                break;
+            double bpFromTouch = Math.abs(px - bestPx) / midTouch * 1e4;
+            if (bpFromTouch > bpCap)
+                break;
+
+            double take = Math.min(rem, qtyAvail);
+            sumPQ += px * take;
+            sumQ += take;
+            rem -= take;
+            used++;
+        }
+        return (sumQ > 0.0) ? (sumPQ / sumQ) : Double.NaN;
     }
 }

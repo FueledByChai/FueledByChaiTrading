@@ -45,7 +45,7 @@ public class ParadexTickerRegistry implements ITickerTranslator, ITickerRegistry
 
     @Override
     public Ticker lookupByCommonSymbol(String commonSymbol) {
-        return (Ticker) commonSymbolMap.get(commonSymbol);
+        return lookupByBrokerSymbol(commonSymbolToExchangeSymbol(commonSymbol));
     }
 
     @Override
@@ -65,7 +65,14 @@ public class ParadexTickerRegistry implements ITickerTranslator, ITickerRegistry
 
     @Override
     public String commonSymbolToExchangeSymbol(String commonSymbol) {
-        // common symbol is like BTC/USDT, exchange symbol is BTC-USD-PERP
+        // common symbol is like BTC/USDT, exchange symbol is BTC-USD-PERP, if its
+        // BTC/USDC or BTC/USDT, then common symbol is BTC-USD-PERP
+
+        if (commonSymbol.endsWith("/USDC")) {
+            commonSymbol = commonSymbol.substring(0, commonSymbol.length() - 5) + "/USD";
+        } else if (commonSymbol.endsWith("/USDT")) {
+            commonSymbol = commonSymbol.substring(0, commonSymbol.length() - 5) + "/USD";
+        }
         String exchangeSymbol = commonSymbol.replace("/", "-") + "-PERP";
         return exchangeSymbol;
     }
