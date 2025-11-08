@@ -65,6 +65,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         synchronized (fillEventListeners) {
             for (com.fueledbychai.broker.order.FillEventListener listener : fillEventListeners) {
                 try {
+                    delayWebSocketCall();
                     listener.fillReceived(fill);
                 } catch (Exception ex) {
                     logger.error(ex.getMessage(), ex);
@@ -76,6 +77,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     protected Logger logger = LoggerFactory.getLogger(PaperBroker.class);
 
     private final ExecutorService executorService = Executors.newFixedThreadPool(10); // Thread pool with 10 threads
+    protected PaperBrokerLatency latencyModel;
 
     protected String asset;
 
@@ -143,7 +145,9 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     private final double dislocationMultiplier = 7.5; // Multiplier for dislocation threshold
 
     public PaperBroker(QuoteEngine quoteEngine, Ticker ticker, PaperBrokerCommission commission,
-            double startingBalance) {
+            PaperBrokerLatency latencyModel, double startingBalance) {
+
+        this.latencyModel = latencyModel;
         this.quoteEngine = quoteEngine;
         this.ticker = ticker;
         this.makerFee = commission.getMakerFeeBps() / 10000.0; // Convert bps to decimal
@@ -260,7 +264,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     @Override
     public synchronized BrokerRequestResult cancelAllOrders(Ticker ticker) {
         executorService.submit(() -> {
-            delay(); // Simulate network delay
+            delayRestCall(); // Simulate network delay
             Iterator<Map.Entry<String, OrderTicket>> bidIterator = openBids.entrySet().iterator();
             while (bidIterator.hasNext()) {
                 Map.Entry<String, OrderTicket> entry = bidIterator.next();
@@ -298,7 +302,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     public void cancelOrderSubmitWithDelay(String orderId, boolean shouldDelay) {
 
         if (shouldDelay) {
-            delay(); // Simulate network delay
+            delayRestCall(); // Simulate network delay
         }
 
         if (openBids.containsKey(orderId)) {
@@ -320,7 +324,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     public List<OrderTicket> getOpenOrders(Ticker ticker) {
-        delay(); // Simulate network delay
+        delayRestCall(); // Simulate network delay
         List<OrderTicket> openOrders = new ArrayList<>(); // List to hold open orders
         // Add all open bids to the list
         for (OrderTicket order : openBids.values()) {
@@ -336,7 +340,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     public List<Position> getAllPositions() {
-        delay(); // Simulate network delay
+        delayRestCall(); // Simulate network delay
         List<Position> positions = new ArrayList<>(); // List to hold position info
         if (!currentPosition.equals(BigDecimal.ZERO)) { // Only add position if there is an inventory
             Side side = currentPosition.compareTo(BigDecimal.ZERO) > 0 ? Side.LONG : Side.SHORT;
@@ -351,6 +355,44 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     @Override
+    public BrokerRequestResult modifyOrder(OrderTicket order) {
+
+        order.setOrderEntryTime(getCurrentTime());
+        executorService.submit(() -> {
+            try {
+                delayRestCall(); // Simulate network delay
+                String orderId = order.getOrderId();
+                if (order.getType() == Type.LIMIT) {
+                    if (order.getDirection() == TradeDirection.BUY) {
+                        if (order.containsModifier(Modifier.POST_ONLY)
+                                && order.getLimitPrice().doubleValue() >= bestAskPrice) {
+                            logger.warn("Limit buy order would cross the best ask price. Cancelling order.");
+                            cancelOrder(orderId, CancelReason.POST_ONLY_WOULD_CROSS);
+                            return;
+                        }
+                        openBids.remove(orderId); // Remove existing order
+                        openBids.put(orderId, order);
+                        logger.info("Limit buy order placed: {}", order);
+                    } else if (order.getDirection() == TradeDirection.SELL) {
+                        if (order.containsModifier(Modifier.POST_ONLY)
+                                && order.getLimitPrice().doubleValue() <= bestBidPrice) {
+                            logger.warn("Limit sell order would cross the best bid price. Cancelling order.");
+                            cancelOrder(orderId, CancelReason.POST_ONLY_WOULD_CROSS);
+                            return;
+                        }
+                        openAsks.remove(orderId); // Remove existing order
+                        openAsks.put(orderId, order);
+                        logger.info("Limit sell order placed: {}", order);
+                    }
+                }
+            } catch (Exception e) {
+                logger.error(e.getMessage(), e);
+            }
+        });
+        return new BrokerRequestResult();
+    }
+
+    @Override
     public BrokerRequestResult placeOrder(OrderTicket order) {
 
         String orderId = System.currentTimeMillis() + "-" + (int) (Math.random() * 10000); // Generate a unique order ID
@@ -360,7 +402,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
         executorService.submit(() -> {
             try {
-                delay(); // Simulate network delay
+                delayRestCall(); // Simulate network delay
                 if (order.getType() == Type.LIMIT) {
                     if (order.getDirection() == TradeDirection.BUY) {
                         if (order.containsModifier(Modifier.POST_ONLY)
@@ -644,6 +686,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
             try {
                 executorService.submit(() -> {
                     try {
+                        delayWebSocketCall();
                         listener.orderEvent(orderStatus);
                     } catch (Exception e) {
                         logger.error(e.getLocalizedMessage(), e);
@@ -660,6 +703,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
             try {
                 executorService.submit(() -> {
                     try {
+                        delayWebSocketCall();
                         listener.accountEquityUpdated(getNetAccountValue()); // Notify the listener with the account
                                                                              // equity update
                     } catch (Exception e) {
@@ -793,13 +837,25 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         return String.format("%s-%s-%s-Trades.csv", timestamp, symbol, exchange);
     }
 
-    protected void delay() {
+    protected void delayRestCall() {
         // Simulate network delay or processing time
         try {
-            Thread.sleep(250 + (long) (Math.random() * 750));
+            Thread.sleep(
+                    latencyModel.getRestLatencyMsMin() + (long) (Math.random() * (latencyModel.getRestLatencyMsMax())));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt(); // Restore interrupted status
-            System.err.println("Delay interrupted: " + e.getMessage());
+            logger.error("Delay interrupted: " + e.getMessage(), e);
+        }
+    }
+
+    protected void delayWebSocketCall() {
+        // Simulate network delay or processing time
+        try {
+            Thread.sleep(
+                    latencyModel.getWsLatencyMsMin() + (long) (Math.random() * (latencyModel.getWsLatencyMsMax())));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt(); // Restore interrupted status
+            logger.error("Delay interrupted: " + e.getMessage(), e);
         }
     }
 

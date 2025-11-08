@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.ZonedDateTime;
 import java.util.List;
 
+import com.fueledbychai.marketdata.OrderBook.DepthVwapParams;
 import com.fueledbychai.marketdata.OrderBook.PriceLevel;
 
 public interface IOrderBook {
@@ -103,5 +104,9 @@ public interface IOrderBook {
      */
     void updateFromSnapshot(BigDecimal[] bidPrices, Double[] bidSizes, BigDecimal[] askPrices, Double[] askSizes,
             ZonedDateTime timestamp);
+
+    BigDecimal getImpactVwapMidpoint(double targetUnits, DepthVwapParams p);
+
+    BigDecimal getDepthVwapMidpoint(DepthVwapParams params);
 
 }
