@@ -10,6 +10,7 @@ import com.fueledbychai.broker.order.OrderTicket.Type;
 import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.broker.paper.PaperBroker;
 import com.fueledbychai.broker.paper.PaperBrokerCommission;
+import com.fueledbychai.broker.paper.PaperBrokerLatency;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.paradex.ParadexQuoteEngine;
 import com.fueledbychai.paradex.common.ParadexTickerRegistry;
@@ -24,7 +25,8 @@ public class TradingPaperBrokerWithParadexData {
         ParadexQuoteEngine quoteEngine = new ParadexQuoteEngine();
         quoteEngine.startEngine();
 
-        PaperBroker broker = new PaperBroker(quoteEngine, ticker, PaperBrokerCommission.PARADEX_COMMISSION, 10000.0);
+        PaperBroker broker = new PaperBroker(quoteEngine, ticker, PaperBrokerCommission.PARADEX_COMMISSION,
+                PaperBrokerLatency.PARDEX_LATENCY, 10000.0);
         quoteEngine.subscribeLevel1(ticker, broker);
         broker.connect();
 

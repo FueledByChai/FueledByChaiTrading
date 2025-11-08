@@ -1,8 +1,7 @@
 package com.fueledbychai.broker.paper;
 
 public class PaperBrokerCommission {
-    public static final PaperBrokerCommission PARADEX_COMMISSION = new PaperBrokerCommission(0.5, -3.0);
-    public static final PaperBrokerCommission PARADEX_PROMO_COMMISSION = new PaperBrokerCommission(0.0, -2.0);
+    public static final PaperBrokerCommission PARADEX_COMMISSION = new PaperBrokerCommission(-0.2, -2.0);
     public static final PaperBrokerCommission HYPERLIQUID_COMMISSION = new PaperBrokerCommission(-1.5, -4.5);
 
     protected double makerFeeBps = 0.0;
