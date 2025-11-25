@@ -45,6 +45,7 @@ public class OrderStatus implements Serializable {
     protected Status status;
     protected String orderId;
     protected String oldOrderid;
+    protected String clientOrderId;
     protected BigDecimal filled;
     protected BigDecimal remaining;
     protected BigDecimal fillPrice;
@@ -119,6 +120,14 @@ public class OrderStatus implements Serializable {
         this.cancelReason = cancelReason;
     }
 
+    public String getClientOrderId() {
+        return clientOrderId;
+    }
+
+    public void setClientOrderId(String clientOrderId) {
+        this.clientOrderId = clientOrderId;
+    }
+
     @Override
     public int hashCode() {
         int hash = 5;
@@ -131,6 +140,7 @@ public class OrderStatus implements Serializable {
         hash = 97 * hash + (this.ticker != null ? this.ticker.hashCode() : 0);
         hash = 97 * hash + (this.timestamp != null ? this.timestamp.hashCode() : 0);
         hash = 97 * hash + (this.cancelReason != null ? this.cancelReason.hashCode() : 0);
+        hash = 97 * hash + (this.clientOrderId != null ? this.clientOrderId.hashCode() : 0);
         return hash;
     }
 
@@ -170,6 +180,10 @@ public class OrderStatus implements Serializable {
         if (this.cancelReason != other.cancelReason) {
             return false;
         }
+        if ((this.clientOrderId == null) ? (other.clientOrderId != null)
+                : !this.clientOrderId.equals(other.clientOrderId)) {
+            return false;
+        }
         return true;
     }
 
@@ -177,7 +191,8 @@ public class OrderStatus implements Serializable {
     public String toString() {
         return "OrderStatus{" + "status=" + status + ", orderId=" + orderId + ", oldOrderid=" + oldOrderid + ", filled="
                 + filled + ", remaining=" + remaining + ", fillPrice=" + fillPrice + ", ticker=" + ticker
-                + ", timestamp=" + timestamp + ", cancelReason=" + cancelReason + '}';
+                + ", timestamp=" + timestamp + ", cancelReason=" + cancelReason + ", clientOrderId=" + clientOrderId
+                + '}';
     }
 
 }

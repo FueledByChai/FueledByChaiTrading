@@ -186,7 +186,8 @@ public class ParadexTranslator implements IParadexTranslator {
             paradoxOrder.setSide(Side.SELL);
         }
 
-        paradoxOrder.setSize(order.getSize());
+        BigDecimal size = ParadexUtil.formatSize(order.getSize(), order.getTicker().getOrderSizeIncrement());
+        paradoxOrder.setSize(size);
 
         if (order.getType() == OrderTicket.Type.MARKET) {
             paradoxOrder.setOrderType(OrderType.MARKET);
