@@ -21,11 +21,12 @@ import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.TreeSet;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,7 +36,6 @@ import com.fueledbychai.broker.BrokerAccountInfoListener;
 import com.fueledbychai.broker.BrokerErrorListener;
 import com.fueledbychai.broker.BrokerRequestResult;
 import com.fueledbychai.broker.Position;
-import com.fueledbychai.broker.Position.Status;
 import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.OrderEvent;
 import com.fueledbychai.broker.order.OrderEventListener;
@@ -60,15 +60,22 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     protected void fireFillEvent(Fill fill) {
+        logger.debug("Notifying fill listeners: {}", fill);
         // Synchronously notify all fill event listeners before any order update
         // listeners
         synchronized (fillEventListeners) {
             for (com.fueledbychai.broker.order.FillEventListener listener : fillEventListeners) {
                 try {
-                    delayWebSocketCall();
-                    listener.fillReceived(fill);
-                } catch (Exception ex) {
-                    logger.error(ex.getMessage(), ex);
+                    executorService.submit(() -> {
+                        try {
+                            delayWebSocketCall();
+                            listener.fillReceived(fill);
+                        } catch (Exception e) {
+                            logger.error(e.getLocalizedMessage(), e);
+                        }
+                    });
+                } catch (Exception e) {
+                    logger.error(e.getLocalizedMessage(), e);
                 }
             }
         }
@@ -76,7 +83,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     protected Logger logger = LoggerFactory.getLogger(PaperBroker.class);
 
-    private final ExecutorService executorService = Executors.newFixedThreadPool(10); // Thread pool with 10 threads
+    private final ExecutorService executorService = Executors.newCachedThreadPool(); // Thread pool with cached threads
     protected PaperBrokerLatency latencyModel;
 
     protected String asset;
@@ -100,8 +107,14 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     protected double fundingAccruedOrPaid = 0.0; // Total funding accrued or paid
     protected long lastFundingTimestamp = 0; // Last funding timestamp
 
-    private final Lock bidsLock = new ReentrantLock();
-    private final Lock asksLock = new ReentrantLock();
+    // Separate locks to prevent deadlock and ensure proper order of operations
+    private final ReadWriteLock marketDataLock = new ReentrantReadWriteLock();
+    private final ReadWriteLock orderOperationsLock = new ReentrantReadWriteLock();
+
+    // Market data processing takes write lock to have exclusive access during fill
+    // checking
+    // Order operations take read lock on market data to allow concurrent order ops
+    // when no fills are being checked
 
     protected BigDecimal currentPosition = BigDecimal.ZERO; // Current position size
     protected double averageEntryPrice = 0.0; // Average entry price for the current position
@@ -109,11 +122,6 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     protected double unrealizedPnL = 0.0; // Unrealized profit and loss
     protected double totalPnL = 0.0; // Total profit and loss
     protected double totalFees = 0.0; // Total fees paid
-
-    protected List<BrokerAccountInfoListener> brokerAccountInfoListeners = new ArrayList<>(); // Listeners for account
-                                                                                              // info updates
-
-    protected List<OrderEventListener> orderEventListeners = new ArrayList<>();
 
     protected boolean firstTradeWrittenToFile = false;
 
@@ -293,9 +301,8 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     public synchronized BrokerRequestResult cancelOrder(String orderId) {
-        executorService.submit(() -> {
-            cancelOrderSubmitWithDelay(orderId, true); // Call the method with no delay
-        });
+
+        cancelOrderSubmitWithDelay(orderId, true); // Call the method with no delay
         return new BrokerRequestResult();
     }
 
@@ -304,23 +311,35 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         if (shouldDelay) {
             delayRestCall(); // Simulate network delay
         }
-
-        if (openBids.containsKey(orderId)) {
-            OrderTicket order = openBids.remove(orderId); // Remove the order from open bids
-            if (order != null) {
-                cancelOrder(orderId, CancelReason.USER_CANCELED); // Notify listeners of cancellation
+        // Take read lock on market data (allows concurrent cancels, but waits for fill
+        // processing)
+        marketDataLock.readLock().lock();
+        try {
+            orderOperationsLock.writeLock().lock();
+            try {
+                if (openBids.containsKey(orderId)) {
+                    OrderTicket order = openBids.remove(orderId); // Remove the order from open bids
+                    if (order != null) {
+                        cancelOrder(orderId, order.getClientOrderId(), CancelReason.USER_CANCELED); // Notify listeners
+                                                                                                    // of cancellation
+                    }
+                    logger.info("Order {} cancelled from bids.", orderId);
+                } else if (openAsks.containsKey(orderId)) {
+                    OrderTicket order = openAsks.remove(orderId); // Remove the order from open asks
+                    if (order != null) {
+                        cancelOrder(orderId, order.getClientOrderId(), CancelReason.USER_CANCELED); // Notify listeners
+                                                                                                    // of cancellation
+                    }
+                    logger.info("Order {} cancelled from asks.", orderId);
+                } else {
+                    logger.warn("Order {} not found in either bids or asks.", orderId);
+                }
+            } finally {
+                orderOperationsLock.writeLock().unlock();
             }
-            logger.info("Order {} cancelled from bids.", orderId);
-        } else if (openAsks.containsKey(orderId)) {
-            OrderTicket order = openAsks.remove(orderId); // Remove the order from open asks
-            if (order != null) {
-                cancelOrder(orderId, CancelReason.USER_CANCELED); // Notify listeners of cancellation
-            }
-            logger.info("Order {} cancelled from asks.", orderId);
-        } else {
-            logger.warn("Order {} not found in either bids or asks.", orderId);
+        } finally {
+            marketDataLock.readLock().unlock();
         }
-
     }
 
     public List<OrderTicket> getOpenOrders(Ticker ticker) {
@@ -358,32 +377,55 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     public BrokerRequestResult modifyOrder(OrderTicket order) {
 
         order.setOrderEntryTime(getCurrentTime());
-        executorService.submit(() -> {
+        delayRestCall(); // Simulate network delay
+        executorService.submit((Runnable) () -> {
             try {
-                delayRestCall(); // Simulate network delay
-                String orderId = order.getOrderId();
-                if (order.getType() == Type.LIMIT) {
-                    if (order.getDirection() == TradeDirection.BUY) {
-                        if (order.containsModifier(Modifier.POST_ONLY)
-                                && order.getLimitPrice().doubleValue() >= bestAskPrice) {
-                            logger.warn("Limit buy order would cross the best ask price. Cancelling order.");
-                            cancelOrder(orderId, CancelReason.POST_ONLY_WOULD_CROSS);
-                            return;
+                // Take read lock on market data (allows concurrent modifies, but waits for fill
+                // processing)
+                marketDataLock.readLock().lock();
+                try {
+                    orderOperationsLock.writeLock().lock();
+                    try {
+                        String orderId = order.getOrderId();
+                        if (order.getType() == Type.LIMIT) {
+                            if (order.getDirection() == TradeDirection.BUY) {
+                                if (order.containsModifier(Modifier.POST_ONLY)
+                                        && order.getLimitPrice().doubleValue() >= bestAskPrice) {
+                                    logger.warn("Limit buy order would cross the best ask price. Cancelling order.");
+                                    openBids.remove(orderId);
+                                    cancelOrder(orderId, order.getClientOrderId(), CancelReason.POST_ONLY_WOULD_CROSS);
+                                    return;
+                                }
+                                OrderTicket removed = openBids.remove(orderId); // Remove existing order
+                                if (removed == null) {
+                                    logger.error("No existing buy order found with ID: {} to modify.", orderId);
+                                } else {
+                                    logger.info("Limit buy order modified: {}", order);
+                                    openBids.put(orderId, order);
+                                }
+
+                            } else if (order.getDirection() == TradeDirection.SELL) {
+                                if (order.containsModifier(Modifier.POST_ONLY)
+                                        && order.getLimitPrice().doubleValue() <= bestBidPrice) {
+                                    logger.warn("Limit sell order would cross the best bid price. Cancelling order.");
+                                    openAsks.remove(orderId);
+                                    cancelOrder(orderId, order.getClientOrderId(), CancelReason.POST_ONLY_WOULD_CROSS);
+                                    return;
+                                }
+                                OrderTicket removed = openAsks.remove(orderId); // Remove existing order
+                                if (removed == null) {
+                                    logger.error("No existing sell order found with ID: {} to modify.", orderId);
+                                } else {
+                                    logger.info("Limit sell order modified: {}", order);
+                                    openAsks.put(orderId, order);
+                                }
+                            }
                         }
-                        openBids.remove(orderId); // Remove existing order
-                        openBids.put(orderId, order);
-                        logger.info("Limit buy order placed: {}", order);
-                    } else if (order.getDirection() == TradeDirection.SELL) {
-                        if (order.containsModifier(Modifier.POST_ONLY)
-                                && order.getLimitPrice().doubleValue() <= bestBidPrice) {
-                            logger.warn("Limit sell order would cross the best bid price. Cancelling order.");
-                            cancelOrder(orderId, CancelReason.POST_ONLY_WOULD_CROSS);
-                            return;
-                        }
-                        openAsks.remove(orderId); // Remove existing order
-                        openAsks.put(orderId, order);
-                        logger.info("Limit sell order placed: {}", order);
+                    } finally {
+                        orderOperationsLock.writeLock().unlock();
                     }
+                } finally {
+                    marketDataLock.readLock().unlock();
                 }
             } catch (Exception e) {
                 logger.error(e.getMessage(), e);
@@ -394,43 +436,54 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     public BrokerRequestResult placeOrder(OrderTicket order) {
-
+        order.setOrderEntryTime(getCurrentTime());
+        delayRestCall(); // Simulate network delay
         String orderId = System.currentTimeMillis() + "-" + (int) (Math.random() * 10000); // Generate a unique order ID
         order.setOrderId(orderId); // Set the generated order ID
-        order.setOrderEntryTime(getCurrentTime());
         openOrders.put(orderId, order); // Add the order to open orders
 
-        executorService.submit(() -> {
+        executorService.submit((Runnable) () -> {
             try {
-                delayRestCall(); // Simulate network delay
-                if (order.getType() == Type.LIMIT) {
-                    if (order.getDirection() == TradeDirection.BUY) {
-                        if (order.containsModifier(Modifier.POST_ONLY)
-                                && order.getLimitPrice().doubleValue() >= bestAskPrice) {
-                            logger.warn("Limit buy order would cross the best ask price. Cancelling order.");
-                            cancelOrder(orderId, CancelReason.POST_ONLY_WOULD_CROSS);
-                            return;
+                // Take read lock on market data (allows concurrent orders, but waits for fill
+                // processing)
+                marketDataLock.readLock().lock();
+                try {
+                    orderOperationsLock.writeLock().lock();
+                    try {
+                        if (order.getType() == Type.LIMIT) {
+                            if (order.getDirection() == TradeDirection.BUY) {
+                                if (order.containsModifier(Modifier.POST_ONLY)
+                                        && order.getLimitPrice().doubleValue() >= bestAskPrice) {
+                                    logger.warn("Limit buy order would cross the best ask price. Cancelling order.");
+                                    cancelOrder(orderId, order.getClientOrderId(), CancelReason.POST_ONLY_WOULD_CROSS);
+                                    return;
+                                }
+                                openBids.put(orderId, order);
+                                logger.info("Limit buy order placed: {}", order);
+                            } else if (order.getDirection() == TradeDirection.SELL) {
+                                if (order.containsModifier(Modifier.POST_ONLY)
+                                        && order.getLimitPrice().doubleValue() <= bestBidPrice) {
+                                    logger.warn("Limit sell order would cross the best bid price. Cancelling order.");
+                                    cancelOrder(orderId, order.getClientOrderId(), CancelReason.POST_ONLY_WOULD_CROSS);
+                                    return;
+                                }
+                                openAsks.put(orderId, order);
+                                logger.info("Limit sell order placed: {}", order);
+                            }
+                        } else if (order.getType() == Type.MARKET) {
+                            if (order.getDirection() == TradeDirection.BUY) {
+                                fillOrder(order, bestAskPrice);
+                                logger.info("Market buy executed: {}", order);
+                            } else if (order.getDirection() == TradeDirection.SELL) {
+                                fillOrder(order, bestBidPrice);
+                                logger.info("Market sell executed: {}", order);
+                            }
                         }
-                        openBids.put(orderId, order);
-                        logger.info("Limit buy order placed: {}", order);
-                    } else if (order.getDirection() == TradeDirection.SELL) {
-                        if (order.containsModifier(Modifier.POST_ONLY)
-                                && order.getLimitPrice().doubleValue() <= bestBidPrice) {
-                            logger.warn("Limit sell order would cross the best bid price. Cancelling order.");
-                            cancelOrder(orderId, CancelReason.POST_ONLY_WOULD_CROSS);
-                            return;
-                        }
-                        openAsks.put(orderId, order);
-                        logger.info("Limit sell order placed: {}", order);
+                    } finally {
+                        orderOperationsLock.writeLock().unlock();
                     }
-                } else if (order.getType() == Type.MARKET) {
-                    if (order.getDirection() == TradeDirection.BUY) {
-                        fillOrder(order, bestAskPrice);
-                        logger.info("Market buy executed: {}", order);
-                    } else if (order.getDirection() == TradeDirection.SELL) {
-                        fillOrder(order, bestBidPrice);
-                        logger.info("Market sell executed: {}", order);
-                    }
+                } finally {
+                    marketDataLock.readLock().unlock();
                 }
             } catch (Exception e) {
                 logger.error(e.getMessage(), e);
@@ -514,7 +567,8 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     protected List<OrderTicket> checkAsksFills(double bestBid, boolean isTrade) {
         List<OrderTicket> filledOrders = new ArrayList<>();
-        asksLock.lock(); // Lock the asks to ensure thread safety
+        // Take write lock on market data for exclusive access during fill processing
+        marketDataLock.writeLock().lock();
         try {
             if (!isTrade) {
                 bestBidPrice = bestBid; // Update the best ask price
@@ -536,7 +590,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                 }
             }
         } finally {
-            asksLock.unlock(); // Ensure the lock is released after processing
+            marketDataLock.writeLock().unlock(); // Ensure the lock is released after processing
         }
 
         return filledOrders;
@@ -544,7 +598,8 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     protected List<OrderTicket> checkBidsFills(double askPrice, boolean isTrade) {
         List<OrderTicket> filledOrders = new ArrayList<>();
-        bidsLock.lock(); // Lock the bids to ensure thread safety
+        // Take write lock on market data for exclusive access during fill processing
+        marketDataLock.writeLock().lock();
         try {
             if (!isTrade) {
                 bestAskPrice = askPrice; // Update the best ask price
@@ -566,7 +621,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                 }
             }
         } finally {
-            bidsLock.unlock(); // Ensure the lock is released after processing
+            marketDataLock.writeLock().unlock(); // Ensure the lock is released after processing
         }
 
         return filledOrders;
@@ -638,11 +693,15 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
         OrderStatus orderStatus = new OrderStatus(OrderStatus.Status.FILLED, orderId, orderId, originalSize,
                 remainingSize, averageFillPrice, ticker, getCurrentTime());
+        orderStatus.setClientOrderId(order.getClientOrderId());
         OrderEvent event = new OrderEvent(order, orderStatus);
+
+        logger.debug("Created OrderStatus for filled order: {}", orderStatus);
 
         executedOrders.add(order);
 
         double fee = calcFee(price, order.getSize().doubleValue(), order.getType() != Type.MARKET);
+        logger.debug("Calculated fee for order {}: {}", orderId, fee);
 
         Fill fill = new Fill();
         fill.setCommission(BigDecimal.valueOf(fee));
@@ -663,60 +722,59 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     }
 
-    protected synchronized void cancelOrder(String orderId, CancelReason reason) {
-        logger.debug("Attempting to remove order with ID: {} from openOrders", orderId);
-        OrderTicket order = openOrders.remove(orderId);
-        BigDecimal remainingSize = BigDecimal.ZERO;
+    protected void cancelOrder(String orderId, String clientOrderId, CancelReason reason) {
+        // This method is called from within already locked contexts, so no additional
+        // locking needed
+        // but we need to ensure we don't have the marketDataLock when calling this
+        try {
+            logger.debug("Attempting to remove order with ID: {} from openOrders", orderId);
+            OrderTicket order = openOrders.remove(orderId);
+            openBids.remove(orderId);
+            openAsks.remove(orderId);
+            BigDecimal remainingSize = BigDecimal.ZERO;
 
-        OrderStatus.Status status = OrderStatus.Status.CANCELED;
-        String cancelReasonAsString = reason.name(); // Use the name of the cancel reason enum
-        BigDecimal averageFillPrice = BigDecimal.ZERO; // No fill price since it's cancelled
+            OrderStatus.Status status = OrderStatus.Status.CANCELED;
+            BigDecimal averageFillPrice = BigDecimal.ZERO; // No fill price since it's cancelled
 
-        OrderStatus orderStatus = new OrderStatus(status, orderId, orderId, averageFillPrice, remainingSize,
-                averageFillPrice, ticker, getCurrentTime());
-        orderStatus.setCancelReason(reason);
+            OrderStatus orderStatus = new OrderStatus(status, orderId, orderId, averageFillPrice, remainingSize,
+                    averageFillPrice, ticker, getCurrentTime());
+            orderStatus.setClientOrderId(clientOrderId);
+            orderStatus.setCancelReason(reason);
 
-        OrderEvent event = new OrderEvent(order, orderStatus);
+            OrderEvent event = new OrderEvent(order, orderStatus);
 
-        fireOrderStatusUpdate(event); // Notify listeners of the cancellation
+            fireOrderStatusUpdate(event); // Notify listeners of the cancellation
+        } finally {
+            // No lock to release - this method is called from within locked contexts
+        }
     }
 
     protected void fireOrderStatusUpdate(OrderEvent orderStatus) {
-        for (OrderEventListener listener : orderEventListeners) {
+        executorService.submit(() -> {
             try {
-                executorService.submit(() -> {
-                    try {
-                        delayWebSocketCall();
-                        listener.orderEvent(orderStatus);
-                    } catch (Exception e) {
-                        logger.error(e.getLocalizedMessage(), e);
-                    }
-                });
-            } catch (Exception e) {
-                logger.error(e.getLocalizedMessage(), e);
-            }
-        }
-    }
-
-    protected void fireAccountUpdate() {
-        for (BrokerAccountInfoListener listener : brokerAccountInfoListeners) {
-            try {
-                executorService.submit(() -> {
-                    try {
-                        delayWebSocketCall();
-                        listener.accountEquityUpdated(getNetAccountValue()); // Notify the listener with the account
-                                                                             // equity update
-                    } catch (Exception e) {
-                        logger.error(e.getMessage(), e);
-                    }
-                });
+                delayWebSocketCall();
+                super.fireOrderEvent(orderStatus); // Notify the listeners with the order status update
             } catch (Exception e) {
                 logger.error(e.getMessage(), e);
             }
-        }
+        });
+
+    }
+
+    protected void fireAccountUpdate() {
+        executorService.submit(() -> {
+            try {
+                delayWebSocketCall();
+                super.fireAccountEquityUpdated(getNetAccountValue()); // Notify the listeners with the account update
+            } catch (Exception e) {
+                logger.error(e.getMessage(), e);
+            }
+        });
     }
 
     protected void updatePosition(TradeDirection side, BigDecimal orderSize, double price, boolean isMaker) {
+        logger.debug("Updating position. Side: {}, Order Size: {}, Price: {}, Is Maker: {}", side, orderSize, price,
+                isMaker);
         BigDecimal size = orderSize; // Use the initial size passed to the method
         double notional = size.doubleValue() * price;
         if (side == TradeDirection.BUY) {
@@ -840,8 +898,10 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     protected void delayRestCall() {
         // Simulate network delay or processing time
         try {
-            Thread.sleep(
-                    latencyModel.getRestLatencyMsMin() + (long) (Math.random() * (latencyModel.getRestLatencyMsMax())));
+            long latency = latencyModel.getRestLatencyMsMin() + (long) (Math.random()
+                    * (latencyModel.getRestLatencyMsMax() - latencyModel.getRestLatencyMsMin()));
+            logger.debug("REST call delay: {} ms", latency);
+            Thread.sleep(latency);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt(); // Restore interrupted status
             logger.error("Delay interrupted: " + e.getMessage(), e);
@@ -851,8 +911,12 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     protected void delayWebSocketCall() {
         // Simulate network delay or processing time
         try {
-            Thread.sleep(
-                    latencyModel.getWsLatencyMsMin() + (long) (Math.random() * (latencyModel.getWsLatencyMsMax())));
+            // sleep time should be a random time betweehn the latencyMsMin and latencyMsMax
+
+            long latency = latencyModel.getWsLatencyMsMin()
+                    + (long) (Math.random() * (latencyModel.getWsLatencyMsMax() - latencyModel.getWsLatencyMsMin()));
+            logger.debug("WebSocket call delay: {} ms", latency);
+            Thread.sleep(latency);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt(); // Restore interrupted status
             logger.error("Delay interrupted: " + e.getMessage(), e);
@@ -860,19 +924,8 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     @Override
-    public void addBrokerAccountInfoListener(BrokerAccountInfoListener listener) {
-        brokerAccountInfoListeners.add(listener);
-    }
-
-    @Override
     public void addBrokerErrorListener(BrokerErrorListener listener) {
         throw new UnsupportedOperationException("Not yet supported in Paper Broker");
-
-    }
-
-    @Override
-    public void addOrderEventListener(OrderEventListener listener) {
-        orderEventListeners.add(listener);
 
     }
 
@@ -943,7 +996,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     public String getNextOrderId() {
-        return "";
+        return UUID.randomUUID().toString();
     }
 
     @Override
@@ -962,20 +1015,8 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     @Override
-    public void removeBrokerAccountInfoListener(BrokerAccountInfoListener listener) {
-        brokerAccountInfoListeners.remove(listener);
-
-    }
-
-    @Override
     public void removeBrokerErrorListener(BrokerErrorListener listener) {
         throw new UnsupportedOperationException("removeBrokerErrorListener not supported in PaperBroker");
-    }
-
-    @Override
-    public void removeOrderEventListener(OrderEventListener listener) {
-        orderEventListeners.remove(listener);
-
     }
 
     @Override

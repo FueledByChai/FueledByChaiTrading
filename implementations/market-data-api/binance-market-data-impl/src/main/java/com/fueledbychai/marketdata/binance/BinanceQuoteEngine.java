@@ -1,4 +1,4 @@
-package com.fueledbychai.marketdata.hyperliquid;
+package com.fueledbychai.marketdata.binance;
 
 import java.math.BigDecimal;
 import java.time.ZoneId;

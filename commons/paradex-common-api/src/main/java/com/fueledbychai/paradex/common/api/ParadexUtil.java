@@ -35,4 +35,12 @@ public class ParadexUtil {
         return divided.multiply(tickSize);
     }
 
+    public static BigDecimal formatSize(BigDecimal size, BigDecimal minOrderSize) {
+        if (size == null || minOrderSize == null || minOrderSize.compareTo(BigDecimal.ZERO) <= 0) {
+            return size;
+        }
+        BigDecimal divided = size.divide(minOrderSize, 0, java.math.RoundingMode.DOWN);
+        return divided.multiply(minOrderSize);
+    }
+
 }

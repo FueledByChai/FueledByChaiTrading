@@ -71,8 +71,9 @@ public class HyperliquidApiFactory {
      */
     public static String getConfigurationInfo() {
         HyperliquidConfiguration config = HyperliquidConfiguration.getInstance();
-        return String.format("Environment: %s, REST URL: %s, WebSocket URL: %s, Private API Available: %s",
+        return String.format(
+                "Environment: %s, REST URL: %s, WebSocket URL: %s, Private API Available: %s, Sub Account Address Configured: %s",
                 config.getEnvironment(), config.getRestUrl(), config.getWebSocketUrl(),
-                config.hasPrivateKeyConfiguration());
+                config.hasPrivateKeyConfiguration(), config.getSubAccountAddress());
     }
 }

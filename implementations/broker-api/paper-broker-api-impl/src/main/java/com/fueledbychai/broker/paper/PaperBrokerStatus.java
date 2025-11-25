@@ -264,9 +264,10 @@ public class PaperBrokerStatus implements IPaperBrokerStatus {
                     + midPoint + ", vwapMidpoint=" + vwapMidpoint + ", cogMidpoint=" + cogMidpoint
                     + ", currentPosition=" + currentPosition + ", accountValue=" + accountValue + ", realizedPnL="
                     + realizedPnL + ", unrealizedPnL=" + unrealizedPnL + ", totalPnL=" + totalPnL
-                    + ", feesCollectedOrPaid=" + feesCollectedOrPaid + ", pnlWithFees=" + pnlWithFees
-                    + ", dollarVolume=" + dollarVolume + ", openOrdersCount=" + openOrdersCount + ", totalTrades="
-                    + totalTrades + ", openOrders=" + new ArrayList<>(openOrders) + "]";
+                    + ", activeOpenOrders=" + openOrders.size() + ", feesCollectedOrPaid=" + feesCollectedOrPaid
+                    + ", pnlWithFees=" + pnlWithFees + ", dollarVolume=" + dollarVolume + ", openOrdersCount="
+                    + openOrdersCount + ", totalTrades=" + totalTrades + ", openOrders=" + new ArrayList<>(openOrders)
+                    + "]";
         }
     }
 }
