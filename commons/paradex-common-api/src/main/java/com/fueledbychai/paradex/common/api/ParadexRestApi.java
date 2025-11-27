@@ -1241,8 +1241,18 @@ public class ParadexRestApi implements IParadexRestApi {
     protected ParadexOrder parseParadexOrder(String responseBody) {
         JsonObject jsonObject = JsonParser.parseString(responseBody).getAsJsonObject();
         JsonArray resultsArray = jsonObject.getAsJsonArray("results");
-        ParadexOrder order = gson.fromJson(resultsArray.get(0), ParadexOrder.class);
-        return order;
+        if (resultsArray.size() == 0) {
+            return null;
+        }
+        try {
+            ParadexOrder order = gson.fromJson(resultsArray.get(0), ParadexOrder.class);
+            return order;
+        } catch (Exception e) {
+            logger.error("Error parsing Paradex order: " + e.getMessage(), e);
+            logger.error(responseBody);
+            throw new FueledByChaiException("Error parsing Paradex order", e);
+        }
+
     }
 
     protected SystemStatus parseSystemStatus(String responseBody) {
