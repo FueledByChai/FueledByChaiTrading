@@ -32,13 +32,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.broker.AbstractBasicBroker;
-import com.fueledbychai.broker.BrokerAccountInfoListener;
 import com.fueledbychai.broker.BrokerErrorListener;
 import com.fueledbychai.broker.BrokerRequestResult;
 import com.fueledbychai.broker.Position;
 import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.OrderEvent;
-import com.fueledbychai.broker.order.OrderEventListener;
 import com.fueledbychai.broker.order.OrderStatus;
 import com.fueledbychai.broker.order.OrderStatus.CancelReason;
 import com.fueledbychai.broker.order.OrderTicket;
@@ -57,29 +55,6 @@ import com.fueledbychai.marketdata.QuoteType;
 import com.fueledbychai.time.TimeUpdatedListener;
 
 public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListener, OrderFlowListener {
-
-    @Override
-    protected void fireFillEvent(Fill fill) {
-        logger.debug("Notifying fill listeners: {}", fill);
-        // Synchronously notify all fill event listeners before any order update
-        // listeners
-        synchronized (fillEventListeners) {
-            for (com.fueledbychai.broker.order.FillEventListener listener : fillEventListeners) {
-                try {
-                    executorService.submit(() -> {
-                        try {
-                            delayWebSocketCall();
-                            listener.fillReceived(fill);
-                        } catch (Exception e) {
-                            logger.error(e.getLocalizedMessage(), e);
-                        }
-                    });
-                } catch (Exception e) {
-                    logger.error(e.getLocalizedMessage(), e);
-                }
-            }
-        }
-    }
 
     protected Logger logger = LoggerFactory.getLogger(PaperBroker.class);
 
@@ -707,6 +682,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         fill.setCommission(BigDecimal.valueOf(fee));
         fill.setFillId(System.currentTimeMillis() + "-" + (int) (Math.random() * 10000));
         fill.setOrderId(orderId);
+        fill.setClientOrderId(order.getClientOrderId());
         fill.setPrice(averageFillPrice);
         fill.setSide(order.getTradeDirection());
         fill.setSize(originalSize);
@@ -714,7 +690,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         fill.setTicker(ticker);
         fill.setTime(getCurrentTime());
 
-        fireFillEvent(fill); // Notify listeners of the fill event
+        fireFillUpdate(fill); // Notify listeners of the fill event
 
         fireOrderStatusUpdate(event); // Notify listeners of the order status update
 
@@ -759,6 +735,18 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
             }
         });
 
+    }
+
+    protected void fireFillUpdate(Fill fill) {
+        logger.debug("Notifying fill listeners: {}", fill);
+        executorService.submit(() -> {
+            try {
+                delayWebSocketCall();
+                super.fireFillEvent(fill);
+            } catch (Exception e) {
+                logger.error(e.getLocalizedMessage(), e);
+            }
+        });
     }
 
     protected void fireAccountUpdate() {

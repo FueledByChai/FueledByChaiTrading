@@ -35,8 +35,15 @@ public class OrderBookRegistry {
     public void startMarketBookWSClient(Ticker ticker, IParadexOrderBook orderBook) {
         try {
             logger.info("Starting order book WebSocket client");
+            // ParadexWebSocketClient orderBookWSClient = new ParadexWebSocketClient(wsUrl,
+            // "order_book." + ticker.getSymbol() + ".deltas", new
+            // MarketBookWebSocketProcessor(orderBook, () -> {
+            // logger.info("Order book WebSocket closed, trying to restart...");
+            // startMarketBookWSClient(ticker, orderBook);
+            // }));
             ParadexWebSocketClient orderBookWSClient = new ParadexWebSocketClient(wsUrl,
-                    "order_book." + ticker.getSymbol() + ".deltas", new MarketBookWebSocketProcessor(orderBook, () -> {
+                    "order_book." + ticker.getSymbol() + ".interactive@15@200ms",
+                    new MarketBookWebSocketProcessor(orderBook, () -> {
                         logger.info("Order book WebSocket closed, trying to restart...");
                         startMarketBookWSClient(ticker, orderBook);
                     }));
