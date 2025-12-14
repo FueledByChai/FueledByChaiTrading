@@ -39,6 +39,7 @@ import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.OrderEvent;
 import com.fueledbychai.broker.order.OrderStatus;
 import com.fueledbychai.broker.order.OrderStatus.CancelReason;
+import com.fueledbychai.broker.order.OrderStatus.Status;
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.broker.order.OrderTicket.Modifier;
 import com.fueledbychai.broker.order.OrderTicket.Type;
@@ -377,6 +378,11 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                                 } else {
                                     logger.info("Limit buy order modified: {}", order);
                                     openBids.put(orderId, order);
+                                    OrderStatus status = new OrderStatus(Status.REPLACED, orderId, orderId, ticker,
+                                            getCurrentTime());
+                                    OrderEvent event = new OrderEvent(order, status);
+                                    fireOrderStatusUpdate(event);
+
                                 }
 
                             } else if (order.getDirection() == TradeDirection.SELL) {
@@ -393,6 +399,11 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                                 } else {
                                     logger.info("Limit sell order modified: {}", order);
                                     openAsks.put(orderId, order);
+                                    OrderStatus status = new OrderStatus(Status.REPLACED, orderId, orderId, ticker,
+                                            getCurrentTime());
+                                    OrderEvent event = new OrderEvent(order, status);
+                                    fireOrderStatusUpdate(event);
+
                                 }
                             }
                         }
@@ -434,6 +445,10 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                                     return;
                                 }
                                 openBids.put(orderId, order);
+                                OrderStatus status = new OrderStatus(Status.NEW, orderId, orderId, ticker,
+                                        getCurrentTime());
+                                OrderEvent event = new OrderEvent(order, status);
+                                fireOrderStatusUpdate(event);
                                 logger.info("Limit buy order placed: {}", order);
                             } else if (order.getDirection() == TradeDirection.SELL) {
                                 if (order.containsModifier(Modifier.POST_ONLY)
@@ -443,6 +458,10 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                                     return;
                                 }
                                 openAsks.put(orderId, order);
+                                OrderStatus status = new OrderStatus(Status.NEW, orderId, orderId, ticker,
+                                        getCurrentTime());
+                                OrderEvent event = new OrderEvent(order, status);
+                                fireOrderStatusUpdate(event);
                                 logger.info("Limit sell order placed: {}", order);
                             }
                         } else if (order.getType() == Type.MARKET) {
