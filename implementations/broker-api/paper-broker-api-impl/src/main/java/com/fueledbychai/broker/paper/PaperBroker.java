@@ -354,69 +354,64 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
         order.setOrderEntryTime(getCurrentTime());
         delayRestCall(); // Simulate network delay
-        executorService.submit((Runnable) () -> {
+
+        // Take read lock on market data (allows concurrent modifies, but waits for
+        // fill processing)
+        marketDataLock.readLock().lock();
+        try {
+            orderOperationsLock.writeLock().lock();
             try {
-                // Take read lock on market data (allows concurrent modifies, but waits for fill
-                // processing)
-                marketDataLock.readLock().lock();
-                try {
-                    orderOperationsLock.writeLock().lock();
-                    try {
-                        String orderId = order.getOrderId();
-                        if (order.getType() == Type.LIMIT) {
-                            if (order.getDirection() == TradeDirection.BUY) {
-                                if (order.containsModifier(Modifier.POST_ONLY)
-                                        && order.getLimitPrice().doubleValue() >= bestAskPrice) {
-                                    logger.warn("Limit buy order would cross the best ask price. Cancelling order.");
-                                    openBids.remove(orderId);
-                                    cancelOrder(orderId, order.getClientOrderId(), CancelReason.POST_ONLY_WOULD_CROSS);
-                                    return;
-                                }
-                                OrderTicket removed = openBids.remove(orderId); // Remove existing order
-                                if (removed == null) {
-                                    logger.error("No existing buy order found with ID: {} to modify.", orderId);
-                                } else {
-                                    logger.info("Limit buy order modified: {}", order);
-                                    openBids.put(orderId, order);
-                                    OrderStatus status = new OrderStatus(Status.REPLACED, orderId, orderId, ticker,
-                                            getCurrentTime());
-                                    OrderEvent event = new OrderEvent(order, status);
-                                    fireOrderStatusUpdate(event);
-
-                                }
-
-                            } else if (order.getDirection() == TradeDirection.SELL) {
-                                if (order.containsModifier(Modifier.POST_ONLY)
-                                        && order.getLimitPrice().doubleValue() <= bestBidPrice) {
-                                    logger.warn("Limit sell order would cross the best bid price. Cancelling order.");
-                                    openAsks.remove(orderId);
-                                    cancelOrder(orderId, order.getClientOrderId(), CancelReason.POST_ONLY_WOULD_CROSS);
-                                    return;
-                                }
-                                OrderTicket removed = openAsks.remove(orderId); // Remove existing order
-                                if (removed == null) {
-                                    logger.error("No existing sell order found with ID: {} to modify.", orderId);
-                                } else {
-                                    logger.info("Limit sell order modified: {}", order);
-                                    openAsks.put(orderId, order);
-                                    OrderStatus status = new OrderStatus(Status.REPLACED, orderId, orderId, ticker,
-                                            getCurrentTime());
-                                    OrderEvent event = new OrderEvent(order, status);
-                                    fireOrderStatusUpdate(event);
-
-                                }
-                            }
+                String orderId = order.getOrderId();
+                if (order.getType() == Type.LIMIT) {
+                    if (order.getDirection() == TradeDirection.BUY) {
+                        if (order.containsModifier(Modifier.POST_ONLY)
+                                && order.getLimitPrice().doubleValue() >= bestAskPrice) {
+                            logger.warn("Limit buy order would cross the best ask price. Cancelling order.");
+                            openBids.remove(orderId);
+                            cancelOrder(orderId, order.getClientOrderId(), CancelReason.POST_ONLY_WOULD_CROSS);
+                            return new BrokerRequestResult(false, true,
+                                    "Post-only buy would cross best ask; order canceled");
                         }
-                    } finally {
-                        orderOperationsLock.writeLock().unlock();
+                        OrderTicket removed = openBids.remove(orderId); // Remove existing order
+                        if (removed == null) {
+                            logger.error("No existing buy order found with ID: {} to modify.", orderId);
+                            return new BrokerRequestResult(false, true, "404 Order not found: " + orderId);
+                        }
+                        logger.info("Limit buy order modified: {}", order);
+                        openBids.put(orderId, order);
+                        OrderStatus status = new OrderStatus(Status.REPLACED, orderId, orderId, ticker,
+                                getCurrentTime());
+                        OrderEvent event = new OrderEvent(order, status);
+                        fireOrderStatusUpdate(event);
+                    } else if (order.getDirection() == TradeDirection.SELL) {
+                        if (order.containsModifier(Modifier.POST_ONLY)
+                                && order.getLimitPrice().doubleValue() <= bestBidPrice) {
+                            logger.warn("Limit sell order would cross the best bid price. Cancelling order.");
+                            openAsks.remove(orderId);
+                            cancelOrder(orderId, order.getClientOrderId(), CancelReason.POST_ONLY_WOULD_CROSS);
+                            return new BrokerRequestResult(false, true,
+                                    "Post-only sell would cross best bid; order canceled");
+                        }
+                        OrderTicket removed = openAsks.remove(orderId); // Remove existing order
+                        if (removed == null) {
+                            logger.error("No existing sell order found with ID: {} to modify.", orderId);
+                            return new BrokerRequestResult(false, true, "404Order not found: " + orderId);
+                        }
+                        logger.info("Limit sell order modified: {}", order);
+                        openAsks.put(orderId, order);
+                        OrderStatus status = new OrderStatus(Status.REPLACED, orderId, orderId, ticker,
+                                getCurrentTime());
+                        OrderEvent event = new OrderEvent(order, status);
+                        fireOrderStatusUpdate(event);
                     }
-                } finally {
-                    marketDataLock.readLock().unlock();
                 }
-            } catch (Exception e) {
-                logger.error(e.getMessage(), e);
+            } finally {
+                orderOperationsLock.writeLock().unlock();
             }
-        });
+        } finally {
+            marketDataLock.readLock().unlock();
+        }
+
         return new BrokerRequestResult();
     }
 
