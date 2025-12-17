@@ -489,7 +489,7 @@ public class ResilientParadexBroker extends ForwardingBroker {
             try {
                 return delegate.modifyOrder(order);
             } catch (Exception e) {
-                logger.error("Error modifying order for {}: {}", order.getTicker().getSymbol(), e.getMessage(), e);
+                logger.error("Error modifying order for {}: ID: {} message: {}", order.getTicker().getSymbol(), order.getClientOrderId(), e.getMessage(), e);
                 throw e;
             }
         };
@@ -504,11 +504,11 @@ public class ResilientParadexBroker extends ForwardingBroker {
                     .withBulkhead(modifyOrderBulkhead).decorate().get();
 
             orderModified = true;
-            logger.debug("Successfully modified order for {} with resilience patterns", order.getTicker().getSymbol());
+            logger.debug("Successfully modified order for {} with resilience patterns", order.getClientOrderId());
 
         } catch (Exception e) {
             lastException = e;
-            logger.warn("Order modification failed for {} after all retries: {}", order.getTicker().getSymbol(),
+            logger.warn("Order modification failed for {} after all retries: {}", order.getClientOrderId(),
                     e.getMessage());
         }
 
@@ -516,14 +516,14 @@ public class ResilientParadexBroker extends ForwardingBroker {
         // reconciliation
         if (!orderModified || lastException != null) {
             logger.info("Attempting order reconciliation for {} due to modification failure or uncertainty",
-                    order.getTicker().getSymbol());
+                    order.getClientOrderId());
 
             ReconciliationResult reconcileResult = reconcileOrderStatus(order);
 
             switch (reconcileResult) {
             case ORDER_FOUND:
                 logger.info("Order reconciliation successful for {} - order was actually modified with ID: {}",
-                        order.getTicker().getSymbol(), order.getOrderId());
+                        order.getClientOrderId(), order.getOrderId());
                 // If the reconciled order is already final, surface that to the caller so they
                 // can
                 // respond appropriately (e.g., filled or canceled). Otherwise treat as success.
@@ -545,7 +545,7 @@ public class ResilientParadexBroker extends ForwardingBroker {
 
             case ORDER_NOT_FOUND:
                 logger.error("Order reconciliation confirmed for {} - order was not found on server",
-                        order.getTicker().getSymbol());
+                        order.getClientOrderId());
                 // We confirmed the order wasn't found, safe to rethrow original exception
                 if (lastException != null) {
                     if (lastException instanceof RuntimeException) {
@@ -561,7 +561,7 @@ public class ResilientParadexBroker extends ForwardingBroker {
             case VERIFICATION_FAILED:
                 logger.error(
                         "Order reconciliation failed for {} - unable to verify order status due to network/API issues. Order state unknown!",
-                        order.getTicker().getSymbol());
+                        order.getClientOrderId());
                 // We don't know if the order was modified or not - this is dangerous!
                 // Throw a specific exception to alert calling code
                 throw new RuntimeException(
