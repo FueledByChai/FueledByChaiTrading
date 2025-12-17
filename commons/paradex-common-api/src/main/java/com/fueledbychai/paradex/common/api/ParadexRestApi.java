@@ -286,6 +286,11 @@ public class ParadexRestApi implements IParadexRestApi {
     }
 
     @Override
+    public List<ParadexOrder> getOpenOrders(String jwtToken) {
+        return getOpenOrders(jwtToken);
+    }
+
+    @Override
     public List<ParadexOrder> getOpenOrders(String jwtToken, String market) {
         checkPrivateApi();
         return executeWithRetry(() -> {
@@ -293,7 +298,9 @@ public class ParadexRestApi implements IParadexRestApi {
             String path = "/orders";
             String url = baseUrl + path;
             HttpUrl.Builder urlBuilder = HttpUrl.parse(url).newBuilder();
-            urlBuilder.addQueryParameter("market", market);
+            if (market != null && !market.isEmpty()) {
+                urlBuilder.addQueryParameter("market", market);
+            }
             String newUrl = urlBuilder.build().toString();
 
             Request.Builder requestBuilder = new Request.Builder().url(newUrl).get().addHeader("Authorization",
@@ -338,8 +345,12 @@ public class ParadexRestApi implements IParadexRestApi {
             try (var s = Span.start("PD_CANCEL_ORDER_BY_ID_REST_CALL", orderId)) {
                 response = client.newCall(request).execute();
                 if (!response.isSuccessful()) {
-                    logger.error("Error response: " + response.body().string());
-                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                    String body = "";
+                    if( response.body() != null ) {
+                        body = response.body().string();
+                    }
+                    logger.error("Error response: " + body);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + body,
                             response.code());
                 }
             }

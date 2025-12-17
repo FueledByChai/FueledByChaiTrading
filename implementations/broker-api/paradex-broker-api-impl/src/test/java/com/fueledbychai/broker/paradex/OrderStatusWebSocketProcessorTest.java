@@ -1,17 +1,17 @@
 package com.fueledbychai.broker.paradex;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
-
-import java.math.BigDecimal;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import static org.mockito.Mockito.verify;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.fueledbychai.paradex.common.api.order.OrderType;
@@ -226,7 +226,7 @@ public class OrderStatusWebSocketProcessorTest {
                             "cancel_reason": "NONE",
                             "type": "LIMIT",
                             "avg_fill_price": "50.25",
-                            "timestamp": 1693036800000,
+                            "published_at": 1693036800000,
                             "side": "BUY",
                             "market": "BTC-USD"
                         }
@@ -259,7 +259,7 @@ public class OrderStatusWebSocketProcessorTest {
                             "cancel_reason": "NONE",
                             "type": "MARKET",
                             "avg_fill_price": "",
-                            "timestamp": 1693036900000,
+                            "published_at": 1693036900000,
                             "side": "SELL",
                             "market": "ETH-USD"
                         }
@@ -293,7 +293,7 @@ public class OrderStatusWebSocketProcessorTest {
                             "cancel_reason": "NONE",
                             "type": "LIMIT",
                             "avg_fill_price": "100.50",
-                            "timestamp": 1693037000000,
+                            "published_at": 1693037000000,
                             "side": "BUY",
                             "market": "SOL-USD"
                         }
@@ -423,7 +423,7 @@ public class OrderStatusWebSocketProcessorTest {
                             "cancel_reason": "NONE",
                             "type": "STOP",
                             "avg_fill_price": "75.00",
-                            "timestamp": 1693037100000,
+                            "published_at": 1693037100000,
                             "side": "SELL",
                             "market": "AVAX-USD"
                         }
@@ -453,7 +453,7 @@ public class OrderStatusWebSocketProcessorTest {
                             "cancel_reason": "NONE",
                             "type": "LIMIT",
                             "avg_fill_price": "50.25",
-                            "timestamp": 1693036800000,
+                            "published_at": 1693036800000,
                             "side": "BUY",
                             "market": "BTC-USD"
                         }

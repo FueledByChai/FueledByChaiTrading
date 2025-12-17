@@ -38,7 +38,7 @@ public class OrderStatusWebSocketProcessor extends AbstractWebSocketProcessor<IP
                 String cancelReason = data.getString("cancel_reason");
                 String orderType = data.getString("type");
                 String averageFillPriceStr = data.getString("avg_fill_price");
-                long timestamp = data.getLong("timestamp");
+                long timestamp = data.getLong("published_at");
                 String side = data.getString("side");
                 String tickerString = data.getString("market");
                 String clientOrderId = data.optString("client_id", "");

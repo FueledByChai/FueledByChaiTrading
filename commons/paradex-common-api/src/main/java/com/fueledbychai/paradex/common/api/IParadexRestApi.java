@@ -29,6 +29,8 @@ public interface IParadexRestApi {
     List<OHLCBar> getOHLCBars(String symbol, int resolutionInMinutes, int lookbackInMinutes,
             HistoricalPriceKind priceKind);
 
+    List<ParadexOrder> getOpenOrders(String jwtToken);
+
     List<ParadexOrder> getOpenOrders(String jwtToken, String market);
 
     RestResponse cancelOrder(String jwtToken, String orderId);
