@@ -26,10 +26,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.broker.BrokerRequestResult;
+import com.fueledbychai.broker.BrokerRequestResult.FailureType;
 import com.fueledbychai.broker.ForwardingBroker;
 import com.fueledbychai.broker.IBroker;
 import com.fueledbychai.broker.IBrokerOrderRegistry;
 import com.fueledbychai.broker.Position;
+import com.fueledbychai.broker.order.OrderStatus.Status;
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.data.FueledByChaiException;
 import com.fueledbychai.data.ResponseException;
@@ -522,7 +524,23 @@ public class ResilientParadexBroker extends ForwardingBroker {
             case ORDER_FOUND:
                 logger.info("Order reconciliation successful for {} - order was actually modified with ID: {}",
                         order.getTicker().getSymbol(), order.getOrderId());
-                // Order was successfully modified despite the exception, so don't rethrow
+                // If the reconciled order is already final, surface that to the caller so they
+                // can
+                // respond appropriately (e.g., filled or canceled). Otherwise treat as success.
+                Status status = order.getCurrentStatus();
+                if (status != null) {
+                    switch (status) {
+                    case FILLED:
+                        return new BrokerRequestResult(false, false, "Modify failed: order already FILLED",
+                                FailureType.ORDER_ALREADY_FILLED);
+                    case CANCELED:
+                        return new BrokerRequestResult(false, false, "Modify failed: order already CANCELED",
+                                FailureType.ORDER_ALREADY_CANCELED);
+                    default:
+                        break;
+                    }
+                }
+
                 return new BrokerRequestResult();
 
             case ORDER_NOT_FOUND:
@@ -537,7 +555,8 @@ public class ResilientParadexBroker extends ForwardingBroker {
                                 lastException);
                     }
                 }
-                return new BrokerRequestResult();
+                return new BrokerRequestResult(false, false, "Modify failed: order not found on server",
+                        FailureType.ORDER_NOT_FOUND);
 
             case VERIFICATION_FAILED:
                 logger.error(
@@ -764,7 +783,11 @@ public class ResilientParadexBroker extends ForwardingBroker {
 
     @Override
     public BrokerRequestResult cancelOrder(OrderTicket order) {
-        return cancelOrder(order.getOrderId());
+        if( order.getClientOrderId() != null && !order.getClientOrderId().trim().isEmpty()) {
+            return cancelOrderByClientOrderId(order.getClientOrderId());
+        } else {
+            return cancelOrder(order.getOrderId());
+        }
     }
 
     @Override

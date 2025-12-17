@@ -1,12 +1,15 @@
 package com.fueledbychai.binance.model;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
  * Represents a Binance trading symbol with all its configuration and
  * restrictions.
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class BinanceSymbol {
 
     @JsonProperty("symbol")

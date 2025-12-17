@@ -205,10 +205,16 @@ public class ParadexBrokerTest {
 
     @Test
     public void testGetOpenOrders_ThrowsUnsupportedOperationException() {
-        // Act & Assert
-        assertThrows(UnsupportedOperationException.class, () -> {
-            broker.getOpenOrders();
-        });
+
+        List<ParadexOrder> mockParadexOrders = List.of(mockParadexOrder);
+        List<OrderTicket> mockOrders = List.of(mockTradeOrder);
+        when(mockRestApi.getOpenOrders(broker.jwtToken)).thenReturn(mockParadexOrders);
+        when(mockTranslator.translateOrders(List.of(mockParadexOrder))).thenReturn(mockOrders);
+
+        List<OrderTicket> openOrders = broker.getOpenOrders();
+
+        assertEquals(mockOrders, openOrders);
+
     }
 
     @Test
