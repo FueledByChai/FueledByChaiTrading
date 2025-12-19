@@ -182,8 +182,8 @@ public class ResilientParadexBroker extends ForwardingBroker {
      * Creates a bulkhead configuration for order operations.
      */
     private Bulkhead createBulkheadForOrders(String name) {
-        BulkheadConfig bulkheadConfig = BulkheadConfig.custom().maxConcurrentCalls(5)
-                .maxWaitDuration(Duration.ofSeconds(10)).build();
+        BulkheadConfig bulkheadConfig = BulkheadConfig.custom().maxConcurrentCalls(40)
+                .maxWaitDuration(Duration.ofSeconds(5)).build();
 
         return Bulkhead.of(name, bulkheadConfig);
     }

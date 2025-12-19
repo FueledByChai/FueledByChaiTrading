@@ -329,9 +329,16 @@ public class ParadexBroker extends AbstractBasicBroker {
         OrderTicket order = orderRegistry.getOpenOrderById(orderStatus.getOrderId());
         if (order == null) {
             order = orderRegistry.getCompletedOrderById(orderStatus.getOrderId());
-            if (order == null) {
-                logger.warn("Received order status update for unknown order ID: {}", orderStatus.getOrderId());
+            if( order == null ) {
+                order = orderRegistry.getOpenOrderByClientId(orderStatus.getClientOrderId());
+                if( order == null ) {
+                    order = orderRegistry.getCompletedOrderByClientId(orderStatus.getClientOrderId());
+                                if (order == null) {
+                logger.warn("Received order status update for unknown order ID: {}  ClientOrderId: {}", orderStatus.getOrderId(), orderStatus.getClientOrderId());
                 return;
+
+                }
+            }
             }
         }
         order.setCurrentStatus(status.getStatus());
