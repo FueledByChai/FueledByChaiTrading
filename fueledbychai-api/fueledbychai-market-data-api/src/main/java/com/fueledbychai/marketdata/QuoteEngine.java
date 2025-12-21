@@ -27,7 +27,10 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.slf4j.Logger;
@@ -45,9 +48,11 @@ public abstract class QuoteEngine implements IQuoteEngine {
     protected static final Logger logger = LoggerFactory.getLogger(QuoteEngine.class);
 
     // Thread pool for handling quote notifications
-    private final ExecutorService quoteExecutor;
+    private final ThreadPoolExecutor quoteExecutor;
 
     private static final Map<Class<? extends QuoteEngine>, QuoteEngine> instances = new ConcurrentHashMap<>();
+    ScheduledExecutorService monitor = Executors.newSingleThreadScheduledExecutor();
+
 
     // Custom ThreadFactory for naming quote processing threads
     private static class QuoteThreadFactory implements ThreadFactory {
@@ -86,7 +91,7 @@ public abstract class QuoteEngine implements IQuoteEngine {
             .synchronizedMap(new HashMap<Ticker, List<OrderFlowListener>>());
 
     public QuoteEngine() {
-        this(100); // Default to 100 threads
+        this(500); // Default to 500 threads
     }
 
     /**
@@ -97,8 +102,11 @@ public abstract class QuoteEngine implements IQuoteEngine {
     public QuoteEngine(int threadPoolSize) {
         errorListeners = new ArrayList<ErrorListener>();
         // Initialize thread pool with specified number of threads for quote processing
-        quoteExecutor = Executors.newFixedThreadPool(threadPoolSize, new QuoteThreadFactory());
+        quoteExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(threadPoolSize, new QuoteThreadFactory());
         logger.info("Initialized QuoteEngine with {} threads for quote processing", threadPoolSize);
+        monitor.scheduleAtFixedRate(() -> {
+    logger.info("Quote Engine Pool size: " + quoteExecutor.getPoolSize() + ", Active threads: " + quoteExecutor.getActiveCount());
+        }, 0, 1, TimeUnit.SECONDS);
     }
 
     public void addErrorListener(ErrorListener listener) {
@@ -244,13 +252,13 @@ public abstract class QuoteEngine implements IQuoteEngine {
                         quoteExecutor.submit(() -> {
                             try {
                                 listener.level2QuoteReceived(quote);
-                            } catch (Exception ex) {
-                                logger.warn("Error processing Level2 quote for listener", ex);
+                            } catch (Throwable ex) {
+                                logger.error("Error processing Level2 quote for listener", ex);
                             }
                         });
                     }
-                } catch (Exception ex) {
-                    logger.warn("Error submitting Level2 quote task", ex);
+                } catch (Throwable ex) {
+                    logger.error("Error submitting Level2 quote task", ex);
                 }
             }
         }

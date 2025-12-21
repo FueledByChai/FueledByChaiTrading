@@ -2,6 +2,7 @@ package com.fueledbychai.paradex.example.trading;
 
 import java.math.BigDecimal;
 
+import com.fueledbychai.broker.BrokerRequestResult;
 import com.fueledbychai.broker.IBroker;
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.broker.order.OrderTicket.Modifier;
@@ -16,6 +17,54 @@ import com.fueledbychai.paradex.common.ParadexTickerRegistry;
 
 public class ParadexTradingExample {
     protected static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ParadexTradingExample.class);
+
+
+        public void placeModifyOrderNoParamsChanged() throws Exception {
+        Ticker btcTicker = ParadexTickerRegistry.getInstance().lookupByBrokerSymbol("BTC-USD-PERP");
+
+        QuoteEngine engine = QuoteEngine.getInstance(ParadexQuoteEngine.class);
+        engine.startEngine();
+
+        engine.subscribeLevel1(btcTicker, (level1Quote) -> {
+            // System.out.println("Level 1 Quote Updated : " + level1Quote);
+        });
+
+        // ParadexBroker broker = new ParadexBroker();
+        IBroker broker = new ResilientParadexBroker();
+        broker.connect();
+
+        broker.addOrderEventListener((event) -> {
+            log.info("Order Event Received : {}", event);
+        });
+
+        broker.addFillEventListener(fill -> {
+            log.info("Order Fill Received : {}", fill);
+        });
+
+        OrderTicket order = new OrderTicket();
+
+        String orderId = System.currentTimeMillis() + "";
+
+        order.setTicker(btcTicker).setSize(BigDecimal.valueOf(0.01)).setDirection(TradeDirection.BUY)
+                .setType(Type.LIMIT).setLimitPrice(BigDecimal.valueOf(85000)).setClientOrderId(orderId).addModifier(Modifier.POST_ONLY);
+
+
+                Thread.sleep(5000);
+
+        broker.placeOrder(order);
+        Thread.sleep(3000);
+
+
+        order.setSize(BigDecimal.ZERO); // No size change
+        BrokerRequestResult orderModificationResult = broker.modifyOrder(order);
+
+        log.info("Order Modification Result : {}", orderModificationResult);
+
+        Thread.sleep(1000);
+
+    }
+
+
 
     public void cancelMultipleTimes() throws Exception {
         Ticker btcTicker = ParadexTickerRegistry.getInstance().lookupByBrokerSymbol("BTC-USD-PERP");
@@ -44,7 +93,7 @@ public class ParadexTradingExample {
         String orderId = System.currentTimeMillis() + "";
 
         order.setTicker(btcTicker).setSize(BigDecimal.valueOf(0.01)).setDirection(TradeDirection.BUY)
-                .setType(Type.LIMIT).setLimitPrice(BigDecimal.valueOf(108000)).setClientOrderId(orderId);
+                .setType(Type.LIMIT).setLimitPrice(BigDecimal.valueOf(108000)).setClientOrderId(orderId).addModifier(Modifier.POST_ONLY);
 
         broker.placeOrder(order);
         Thread.sleep(3000);
@@ -103,7 +152,8 @@ public class ParadexTradingExample {
         // System.setProperty("paradex.config.file",
         // "/path/to/your/paradex-trading-example.properties");
         ParadexTradingExample example = new ParadexTradingExample();
-        example.executeTrade();
+        //example.executeTrade();
+        example.placeModifyOrderNoParamsChanged();
         // example.cancelMultipleTimes();
         // example.onBoard();
     }

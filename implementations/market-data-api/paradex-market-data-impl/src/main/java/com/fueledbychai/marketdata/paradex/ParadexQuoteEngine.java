@@ -87,6 +87,7 @@ public class ParadexQuoteEngine extends QuoteEngine
 
     @Override
     public void subscribeMarketDepth(Ticker ticker, Level2QuoteListener listener) {
+        logger.debug("Subscribing to market depth for ticker: {} Listener: {}", ticker.getSymbol(), listener);
         super.subscribeMarketDepth(ticker, listener);
         OrderBookRegistry.getInstance().getOrderBook(ticker).addOrderBookUpdateListener(this);
     }
@@ -141,6 +142,8 @@ public class ParadexQuoteEngine extends QuoteEngine
 
     @Override
     public void orderBookUpdated(Ticker ticker, IOrderBook book, ZonedDateTime timestamp) {
+        logger.debug("Order book updated for {}: bestBid: {}, bestAsk: {}", ticker, book.getBestBid().price,
+                book.getBestAsk().price);
         Level2Quote quote = new Level2Quote(ticker, book, timestamp);
         super.fireMarketDepthQuote(quote);
     }

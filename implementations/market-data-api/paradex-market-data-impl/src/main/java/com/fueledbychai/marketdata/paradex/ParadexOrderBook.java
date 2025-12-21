@@ -19,7 +19,7 @@ public class ParadexOrderBook extends OrderBook implements IParadexOrderBook {
     private final ScheduledExecutorService notificationScheduler;
     private final AtomicBoolean hasUpdates = new AtomicBoolean(false);
     private final AtomicReference<ZonedDateTime> lastUpdateTimestamp = new AtomicReference<>();
-    private static final long NOTIFICATION_INTERVAL_MS = 500; // 500ms between notifications
+    private static final long NOTIFICATION_INTERVAL_MS = 100; // 100ms between notifications
 
     public ParadexOrderBook(Ticker ticker) {
         super(ticker);
@@ -51,6 +51,9 @@ public class ParadexOrderBook extends OrderBook implements IParadexOrderBook {
 
     private void sendPeriodicNotifications() {
         // Only send notifications if there have been updates since last notification
+        logger.debug("Checking for orderBook update is true: {} timestamp: {}", hasUpdates.get(),
+                lastUpdateTimestamp.get());
+                try {
         if (hasUpdates.compareAndSet(true, false) && initialized) {
             ZonedDateTime timestamp = lastUpdateTimestamp.get();
             if (timestamp != null) {
@@ -59,9 +62,13 @@ public class ParadexOrderBook extends OrderBook implements IParadexOrderBook {
                 super.notifyOrderBookUpdateListenersNewOrderBookSnapshot(timestamp);
             }
         }
+    } catch (Exception e) {
+        logger.error("Error during periodic notification: {}", e.getMessage(), e);
     }
+}
 
     private void markUpdated(ZonedDateTime timestamp) {
+        logger.debug("Marking has updates as true with timestamp: {}", timestamp);
         hasUpdates.set(true);
         lastUpdateTimestamp.set(timestamp);
     }

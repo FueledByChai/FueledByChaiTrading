@@ -489,6 +489,22 @@ public class ResilientParadexBroker extends ForwardingBroker {
             try {
                 return delegate.modifyOrder(order);
             } catch (Exception e) {
+                // Special handling for Paradex error: 400 INVALID_REQUEST_PARAMETER
+                if (e instanceof ResponseException) {
+                    ResponseException re = (ResponseException) e;
+                    if (re.getStatusCode() == 400 && re.getMessage() != null &&
+                        re.getMessage().contains("INVALID_REQUEST_PARAMETER")) {
+                        if (re.getMessage().contains("no order parameters changed")) {
+                            logger.warn("Paradex modifyOrder: No order parameters changed for {}. Returning failed BrokerRequestResult and skipping reconciliation.", order.getClientOrderId());
+                            // Return a failed result, do not throw
+                            return new BrokerRequestResult(false, false, "Modify failed: no order parameters changed", FailureType.NO_ORDER_PARAMS_CHANGED);
+                        } else if (re.getMessage().contains("size: must be a non-negative non-zero number.")) {
+                            logger.warn("Paradex modifyOrder: Invalid size for {}. Returning failed BrokerRequestResult and skipping reconciliation.", order.getClientOrderId());
+                            // Return a failed result, do not throw
+                            return new BrokerRequestResult(false, false, "Modify failed: size must be a non-negative non-zero number.", FailureType.INVALID_SIZE);
+                        }
+                    }
+                }
                 logger.error("Error modifying order for {}: ID: {} message: {}", order.getTicker().getSymbol(), order.getClientOrderId(), e.getMessage(), e);
                 throw e;
             }
@@ -502,6 +518,11 @@ public class ResilientParadexBroker extends ForwardingBroker {
             // exchange seems degraded
             result = Decorators.ofSupplier(orderModificationSupplier).withRetry(modifyOrderRetry)
                     .withBulkhead(modifyOrderBulkhead).decorate().get();
+
+            // If the result is a failed result for NO_ORDER_PARAMS_CHANGED, return immediately (skip reconciliation)
+            if (result != null && !result.isSuccess() && result.getFailureType() == FailureType.NO_ORDER_PARAMS_CHANGED) {
+                return result;
+            }
 
             orderModified = true;
             logger.debug("Successfully modified order for {} with resilience patterns", order.getClientOrderId());
