@@ -123,16 +123,25 @@ public class OrderBook implements IOrderBook {
      * @param asks      List of ask entries (price, size pairs)
      * @param timestamp The timestamp for this update
      */
+    @Override
     public synchronized void updateFromSnapshot(List<PriceLevel> bids, List<PriceLevel> asks, ZonedDateTime timestamp) {
         // Build new state off to the side
         OrderBookSide newBuySide = new OrderBookSide(true);
         OrderBookSide newSellSide = new OrderBookSide(false);
 
-        // Populate the new sides
+        // Populate the new sides with explicit NaN/null checks and warnings
         for (PriceLevel bid : bids) {
+            if (bid.getSize() == null || Double.isNaN(bid.getSize())) {
+                logger.warn("NaN or null bid size encountered in updateFromSnapshot for price {}. Skipping.", bid.getPrice());
+                continue;
+            }
             newBuySide.insertDirectly(bid.getPrice(), bid.getSize());
         }
         for (PriceLevel ask : asks) {
+            if (ask.getSize() == null || Double.isNaN(ask.getSize())) {
+                logger.warn("NaN or null ask size encountered in updateFromSnapshot for price {}. Skipping.", ask.getPrice());
+                continue;
+            }
             newSellSide.insertDirectly(ask.getPrice(), ask.getSize());
         }
 
@@ -189,17 +198,28 @@ public class OrderBook implements IOrderBook {
      * @param askSizes  Array of ask sizes (must be same length as askPrices)
      * @param timestamp The timestamp for this update
      */
+    @Override
     public void updateFromSnapshot(BigDecimal[] bidPrices, Double[] bidSizes, BigDecimal[] askPrices, Double[] askSizes,
             ZonedDateTime timestamp) {
         List<PriceLevel> bids = new ArrayList<>();
         List<PriceLevel> asks = new ArrayList<>();
 
         for (int i = 0; i < bidPrices.length; i++) {
-            bids.add(new PriceLevel(bidPrices[i], bidSizes[i]));
+            Double size = bidSizes[i];
+            if (size == null || Double.isNaN(size)) {
+                logger.warn("NaN or null bid size encountered in updateFromSnapshot (array) for price {}. Skipping.", bidPrices[i]);
+                continue;
+            }
+            bids.add(new PriceLevel(bidPrices[i], size));
         }
 
         for (int i = 0; i < askPrices.length; i++) {
-            asks.add(new PriceLevel(askPrices[i], askSizes[i]));
+            Double size = askSizes[i];
+            if (size == null || Double.isNaN(size)) {
+                logger.warn("NaN or null ask size encountered in updateFromSnapshot (array) for price {}. Skipping.", askPrices[i]);
+                continue;
+            }
+            asks.add(new PriceLevel(askPrices[i], size));
         }
 
         updateFromSnapshot(bids, asks, timestamp);
@@ -524,6 +544,8 @@ public class OrderBook implements IOrderBook {
 
     @Override
     public void addOrderBookUpdateListener(OrderBookUpdateListener listener) {
+        Exception exception = new Exception();
+        logger.debug("### Exception for debugging listener addition", exception);
         orderbookUpdateListeners.add(listener);
     }
 
@@ -594,9 +616,12 @@ public class OrderBook implements IOrderBook {
      */
     protected void notifyOrderBookUpdateListenersNewOrderBookSnapshot(ZonedDateTime timestamp) {
         IOrderBook snapshot = this.cloneOrderBook();
+        logger.debug("Notifying of new order book snapshot, bestBid: {}, bestAsk: {}", snapshot.getBestBid().price,
+                snapshot.getBestAsk().price);
         for (OrderBookUpdateListener listener : orderbookUpdateListeners) {
             listenerExecutor.submit(() -> {
                 try {
+                    logger.debug("Sending order book snapshot to listener: {}", listener);
                     listener.orderBookUpdated(ticker, snapshot, timestamp);
                 } catch (Throwable t) {
                     logger.error("Listener threw exception for {}: {}", ticker, t.getMessage(), t);
@@ -655,6 +680,10 @@ public class OrderBook implements IOrderBook {
         }
 
         public void insert(BigDecimal price, Double size, ZonedDateTime timestamp) {
+            if (size == null || Double.isNaN(size)) {
+                logger.warn("Attempted to insert NaN or null size for price {}. Ignoring order.", price);
+                return;
+            }
             orders.put(price, size);
             updateBestPriceAndSize(timestamp);
         }
@@ -664,10 +693,18 @@ public class OrderBook implements IOrderBook {
          * operations like snapshot loading.
          */
         public void insertDirectly(BigDecimal price, Double size) {
+            if (size == null || Double.isNaN(size)) {
+                logger.warn("Attempted to insert NaN or null size for price {} (insertDirectly). Ignoring order.", price);
+                return;
+            }
             orders.put(price, size);
         }
 
         public void update(BigDecimal price, Double size, ZonedDateTime timestamp) {
+            if (size == null || Double.isNaN(size)) {
+                logger.warn("Attempted to update with NaN or null size for price {}. Ignoring update.", price);
+                return;
+            }
             orders.put(price, size);
             updateBestPriceAndSize(timestamp);
         }

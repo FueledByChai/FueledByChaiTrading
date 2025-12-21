@@ -605,8 +605,9 @@ public class ParadexRestApi implements IParadexRestApi {
         try (var s = Span.start("PD_SEND_MODIFY_ORDER_REST_REQUEST", order.getClientId())) {
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
-                    logger.error("Error response: " + response.body().string());
-                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                    String responseBody = response.body().string();
+                    logger.error("Error response: " + responseBody);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message() + ", " + responseBody,
                             response.code());
                 }
 
