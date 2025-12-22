@@ -489,19 +489,21 @@ public class ResilientParadexBroker extends ForwardingBroker {
             try {
                 return delegate.modifyOrder(order);
             } catch (Exception e) {
-                // Special handling for Paradex error: 400 INVALID_REQUEST_PARAMETER
+                // Special handling for Paradex error: 400 INVALID_REQUEST_PARAMETER or ORDER_IS_NOT_OPEN
                 if (e instanceof ResponseException) {
                     ResponseException re = (ResponseException) e;
-                    if (re.getStatusCode() == 400 && re.getMessage() != null &&
-                        re.getMessage().contains("INVALID_REQUEST_PARAMETER")) {
-                        if (re.getMessage().contains("no order parameters changed")) {
-                            logger.warn("Paradex modifyOrder: No order parameters changed for {}. Returning failed BrokerRequestResult and skipping reconciliation.", order.getClientOrderId());
-                            // Return a failed result, do not throw
-                            return new BrokerRequestResult(false, false, "Modify failed: no order parameters changed", FailureType.NO_ORDER_PARAMS_CHANGED);
-                        } else if (re.getMessage().contains("size: must be a non-negative non-zero number.")) {
-                            logger.warn("Paradex modifyOrder: Invalid size for {}. Returning failed BrokerRequestResult and skipping reconciliation.", order.getClientOrderId());
-                            // Return a failed result, do not throw
-                            return new BrokerRequestResult(false, false, "Modify failed: size must be a non-negative non-zero number.", FailureType.INVALID_SIZE);
+                    if (re.getStatusCode() == 400 && re.getMessage() != null) {
+                        if (re.getMessage().contains("INVALID_REQUEST_PARAMETER")) {
+                            if (re.getMessage().contains("no order parameters changed")) {
+                                logger.warn("Paradex modifyOrder: No order parameters changed for {}. Returning failed BrokerRequestResult and skipping reconciliation.", order.getClientOrderId());
+                                return new BrokerRequestResult(false, false, "Modify failed: no order parameters changed", FailureType.NO_ORDER_PARAMS_CHANGED);
+                            } else if (re.getMessage().contains("size: must be a non-negative non-zero number.")) {
+                                logger.warn("Paradex modifyOrder: Invalid size for {}. Returning failed BrokerRequestResult and skipping reconciliation.", order.getClientOrderId());
+                                return new BrokerRequestResult(false, false, "Modify failed: size must be a non-negative non-zero number.", FailureType.INVALID_SIZE);
+                            }
+                        } else if (re.getMessage().contains("ORDER_IS_NOT_OPEN") && re.getMessage().contains("status: cannot be modified.")) {
+                            logger.warn("Paradex modifyOrder: Order is not open for {}. Returning failed BrokerRequestResult and skipping reconciliation.", order.getClientOrderId());
+                            return new BrokerRequestResult(false, false, "Modify failed: order is not open (cannot be modified)", FailureType.ORDER_NOT_OPEN);
                         }
                     }
                 }
