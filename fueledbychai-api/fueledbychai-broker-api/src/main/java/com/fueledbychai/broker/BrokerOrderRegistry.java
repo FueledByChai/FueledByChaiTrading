@@ -116,6 +116,9 @@ public class BrokerOrderRegistry implements IBrokerOrderRegistry {
     }
 
     protected void addOpenOrderToMap(OrderTicket order, String idToUse, Map<String, OrderTicket> openOrderMap) {
+        if (idToUse == null || idToUse.isEmpty()) {
+            return;
+        }
         openOrderMap.put(idToUse, order);
     }
 
@@ -144,9 +147,7 @@ public class BrokerOrderRegistry implements IBrokerOrderRegistry {
             return;
 
         openOrderMap.remove(idToUse);
-        if (order.getFilledSize() != null && order.getFilledSize().compareTo(BigDecimal.ZERO) > 0) {
-            completedOrderMap.put(idToUse, order);
-        }
+        completedOrderMap.put(idToUse, order);
     }
 
     @Override

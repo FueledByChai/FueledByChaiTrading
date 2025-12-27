@@ -203,11 +203,13 @@ public class ParadexBroker extends AbstractBasicBroker {
         ParadexOrder paradexOrder = translator.translateOrder(order);
 
         String orderId;
+        orderRegistry.addOpenOrder(order);
         try (var s = Span.start("PD_PLACE_ORDER_WITH_API", order.getClientOrderId())) {
             orderId = restApi.placeOrder(jwtToken, paradexOrder);
         }
         logger.info("{} Order for {} placed with ID: {}", order.getDirection(), order.getTicker().getSymbol(), orderId);
         order.setOrderId(orderId);
+        // add to the registry again after we got the exchanges order ID
         orderRegistry.addOpenOrder(order);
         return new BrokerRequestResult();
     }
@@ -329,16 +331,17 @@ public class ParadexBroker extends AbstractBasicBroker {
         OrderTicket order = orderRegistry.getOpenOrderById(orderStatus.getOrderId());
         if (order == null) {
             order = orderRegistry.getCompletedOrderById(orderStatus.getOrderId());
-            if( order == null ) {
+            if (order == null) {
                 order = orderRegistry.getOpenOrderByClientId(orderStatus.getClientOrderId());
-                if( order == null ) {
+                if (order == null) {
                     order = orderRegistry.getCompletedOrderByClientId(orderStatus.getClientOrderId());
-                                if (order == null) {
-                logger.warn("Received order status update for unknown order ID: {}  ClientOrderId: {}", orderStatus.getOrderId(), orderStatus.getClientOrderId());
-                return;
+                    if (order == null) {
+                        logger.warn("Received order status update for unknown order ID: {}  ClientOrderId: {}",
+                                orderStatus.getOrderId(), orderStatus.getClientOrderId());
+                        return;
 
+                    }
                 }
-            }
             }
         }
         order.setCurrentStatus(status.getStatus());

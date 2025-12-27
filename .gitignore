@@ -6,6 +6,7 @@ nbbuild/
 dist/
 nbdist/
 target/
+.history/
 local-stuff/
 nbactions.xml
 nb-configuration.xml
