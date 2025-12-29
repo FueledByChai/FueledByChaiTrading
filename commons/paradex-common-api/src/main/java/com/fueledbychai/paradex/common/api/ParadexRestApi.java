@@ -287,7 +287,7 @@ public class ParadexRestApi implements IParadexRestApi {
 
     @Override
     public List<ParadexOrder> getOpenOrders(String jwtToken) {
-        return getOpenOrders(jwtToken);
+        return getOpenOrders(jwtToken, "");
     }
 
     @Override
@@ -346,12 +346,11 @@ public class ParadexRestApi implements IParadexRestApi {
                 response = client.newCall(request).execute();
                 if (!response.isSuccessful()) {
                     String body = "";
-                    if( response.body() != null ) {
+                    if (response.body() != null) {
                         body = response.body().string();
                     }
                     logger.error("Error response: " + body);
-                    throw new ResponseException("Unexpected code " + response.code() + ": " + body,
-                            response.code());
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + body, response.code());
                 }
             }
 
@@ -607,7 +606,8 @@ public class ParadexRestApi implements IParadexRestApi {
                 if (!response.isSuccessful()) {
                     String responseBody = response.body().string();
                     logger.error("Error response: " + responseBody);
-                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message() + ", " + responseBody,
+                    throw new ResponseException(
+                            "Unexpected code " + response.code() + ": " + response.message() + ", " + responseBody,
                             response.code());
                 }
 
