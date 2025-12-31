@@ -727,22 +727,30 @@ public class ResilientParadexBroker extends ForwardingBroker {
                                 logger.info(
                                         "Order with client ID {} was already canceled, treating cancellation request as successful",
                                         clientOrderId);
-                                return new BrokerRequestResult(true, "Order already canceled");
+                                return new BrokerRequestResult(false, false, "Order already canceled",
+                                        FailureType.ORDER_ALREADY_CANCELED);
                             } else if (status.contains("FILLED") || status.contains("COMPLETE")) {
                                 logger.warn("Order with client ID {} was already filled, cannot cancel a filled order",
                                         clientOrderId);
-                                return new BrokerRequestResult(false, "Cannot cancel order - order was already filled");
+                                return new BrokerRequestResult(false, false,
+                                        "Cannot cancel order - order was already filled",
+                                        FailureType.ORDER_ALREADY_FILLED);
                             } else {
                                 logger.warn(
                                         "Order with client ID {} is closed with status {}, treating as cancellation failure",
                                         clientOrderId, status);
-                                return new BrokerRequestResult(false, "Order is closed with status: " + status);
+                                return new BrokerRequestResult(false, false, "Order is closed with status: " + status,
+                                        FailureType.ORDER_ALREADY_COMPLETE);
                             }
+                        } else if (orderStatus == null) {
+                            logger.warn("Could not retrieve order status for order with client ID {}", clientOrderId);
+                            return new BrokerRequestResult(false, false,
+                                    "Order not found for client ID: " + clientOrderId, FailureType.ORDER_NOT_FOUND);
                         } else {
-                            logger.warn(
-                                    "Could not retrieve order status for closed order with client ID {}, assuming it was canceled",
+                            logger.warn("Could not retrieve order status for closed order with client ID {}",
                                     clientOrderId);
-                            return new BrokerRequestResult(true, "Order is closed (status unknown, assuming canceled)");
+                            return new BrokerRequestResult(false, false, "Order is closed (status unknown)",
+                                    FailureType.UNKNOWN);
                         }
                     } catch (Exception statusException) {
                         logger.warn("Failed to check order status for closed order with client ID {}: {}",
