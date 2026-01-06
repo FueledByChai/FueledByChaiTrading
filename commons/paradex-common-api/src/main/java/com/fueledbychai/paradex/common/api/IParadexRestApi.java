@@ -47,7 +47,7 @@ public interface IParadexRestApi {
 
     String getJwtToken(Map<String, String> headers);
 
-    String getOrderMessageSignature(String orderMessage);
+    // String getOrderMessageSignature(String orderMessage);
 
     boolean isPublicApiOnly();
 
