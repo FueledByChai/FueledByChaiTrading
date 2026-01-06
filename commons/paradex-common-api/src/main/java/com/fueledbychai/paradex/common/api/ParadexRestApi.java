@@ -65,7 +65,7 @@ public class ParadexRestApi implements IParadexRestApi {
     protected String starkPublicKeyHex = null;
 
     // Dedicated message signer for optimized cryptographic operations
-    private ParadexMessageSigner messageSigner = null;
+    private ParadexTypedDataSigner messageSigner = null;
 
     public static IParadexRestApi getPublicOnlyApi(String baseUrl, boolean isTestnet) {
         if (publicOnlyApi == null) {
@@ -119,55 +119,66 @@ public class ParadexRestApi implements IParadexRestApi {
 
         // Initialize message signer if we have credentials
         if (!publicApiOnly) {
-            messageSigner = new ParadexMessageSigner(accountAddressString, privateKeyString, chainID);
+            messageSigner = new ParadexTypedDataSigner(accountAddressString, privateKeyString,
+                    "0x" + chainID.toString(16).toUpperCase());
             warmup();
         }
     }
 
     @Override
     public boolean onboardAccount(String ethereumAddress, String starketAddress, boolean isTestnet) throws Exception {
+        if (true) {
+            throw new UnsupportedOperationException("OnboardAccount not suppored");
+        }
 
+        return false;
         // String jwtToken = getJwtToken();
 
-        BigInteger chainId = isTestnet ? testnetChainId : prodChainId;
-        String chainIdHex = "0x" + chainId.toString(16).toUpperCase();
-        String message = createOnboardingMessage(chainIdHex);
-        String signatureString = getOrderMessageSignature(message);
+        // BigInteger chainId = isTestnet ? testnetChainId : prodChainId;
+        // String chainIdHex = "0x" + chainId.toString(16).toUpperCase();
+        // String message = createOnboardingMessage(chainIdHex);
+        // String signatureString = getOrderMessageSignature(message);
 
-        String path = "/onboarding";
-        String url = baseUrl + path;
+        // String path = "/onboarding";
+        // String url = baseUrl + path;
 
-        Headers headers = new Headers.Builder().add("PARADEX-ETHEREUM-ACCOUNT", ethereumAddress)
-                .add("PARADEX-STARKNET-ACCOUNT", starketAddress).add("PARADEX-STARKNET-SIGNATURE", signatureString)
-                // .add("Authorization", "Bearer " + jwtToken)
-                .build();
+        // Headers headers = new Headers.Builder().add("PARADEX-ETHEREUM-ACCOUNT",
+        // ethereumAddress)
+        // .add("PARADEX-STARKNET-ACCOUNT",
+        // starketAddress).add("PARADEX-STARKNET-SIGNATURE", signatureString)
+        // // .add("Authorization", "Bearer " + jwtToken)
+        // .build();
 
-        RequestBody requestBody = RequestBody.create("{\"public_key\": \"" + starkPublicKeyHex + "\"}",
-                MediaType.get("application/json; charset=utf-8"));
+        // RequestBody requestBody = RequestBody.create("{\"public_key\": \"" +
+        // starkPublicKeyHex + "\"}",
+        // MediaType.get("application/json; charset=utf-8"));
 
-        Request request = new Request.Builder().headers(headers).url(url).post(requestBody).build();
-        logger.info("Request: " + request);
+        // Request request = new
+        // Request.Builder().headers(headers).url(url).post(requestBody).build();
+        // logger.info("Request: " + request);
 
-        try (Response response = client.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                logger.error("Error response: " + response.body().string());
-                throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
-                        response.code());
-            }
+        // try (Response response = client.newCall(request).execute()) {
+        // if (!response.isSuccessful()) {
+        // logger.error("Error response: " + response.body().string());
+        // throw new ResponseException("Unexpected code " + response.code() + ": " +
+        // response.message(),
+        // response.code());
+        // }
 
-            String responseBody = response.body().string();
-            logger.info("Response output: " + responseBody);
-            JsonObject jsonResponse = JsonParser.parseString(responseBody).getAsJsonObject();
-            if (jsonResponse.has("success")) {
-                return jsonResponse.get("success").getAsBoolean();
-            } else {
-                return false;
-            }
+        // String responseBody = response.body().string();
+        // logger.info("Response output: " + responseBody);
+        // JsonObject jsonResponse =
+        // JsonParser.parseString(responseBody).getAsJsonObject();
+        // if (jsonResponse.has("success")) {
+        // return jsonResponse.get("success").getAsBoolean();
+        // } else {
+        // return false;
+        // }
 
-        } catch (IOException e) {
-            logger.error(e.getMessage(), e);
-            throw new RuntimeException(e);
-        }
+        // } catch (IOException e) {
+        // logger.error(e.getMessage(), e);
+        // throw new RuntimeException(e);
+        // }
     }
 
     @Override
@@ -761,8 +772,8 @@ public class ParadexRestApi implements IParadexRestApi {
         logger.info("Getting JWT token for account: " + accountAddressString);
         logger.info("Chain ID: " + chainID);
         // Convert the account address and private key to Felt types
-        Felt accountAddress = Felt.fromHex(accountAddressString);
-        Felt privateKey = Felt.fromHex(privateKeyString);
+        // Felt accountAddress = Felt.fromHex(accountAddressString);
+        // Felt privateKey = Felt.fromHex(privateKeyString);
 
         // Get current timestamp in seconds
         long timestamp = System.currentTimeMillis() / 1000;
@@ -771,29 +782,32 @@ public class ParadexRestApi implements IParadexRestApi {
         // BigInteger chainID = new
         // BigInteger("8458834024819506728615521019831122032732688838300957472069977523540");
 
-        String chainIdHex = "0x" + chainID.toString(16).toUpperCase();
+        // String chainIdHex = "0x" + chainID.toString(16).toUpperCase();
 
         // Create the auth message
-        String authMessage = createAuthMessage(timestamp, expiry, chainIdHex);
+        // String authMessage = createAuthMessage(timestamp, expiry, chainIdHex);
+        String signatureString = messageSigner.signAuthRequestAsParadexArray(timestamp, expiry);
 
         // Convert the auth message to a typed data object
-        TypedData typedData = TypedData.fromJsonString(authMessage);
+        // TypedData typedData = TypedData.fromJsonString(authMessage);
 
         // Create new StarkCurveSigner with the private key
-        StarkCurveSigner scSigner = new StarkCurveSigner(privateKey);
+        // StarkCurveSigner scSigner = new StarkCurveSigner(privateKey);
 
         // Sign the typed data
-        List<Felt> signature = scSigner.signTypedData(typedData, accountAddress);
+        // List<Felt> signature = scSigner.signTypedData(typedData, accountAddress);
 
         // Convert the signature to a string
-        List<BigInteger> signatureBigInt = signature.stream().map(Felt::getValue).collect(Collectors.toList());
-        String signatureStr = convertBigIntListToString(signatureBigInt);
+        // List<BigInteger> signatureBigInt =
+        // signature.stream().map(Felt::getValue).collect(Collectors.toList());
+        // String signatureStr = convertBigIntListToString(signatureBigInt);
 
         // Call the auth endpoint
 
         Map<String, String> requestHeaders = new HashMap<>();
         requestHeaders.put("PARADEX-STARKNET-ACCOUNT", accountAddressString);
-        requestHeaders.put("PARADEX-STARKNET-SIGNATURE", signatureStr);
+        // requestHeaders.put("PARADEX-STARKNET-SIGNATURE", signatureStr);
+        requestHeaders.put("PARADEX-STARKNET-SIGNATURE", signatureString);
         requestHeaders.put("PARADEX-TIMESTAMP", Long.toString(timestamp));
         requestHeaders.put("PARADEX-SIGNATURE-EXPIRATION", Long.toString(expiry));
 
@@ -802,22 +816,23 @@ public class ParadexRestApi implements IParadexRestApi {
         return getJwtToken(requestHeaders);
     }
 
-    @Override
-    public String getOrderMessageSignature(String orderMessage) {
-        if (messageSigner == null) {
-            throw new IllegalStateException("Message signer not initialized - API in public-only mode");
-        }
+    // @Override
+    // public String getOrderMessageSignature(String orderMessage) {
+    // if (messageSigner == null) {
+    // throw new IllegalStateException("Message signer not initialized - API in
+    // public-only mode");
+    // }
 
-        // Use the optimized message signer
-        String signature = messageSigner.signMessage(orderMessage);
+    // // Use the optimized message signer
+    // String signature = messageSigner.signMessage(orderMessage);
 
-        // Update the public key hex if not already set
-        if (starkPublicKeyHex == null) {
-            starkPublicKeyHex = messageSigner.getPublicKeyHex();
-        }
+    // // Update the public key hex if not already set
+    // if (starkPublicKeyHex == null) {
+    // starkPublicKeyHex = messageSigner.getPublicKeyHex();
+    // }
 
-        return signature;
-    }
+    // return signature;
+    // }
 
     /**
      * Optimized direct signing method that avoids JSON parsing overhead. This
@@ -830,12 +845,7 @@ public class ParadexRestApi implements IParadexRestApi {
         }
 
         // Use the optimized direct signing method
-        String signature = messageSigner.signOrderMessageDirect(timestamp, market, side, orderType, size, price);
-
-        // Update the public key hex if not already set
-        if (starkPublicKeyHex == null) {
-            starkPublicKeyHex = messageSigner.getPublicKeyHex();
-        }
+        String signature = messageSigner.signOrderAsParadexArray(timestamp, market, side, orderType, size, price);
 
         return signature;
     }
@@ -851,13 +861,8 @@ public class ParadexRestApi implements IParadexRestApi {
         }
 
         // Use the optimized direct signing method for modify orders
-        String signature = messageSigner.signModifyOrderMessageDirect(timestamp, market, side, orderType, size, price,
+        String signature = messageSigner.signModifyOrderAsParadexArray(timestamp, market, side, orderType, size, price,
                 orderId);
-
-        // Update the public key hex if not already set
-        if (starkPublicKeyHex == null) {
-            starkPublicKeyHex = messageSigner.getPublicKeyHex();
-        }
 
         return signature;
     }
@@ -870,12 +875,12 @@ public class ParadexRestApi implements IParadexRestApi {
     /**
      * Clears cached cryptographic objects. Call this if account credentials change.
      */
-    public void clearSigningCache() {
-        if (messageSigner != null) {
-            messageSigner.clearCache();
-        }
-        starkPublicKeyHex = null;
-    }
+    // public void clearSigningCache() {
+    // if (messageSigner != null) {
+    // messageSigner.clearCache();
+    // }
+    // starkPublicKeyHex = null;
+    // }
 
     /**
      * Legacy method - kept for backwards compatibility but now calls optimized

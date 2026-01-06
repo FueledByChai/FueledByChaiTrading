@@ -94,7 +94,7 @@ public class ParadexMessageSigner {
 
         long totalTime = (System.nanoTime() - totalStart) / 1_000_000;
 
-        logger.info("Signing breakdown - Total: {}ms, JSON Parse: {}ms, Crypto Sign: {}ms, String Convert: {}ms",
+        logger.debug("Signing breakdown - Total: {}ms, JSON Parse: {}ms, Crypto Sign: {}ms, String Convert: {}ms",
                 totalTime, jsonTime, signTime, convertTime);
 
         return result;
@@ -141,7 +141,7 @@ public class ParadexMessageSigner {
 
         long totalTime = (System.nanoTime() - totalStart) / 1_000_000;
 
-        logger.info(
+        logger.debug(
                 "Direct signing breakdown - Total: {}ms, TypedData Build: {}ms, Crypto Sign: {}ms, String Convert: {}ms",
                 totalTime, constructTime, signTime, convertTime);
 
@@ -209,6 +209,7 @@ public class ParadexMessageSigner {
 
         long totalTime = (System.nanoTime() - totalStart) / 1_000_000;
 
+        logger.debug("Signing info market: {} orderId: {}", market, orderId);
         logger.debug(
                 "Direct modify signing breakdown - Total: {}ms, TypedData Build: {}ms, Crypto Sign: {}ms, String Convert: {}ms",
                 totalTime, constructTime, signTime, convertTime);
@@ -358,7 +359,7 @@ public class ParadexMessageSigner {
 
         long totalTime = (System.nanoTime() - totalStart) / 1_000_000;
 
-        logger.info(
+        logger.debug(
                 "Pre-constructed signing breakdown - Total: {}ms, JSON Parse: {}ms, Crypto Sign: {}ms, String Convert: {}ms",
                 totalTime, jsonTime, signTime, convertTime);
 
