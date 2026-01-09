@@ -121,6 +121,7 @@ public class ParadexQuoteEngine extends QuoteEngine
     public void bestBidUpdated(Ticker ticker, BigDecimal bestBid, Double bidSize, ZonedDateTime timestamp) {
         Level1Quote quote = new Level1Quote(ticker, timestamp);
         quote.addQuote(QuoteType.BID, ticker.formatPrice(bestBid));
+        quote.addQuote(QuoteType.BID_SIZE, BigDecimal.valueOf(bidSize));
         super.fireLevel1Quote(quote);
 
     }
@@ -129,6 +130,7 @@ public class ParadexQuoteEngine extends QuoteEngine
     public void bestAskUpdated(Ticker ticker, BigDecimal bestAsk, Double askSize, ZonedDateTime timestamp) {
         Level1Quote quote = new Level1Quote(ticker, timestamp);
         quote.addQuote(QuoteType.ASK, ticker.formatPrice(bestAsk));
+        quote.addQuote(QuoteType.ASK_SIZE, BigDecimal.valueOf(askSize));
         super.fireLevel1Quote(quote);
 
     }
