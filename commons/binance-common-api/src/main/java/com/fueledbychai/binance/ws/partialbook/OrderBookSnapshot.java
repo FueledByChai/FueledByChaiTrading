@@ -1,5 +1,6 @@
 package com.fueledbychai.binance.ws.partialbook;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
@@ -7,6 +8,7 @@ import java.util.List;
  * Represents a Binance order book snapshot. This corresponds to the REST API
  * /api/v3/depth endpoint or similar orderbook data.
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class OrderBookSnapshot {
 
     @JsonProperty("lastUpdateId")

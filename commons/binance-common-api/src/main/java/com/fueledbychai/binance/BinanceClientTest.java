@@ -2,6 +2,7 @@ package com.fueledbychai.binance;
 
 import com.fueledbychai.binance.ws.BinanceWebSocketClient;
 import com.fueledbychai.binance.ws.BinanceWebSocketClientBuilder;
+import com.fueledbychai.binance.ws.aggtrade.AggTradeRecordProcessor;
 import com.fueledbychai.binance.ws.partialbook.OrderBookSnapshot;
 import com.fueledbychai.binance.ws.partialbook.PartialOrderBookProcessor;
 import com.fueledbychai.data.Ticker;
@@ -35,7 +36,17 @@ public class BinanceClientTest {
         BinanceWebSocketClient client = BinanceWebSocketClientBuilder
                 .buildPartialBookDepth("wss://fstream.binance.com/stream", ticker, new PartialOrderBookProcessor(null));
 
-        client.connect();
+        AggTradeRecordProcessor processor = new AggTradeRecordProcessor(() -> {
+
+        });
+        processor.addEventListener(event -> {
+            System.out.println("AggTradeRecord: " + event);
+        });
+
+        BinanceWebSocketClient tradesClient = BinanceWebSocketClientBuilder
+                .buildTradesClient("wss://fstream.binance.com/stream", ticker, processor);
+        // client.connect();
+        tradesClient.connect();
 
     }
 }

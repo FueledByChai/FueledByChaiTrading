@@ -59,7 +59,6 @@ public class BinanceWebSocketClient extends AbstractWebSocketClient {
     @Override
     public void onError(Exception ex) {
         super.onError(ex);
-        // stopPingScheduler();
     }
 
 }
