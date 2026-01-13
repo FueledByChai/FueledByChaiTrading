@@ -12,4 +12,11 @@ public class BinanceWebSocketClientBuilder {
         return new BinanceWebSocketClient(url, channel, processor);
     }
 
+    public static BinanceWebSocketClient buildTradesClient(String url, Ticker ticker, IWebSocketProcessor processor)
+            throws Exception {
+        String channel = String.format("%s@aggTrade", ticker.getSymbol().toLowerCase());
+
+        return new BinanceWebSocketClient(url, channel, processor);
+    }
+
 }
