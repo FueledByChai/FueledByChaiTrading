@@ -246,6 +246,24 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     @Override
+    public BrokerRequestResult cancelOrderByClientOrderId(String clientOrderId) {
+        String orderIdToCancel = null;
+        for (OrderTicket order : openOrders.values()) {
+            if (order.getClientOrderId().equals(clientOrderId)) {
+                orderIdToCancel = order.getOrderId();
+                break;
+            }
+        }
+        if (orderIdToCancel == null) {
+            logger.warn("No order found with client order ID: {}", clientOrderId);
+            return new BrokerRequestResult(false, true, "404 Order not found for client order ID: " + clientOrderId);
+        } else {
+            cancelOrderSubmitWithDelay(orderIdToCancel, true); // Call the method with delay
+            return new BrokerRequestResult();
+        }
+    }
+
+    @Override
     public synchronized BrokerRequestResult cancelAllOrders(Ticker ticker) {
         executorService.submit(() -> {
             delayRestCall(); // Simulate network delay
@@ -323,11 +341,15 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         List<OrderTicket> openOrders = new ArrayList<>(); // List to hold open orders
         // Add all open bids to the list
         for (OrderTicket order : openBids.values()) {
-            openOrders.add(order);
+            if (order.getTicker().equals(ticker)) {
+                openOrders.add(order);
+            }
         }
         // Add all open asks to the list
         for (OrderTicket order : openAsks.values()) {
-            openOrders.add(order);
+            if (order.getTicker().equals(ticker)) {
+                openOrders.add(order);
+            }
         }
 
         return openOrders; // Return the list of open orders
@@ -1003,7 +1025,18 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     public List<OrderTicket> getOpenOrders() {
-        throw new UnsupportedOperationException("getOpenOrders not supported in PaperBroker");
+        delayRestCall(); // Simulate network delay
+        List<OrderTicket> openOrders = new ArrayList<>(); // List to hold open orders
+        // Add all open bids to the list
+        for (OrderTicket order : openBids.values()) {
+            openOrders.add(order);
+        }
+        // Add all open asks to the list
+        for (OrderTicket order : openAsks.values()) {
+            openOrders.add(order);
+        }
+
+        return openOrders; // Return the list of open orders
     }
 
     @Override
