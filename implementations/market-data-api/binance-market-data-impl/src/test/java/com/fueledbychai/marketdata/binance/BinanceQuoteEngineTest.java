@@ -186,7 +186,7 @@ public class BinanceQuoteEngineTest {
         assertEquals(new BigDecimal("10.5"), orderFlow.getPrice());
         assertEquals(new BigDecimal("2.0"), orderFlow.getSize());
         assertEquals(OrderFlow.Side.SELL, orderFlow.getSide());
-        assertEquals(ZonedDateTime.ofInstant(Instant.ofEpochSecond(1710000000L), ZoneId.of("UTC")),
+        assertEquals(ZonedDateTime.ofInstant(Instant.ofEpochMilli(1710000000L), ZoneId.of("UTC")),
                 orderFlow.getTimestamp());
     }
 }
