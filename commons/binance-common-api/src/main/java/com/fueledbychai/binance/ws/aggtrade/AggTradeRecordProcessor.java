@@ -11,7 +11,7 @@ import com.fueledbychai.websocket.IWebSocketClosedListener;
 public class AggTradeRecordProcessor extends AbstractWebSocketProcessor<TradeRecord> {
 
     private static final Logger logger = LoggerFactory.getLogger(AggTradeRecordProcessor.class);
-    ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public AggTradeRecordProcessor(IWebSocketClosedListener listener) {
         super(listener);
