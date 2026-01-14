@@ -169,7 +169,7 @@ public class BinanceQuoteEngine extends QuoteEngine {
 
     public void onTradeRecordUpdate(Ticker ticker, TradeRecord tradeRecord) {
         // Convert TradeRecord to OrderFlow and fire event
-        ZonedDateTime eventTime = Instant.ofEpochSecond(tradeRecord.getTradeTime()).atZone(ZoneId.of("UTC"));
+        ZonedDateTime eventTime = Instant.ofEpochMilli(tradeRecord.getTradeTime()).atZone(ZoneId.of("UTC"));
         OrderFlow orderFlow = new OrderFlow(ticker, new BigDecimal(tradeRecord.getPrice()),
                 new BigDecimal(tradeRecord.getQuantity()),
                 tradeRecord.isBuyerMarketMaker() ? OrderFlow.Side.SELL : OrderFlow.Side.BUY, eventTime);
@@ -236,7 +236,7 @@ public class BinanceQuoteEngine extends QuoteEngine {
                 try {
                     onTradeRecordUpdate(ticker, obs);
                 } catch (Exception e) {
-                    logger.error("Error processing BBO update", e);
+                    logger.error("Error processing trade record update", e);
                 }
             });
 
