@@ -44,6 +44,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     <module>interactive-brokers-client</module>
     <module>interactive-brokers-integration-tests</module>
     <module>paradex-common-api</module>
+    <module>lighter-common-api</module>
     <module>hyperliquid-common-api</module>
     <module>binance-common-api</module>
   </modules>
