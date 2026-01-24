@@ -246,10 +246,10 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     @Override
-    public BrokerRequestResult cancelOrderByClientOrderId(String clientOrderId) {
+    public synchronized BrokerRequestResult cancelOrderByClientOrderId(String clientOrderId) {
         String orderIdToCancel = null;
         for (OrderTicket order : openOrders.values()) {
-            if (order.getClientOrderId().equals(clientOrderId)) {
+            if (clientOrderId.equals(order.getClientOrderId())) {
                 orderIdToCancel = order.getOrderId();
                 break;
             }
@@ -1027,13 +1027,17 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     public List<OrderTicket> getOpenOrders() {
         delayRestCall(); // Simulate network delay
         List<OrderTicket> openOrders = new ArrayList<>(); // List to hold open orders
-        // Add all open bids to the list
-        for (OrderTicket order : openBids.values()) {
-            openOrders.add(order);
+        // Add all open bids to the list in a thread-safe manner
+        synchronized (openBids) {
+            for (OrderTicket order : openBids.values()) {
+                openOrders.add(order);
+            }
         }
-        // Add all open asks to the list
-        for (OrderTicket order : openAsks.values()) {
-            openOrders.add(order);
+        // Add all open asks to the list in a thread-safe manner
+        synchronized (openAsks) {
+            for (OrderTicket order : openAsks.values()) {
+                openOrders.add(order);
+            }
         }
 
         return openOrders; // Return the list of open orders
