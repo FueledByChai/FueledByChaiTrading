@@ -37,7 +37,6 @@ import com.google.gson.reflect.TypeToken;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
-
 import okhttp3.Headers;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
@@ -54,9 +53,6 @@ public class LighterRestApi implements ILighterRestApi {
     protected static ILighterRestApi publicOnlyApi;
     protected static ILighterRestApi privateApi;
 
-
-
-
     @FunctionalInterface
     public interface RetryableAction {
         void run() throws Exception; // Allows throwing checked exceptions
@@ -67,8 +63,6 @@ public class LighterRestApi implements ILighterRestApi {
     protected String accountAddressString;
     protected String privateKeyString;
     protected boolean publicApiOnly = true;
-
-
 
     public LighterRestApi(String baseUrl, boolean isTestnet) {
         this(baseUrl, null, null, isTestnet, null);
@@ -93,14 +87,16 @@ public class LighterRestApi implements ILighterRestApi {
         publicApiOnly = accountAddressString == null || privateKeyString == null;
     }
 
-  
-
     @Override
     public InstrumentDescriptor[] getAllInstrumentsForType(InstrumentType instrumentType) {
         return executeWithRetry(() -> {
             String path = "/orderBookDetails";
             String url = baseUrl + path;
             HttpUrl.Builder urlBuilder = HttpUrl.parse(url).newBuilder();
+            String filter = getOrderBookFilter(instrumentType);
+            if (filter != null && !filter.isBlank()) {
+                urlBuilder.addQueryParameter("filter", filter);
+            }
             String newUrl = urlBuilder.build().toString();
 
             Request request = new Request.Builder().url(newUrl).get().build();
@@ -236,7 +232,7 @@ public class LighterRestApi implements ILighterRestApi {
             String quoteCurrency = instrumentObj.get("quote_currency").getAsString();
 
             // Create common symbol (without exchange-specific suffix)
-            String commonSymbol = symbol.split("-")[0];
+            String commonSymbol = symbol + "/USD";
             String exchangeSymbol = symbol;
 
             // Parse tick size and order size increment from the JSON
@@ -248,7 +244,7 @@ public class LighterRestApi implements ILighterRestApi {
             int fundingPeriodHours = instrumentObj.get("funding_period_hours").getAsInt();
 
             // Create and return the InstrumentDescriptor
-            return new InstrumentDescriptor(InstrumentType.PERPETUAL_FUTURES, Exchange.PARADEX, commonSymbol,
+            return new InstrumentDescriptor(InstrumentType.PERPETUAL_FUTURES, Exchange.LIGHTER, commonSymbol,
                     exchangeSymbol, baseCurrency, quoteCurrency, orderSizeIncrement, priceTickSize,
                     minNotionalOrderSize, BigDecimal.ZERO, fundingPeriodHours, BigDecimal.ONE, 1, "");
 
@@ -328,7 +324,8 @@ public class LighterRestApi implements ILighterRestApi {
         }
     }
 
-    protected InstrumentDescriptor[] parseOrderBookInstrumentDescriptors(InstrumentType instrumentType, JsonObject root) {
+    protected InstrumentDescriptor[] parseOrderBookInstrumentDescriptors(InstrumentType instrumentType,
+            JsonObject root) {
         JsonArray orderBookDetails = getOrderBookDetailsForType(root, instrumentType);
         if (orderBookDetails == null || orderBookDetails.size() == 0) {
             logger.warn("No order_book_details found for instrument type {}", instrumentType);
@@ -415,6 +412,20 @@ public class LighterRestApi implements ILighterRestApi {
         }
 
         return null;
+    }
+
+    protected String getOrderBookFilter(InstrumentType instrumentType) {
+        if (instrumentType == null) {
+            return null;
+        }
+        switch (instrumentType) {
+        case CRYPTO_SPOT:
+            return "spot";
+        case PERPETUAL_FUTURES:
+            return "perp";
+        default:
+            return null;
+        }
     }
 
     protected boolean isValidMarketTypeForInstrumentType(String marketType, InstrumentType instrumentType) {
@@ -545,6 +556,5 @@ public class LighterRestApi implements ILighterRestApi {
             return ZonedDateTime.parse(in.nextString(), FORMATTER);
         }
     }
-
 
 }
