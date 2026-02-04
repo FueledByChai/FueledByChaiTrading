@@ -60,8 +60,9 @@ public class LighterRestApiExample {
             InstrumentDescriptor[] perps = api.getAllInstrumentsForType(InstrumentType.PERPETUAL_FUTURES);
             logSample("PERPETUAL_FUTURES", perps);
 
-            InstrumentDescriptor[] spot = api.getAllInstrumentsForType(InstrumentType.CRYPTO_SPOT);
-            logSample("CRYPTO_SPOT", spot);
+            // InstrumentDescriptor[] spot =
+            // api.getAllInstrumentsForType(InstrumentType.CRYPTO_SPOT);
+            // logSample("CRYPTO_SPOT", spot);
 
             // if (symbol != null && !symbol.isBlank()) {
             // InstrumentDescriptor descriptor = api.getInstrumentDescriptor(symbol);
