@@ -54,6 +54,7 @@ import com.fueledbychai.broker.BrokerAccountInfoListener;
 import com.fueledbychai.broker.BrokerError;
 import com.fueledbychai.broker.BrokerErrorListener;
 import com.fueledbychai.broker.BrokerRequestResult;
+import com.fueledbychai.broker.BrokerStatus;
 import com.fueledbychai.broker.IBroker;
 import com.fueledbychai.broker.IBrokerOrderRegistry;
 import com.fueledbychai.broker.Position;
@@ -179,8 +180,12 @@ public class InteractiveBrokersBroker extends BaseIBConnectionDelegate implement
     @Override
     public void addFillEventListener(FillEventListener listener) {
         throw new UnsupportedOperationException("Not supported yet."); // To change body of generated methods,
-                                                                       // choose Tools | Templates.
+                                                                       // choose Tools | Templates
+    }
 
+    @Override
+    public BrokerStatus getBrokerStatus() {
+        throw new UnsupportedOperationException("Get broker status not implemented yet");
     }
 
     @Override

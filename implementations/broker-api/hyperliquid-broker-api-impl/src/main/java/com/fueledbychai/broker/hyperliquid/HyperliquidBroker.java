@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 import com.fueledbychai.BestBidOffer;
 import com.fueledbychai.broker.AbstractBasicBroker;
 import com.fueledbychai.broker.BrokerRequestResult;
+import com.fueledbychai.broker.BrokerStatus;
 import com.fueledbychai.broker.Position;
 import com.fueledbychai.broker.hyperliquid.translators.ITranslator;
 import com.fueledbychai.broker.hyperliquid.translators.Translator;
@@ -161,6 +162,11 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
     public BrokerRequestResult cancelOrder(OrderTicket order) {
         checkConnected();
         throw new UnsupportedOperationException("Cancel order by OrderTicket not implemented yet");
+    }
+
+    @Override
+    public BrokerStatus getBrokerStatus() {
+        throw new UnsupportedOperationException("Get broker status not implemented yet");
     }
 
     @Override
