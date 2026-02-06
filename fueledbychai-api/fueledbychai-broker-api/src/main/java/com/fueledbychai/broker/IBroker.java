@@ -170,6 +170,8 @@ public interface IBroker {
      */
     public boolean isConnected();
 
+    public BrokerStatus getBrokerStatus();
+
     /**
      * Used to lock the broker in order to create order IDs and transmit orders,
      * since IB does not tolerate orders IDs that are transmitted out of order.

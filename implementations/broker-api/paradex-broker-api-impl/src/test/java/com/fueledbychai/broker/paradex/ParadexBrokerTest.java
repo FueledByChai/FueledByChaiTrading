@@ -29,6 +29,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.fueledbychai.broker.BrokerAccountInfoListener;
 import com.fueledbychai.broker.BrokerErrorListener;
+import com.fueledbychai.broker.BrokerStatus;
 import com.fueledbychai.broker.IBrokerOrderRegistry;
 import com.fueledbychai.broker.Position;
 import com.fueledbychai.broker.order.OrderEvent;
@@ -41,6 +42,7 @@ import com.fueledbychai.paradex.common.api.ParadexRestApi;
 import com.fueledbychai.paradex.common.api.RestResponse;
 import com.fueledbychai.paradex.common.api.order.ParadexOrder;
 import com.fueledbychai.paradex.common.api.ws.ParadexWebSocketClient;
+import com.fueledbychai.paradex.common.api.ws.SystemStatus;
 import com.fueledbychai.paradex.common.api.ws.orderstatus.IParadexOrderStatusUpdate;
 import com.fueledbychai.paradex.common.api.ws.orderstatus.OrderStatusWebSocketProcessor;
 import com.fueledbychai.paradex.common.api.ws.orderstatus.ParadexOrderStatus;
@@ -215,6 +217,44 @@ public class ParadexBrokerTest {
 
         assertEquals(mockOrders, openOrders);
 
+    }
+
+    @Test
+    public void testGetBrokerStatus_RestApiNull_ReturnsUnknown() {
+        broker.restApi = null;
+
+        BrokerStatus status = broker.getBrokerStatus();
+
+        assertEquals(BrokerStatus.UNKNOWN, status);
+    }
+
+    @Test
+    public void testGetBrokerStatus_MapsSystemStatus() {
+        when(mockRestApi.getSystemState()).thenReturn(SystemStatus.OK, SystemStatus.MAINTENANCE,
+                SystemStatus.CANCEL_ONLY, SystemStatus.POST_ONLY);
+
+        assertEquals(BrokerStatus.OK, broker.getBrokerStatus());
+        assertEquals(BrokerStatus.MAINTENANCE, broker.getBrokerStatus());
+        assertEquals(BrokerStatus.CANCEL_ONLY_MODE, broker.getBrokerStatus());
+        assertEquals(BrokerStatus.POST_ONLY_MODE, broker.getBrokerStatus());
+    }
+
+    @Test
+    public void testGetBrokerStatus_NullSystemStatus_ReturnsUnknown() {
+        when(mockRestApi.getSystemState()).thenReturn(null);
+
+        BrokerStatus status = broker.getBrokerStatus();
+
+        assertEquals(BrokerStatus.UNKNOWN, status);
+    }
+
+    @Test
+    public void testGetBrokerStatus_Exception_ReturnsUnknown() {
+        when(mockRestApi.getSystemState()).thenThrow(new RuntimeException("boom"));
+
+        BrokerStatus status = broker.getBrokerStatus();
+
+        assertEquals(BrokerStatus.UNKNOWN, status);
     }
 
     @Test

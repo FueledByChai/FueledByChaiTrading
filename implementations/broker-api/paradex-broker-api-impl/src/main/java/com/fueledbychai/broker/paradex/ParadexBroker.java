@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.broker.AbstractBasicBroker;
 import com.fueledbychai.broker.BrokerRequestResult;
+import com.fueledbychai.broker.BrokerStatus;
 import com.fueledbychai.broker.Position;
 import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.OrderEvent;
@@ -43,6 +44,7 @@ import com.fueledbychai.paradex.common.api.RestResponse;
 import com.fueledbychai.paradex.common.api.order.ParadexOrder;
 import com.fueledbychai.paradex.common.api.ws.ParadexWSClientBuilder;
 import com.fueledbychai.paradex.common.api.ws.ParadexWebSocketClient;
+import com.fueledbychai.paradex.common.api.ws.SystemStatus;
 import com.fueledbychai.paradex.common.api.ws.accountinfo.AccountWebSocketProcessor;
 import com.fueledbychai.paradex.common.api.ws.accountinfo.IAccountUpdate;
 import com.fueledbychai.paradex.common.api.ws.fills.ParadexFill;
@@ -303,6 +305,36 @@ public class ParadexBroker extends AbstractBasicBroker {
         } catch (Exception e) {
             logger.error("Error requesting order status for client order ID {}: {}", clientOrderId, e.getMessage(), e);
             throw e;
+        }
+    }
+
+    @Override
+    public BrokerStatus getBrokerStatus() {
+        if (restApi == null) {
+            logger.warn("Paradex REST API is not initialized; broker status unknown.");
+            return BrokerStatus.UNKNOWN;
+        }
+
+        try (var s = Span.start("PD_GET_SYSTEM_STATE", "N/A")) {
+            SystemStatus systemStatus = restApi.getSystemState();
+            if (systemStatus == null) {
+                return BrokerStatus.UNKNOWN;
+            }
+            switch (systemStatus) {
+                case OK:
+                    return BrokerStatus.OK;
+                case MAINTENANCE:
+                    return BrokerStatus.MAINTENANCE;
+                case CANCEL_ONLY:
+                    return BrokerStatus.CANCEL_ONLY_MODE;
+                case POST_ONLY:
+                    return BrokerStatus.POST_ONLY_MODE;
+                default:
+                    return BrokerStatus.UNKNOWN;
+            }
+        } catch (Exception e) {
+            logger.error("Error retrieving Paradex system status: {}", e.getMessage(), e);
+            return BrokerStatus.UNKNOWN;
         }
     }
 
