@@ -316,7 +316,7 @@ public class ParadexBroker extends AbstractBasicBroker {
         }
 
         try (var s = Span.start("PD_GET_SYSTEM_STATE", "N/A")) {
-            SystemStatus systemStatus = restApi.getSystemStatus();
+            SystemStatus systemStatus = restApi.getSystemState();
             if (systemStatus == null) {
                 return BrokerStatus.UNKNOWN;
             }
