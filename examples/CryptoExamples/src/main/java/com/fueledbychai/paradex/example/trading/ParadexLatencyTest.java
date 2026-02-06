@@ -3,6 +3,7 @@ package com.fueledbychai.paradex.example.trading;
 import java.math.BigDecimal;
 import java.util.List;
 
+import com.fueledbychai.broker.BrokerStatus;
 import com.fueledbychai.broker.IBroker;
 import com.fueledbychai.broker.Position;
 import com.fueledbychai.broker.order.OrderTicket;
@@ -162,12 +163,21 @@ public class ParadexLatencyTest {
         Thread.sleep(5000);
     }
 
+    public void getSystemStatus() throws Exception {
+        ParadexBroker broker = new ParadexBroker();
+        broker.connect();
+
+        BrokerStatus status = broker.getBrokerStatus();
+        log.info("Current Broker Status: {}", status);
+    }
+
     public static void main(String[] args) throws Exception {
         // config file
         // System.setProperty("paradex.config.file",
         // "/path/to/your/paradex-trading-example.properties");
         ParadexLatencyTest example = new ParadexLatencyTest();
-        example.executeMultipleTrades();
+        // example.executeMultipleTrades();
+        example.getSystemStatus();
         // example.cancelMultipleTimes();
         // example.testModifyOrder();
         // example.onBoard();
