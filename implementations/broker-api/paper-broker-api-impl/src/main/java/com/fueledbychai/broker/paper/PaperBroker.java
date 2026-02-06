@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
 import com.fueledbychai.broker.AbstractBasicBroker;
 import com.fueledbychai.broker.BrokerErrorListener;
 import com.fueledbychai.broker.BrokerRequestResult;
+import com.fueledbychai.broker.BrokerStatus;
 import com.fueledbychai.broker.Position;
 import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.OrderEvent;
@@ -1099,7 +1100,12 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     }
 
-    public IPaperBrokerStatus getBrokerStatus() {
+    @Override
+    public BrokerStatus getBrokerStatus() {
+        return BrokerStatus.OK; // For the paper broker, we can assume it's always operational
+    }
+
+    public IPaperBrokerStatus getPaperBrokerStatus() {
         return brokerStatus;
     }
 

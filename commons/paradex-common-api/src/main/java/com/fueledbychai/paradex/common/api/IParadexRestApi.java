@@ -59,4 +59,6 @@ public interface IParadexRestApi {
 
     SystemStatus getSystemStatus();
 
+    SystemStatus getSystemState();
+
 }

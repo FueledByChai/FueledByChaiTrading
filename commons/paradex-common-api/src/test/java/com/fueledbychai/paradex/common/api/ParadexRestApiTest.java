@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.math.BigDecimal;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,15 @@ import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.FueledByChaiException;
+import com.fueledbychai.data.ResponseException;
+import com.fueledbychai.paradex.common.api.ws.SystemStatus;
+
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 
 @ExtendWith(MockitoExtension.class)
 class ParadexRestApiTest {
@@ -535,6 +545,100 @@ class ParadexRestApiTest {
         assertFalse(paradexRestApi.isValidAssetKindForInstrumentType("Perp", InstrumentType.PERPETUAL_FUTURES));
         assertFalse(paradexRestApi.isValidAssetKindForInstrumentType("PERP ", InstrumentType.PERPETUAL_FUTURES));
         assertFalse(paradexRestApi.isValidAssetKindForInstrumentType(" PERP", InstrumentType.PERPETUAL_FUTURES));
+    }
+
+    @Test
+    void testParseSystemStatus_Ok() {
+        String response = "{\"status\":\"ok\"}";
+
+        SystemStatus result = paradexRestApi.parseSystemStatus(response);
+
+        assertEquals(SystemStatus.OK, result);
+    }
+
+    @Test
+    void testParseSystemStatus_PostOnly() {
+        String response = "{\"status\":\"post_only\"}";
+
+        SystemStatus result = paradexRestApi.parseSystemStatus(response);
+
+        assertEquals(SystemStatus.POST_ONLY, result);
+    }
+
+    @Test
+    void testParseSystemStatus_MissingStatus() {
+        String response = "{\"message\":\"no status\"}";
+
+        assertThrows(FueledByChaiException.class, () -> {
+            paradexRestApi.parseSystemStatus(response);
+        });
+    }
+
+    @Test
+    void testGetSystemState_Success() {
+        AtomicReference<Request> capturedRequest = new AtomicReference<>();
+        OkHttpClient mockClient = buildMockClient(200, "OK", "{\"status\":\"ok\"}", capturedRequest);
+
+        ParadexRestApi api = new ParadexRestApi("https://api.testnet.paradex.trade/v1", true);
+        api.client = mockClient;
+
+        SystemStatus status = api.getSystemState();
+
+        assertEquals(SystemStatus.OK, status);
+        assertNotNull(capturedRequest.get());
+        assertEquals("/v1/system/state", capturedRequest.get().url().encodedPath());
+    }
+
+    @Test
+    void testGetSystemState_HttpError() {
+        OkHttpClient mockClient = buildMockClient(503, "Service Unavailable", "{\"error\":\"down\"}", null);
+
+        ParadexRestApi api = new ParadexRestApi("https://api.testnet.paradex.trade/v1", true);
+        api.client = mockClient;
+
+        assertThrows(ResponseException.class, () -> {
+            api.getSystemState();
+        });
+    }
+
+    @Test
+    void testGetSystemStatus_DelegatesToGetSystemState() {
+        class DelegatingApi extends ParadexRestApi {
+            private boolean called = false;
+
+            private DelegatingApi() {
+                super("https://api.testnet.paradex.trade/v1", true);
+            }
+
+            @Override
+            public SystemStatus getSystemState() {
+                called = true;
+                return SystemStatus.OK;
+            }
+        }
+
+        DelegatingApi api = new DelegatingApi();
+        assertEquals(SystemStatus.OK, api.getSystemStatus());
+        assertTrue(api.called);
+    }
+
+    private OkHttpClient buildMockClient(int code, String message, String body, AtomicReference<Request> requestRef) {
+        MediaType mediaType = MediaType.get("application/json; charset=utf-8");
+        return new OkHttpClient.Builder()
+                .addInterceptor(chain -> {
+                    if (requestRef != null) {
+                        requestRef.set(chain.request());
+                    }
+                    ResponseBody responseBody = ResponseBody.create(body == null ? "" : body, mediaType);
+                    return new Response.Builder()
+                            .request(chain.request())
+                            .protocol(Protocol.HTTP_1_1)
+                            .code(code)
+                            .message(message == null ? "" : message)
+                            .body(responseBody)
+                            .build();
+                })
+                .build();
     }
 
     /**
