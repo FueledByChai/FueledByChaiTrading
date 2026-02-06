@@ -316,21 +316,21 @@ public class ParadexBroker extends AbstractBasicBroker {
         }
 
         try (var s = Span.start("PD_GET_SYSTEM_STATE", "N/A")) {
-            SystemStatus systemStatus = restApi.getSystemState();
+            SystemStatus systemStatus = restApi.getSystemStatus();
             if (systemStatus == null) {
                 return BrokerStatus.UNKNOWN;
             }
             switch (systemStatus) {
-                case OK:
-                    return BrokerStatus.OK;
-                case MAINTENANCE:
-                    return BrokerStatus.MAINTENANCE;
-                case CANCEL_ONLY:
-                    return BrokerStatus.CANCEL_ONLY_MODE;
-                case POST_ONLY:
-                    return BrokerStatus.POST_ONLY_MODE;
-                default:
-                    return BrokerStatus.UNKNOWN;
+            case OK:
+                return BrokerStatus.OK;
+            case MAINTENANCE:
+                return BrokerStatus.MAINTENANCE;
+            case CANCEL_ONLY:
+                return BrokerStatus.CANCEL_ONLY_MODE;
+            case POST_ONLY:
+                return BrokerStatus.POST_ONLY_MODE;
+            default:
+                return BrokerStatus.UNKNOWN;
             }
         } catch (Exception e) {
             logger.error("Error retrieving Paradex system status: {}", e.getMessage(), e);

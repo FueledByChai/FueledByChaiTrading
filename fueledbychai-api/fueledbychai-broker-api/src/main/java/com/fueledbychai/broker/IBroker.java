@@ -170,6 +170,27 @@ public interface IBroker {
      */
     public boolean isConnected();
 
+    /**
+     * Returns the current operational status of this broker connection.
+     * <p>
+     * This is a higher-level view than {@link #isConnected()} and may take into
+     * account both connectivity to the remote broker and any broker- or
+     * exchange-specific modes (for example, pre-open, halted, or normal trading),
+     * depending on the implementation.
+     * </p>
+     * <p>
+     * Implementations of this method must be fast and non-blocking so that callers
+     * can safely poll it at a high frequency (for example, from a UI refresh loop
+     * or monitoring component).
+     * </p>
+     * <p>
+     * If the broker status cannot be determined, or no connection attempt has yet
+     * been made, implementations must return {@code BrokerStatus.UNKNOWN}.
+     * </p>
+     *
+     * @return the current {@link BrokerStatus} for this broker instance; never
+     *         {@code null}.
+     */
     public BrokerStatus getBrokerStatus();
 
     /**
