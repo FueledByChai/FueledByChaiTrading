@@ -21,6 +21,7 @@ package com.fueledbychai.paradex.example.market.data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.hyperliquid.ws.HyperliquidTickerRegistry;
 import com.fueledbychai.marketdata.ILevel1Quote;
@@ -33,7 +34,8 @@ public class HyperliquidMarketDataExample {
 
     public void getLevel1Quotes() {
 
-        Ticker ticker = HyperliquidTickerRegistry.getInstance().lookupByBrokerSymbol("BTC");
+        Ticker ticker = HyperliquidTickerRegistry.getInstance()
+                .lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC");
 
         QuoteEngine quoteEngine = QuoteEngine.getInstance(HyperliquidQuoteEngine.class);
 

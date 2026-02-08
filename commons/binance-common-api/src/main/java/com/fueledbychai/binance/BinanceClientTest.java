@@ -5,6 +5,7 @@ import com.fueledbychai.binance.ws.BinanceWebSocketClientBuilder;
 import com.fueledbychai.binance.ws.aggtrade.AggTradeRecordProcessor;
 import com.fueledbychai.binance.ws.partialbook.OrderBookSnapshot;
 import com.fueledbychai.binance.ws.partialbook.PartialOrderBookProcessor;
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.util.ITickerRegistry;
 import com.fueledbychai.websocket.IWebSocketProcessor;
@@ -30,7 +31,7 @@ public class BinanceClientTest {
         // System.out.println("Sample instrument: " + result.getSymbols().get(0));
 
         ITickerRegistry tickerRegistry = BinanceTickerRegistry.getInstance();
-        Ticker ticker = tickerRegistry.lookupByCommonSymbol("ZEC/USDT");
+        Ticker ticker = tickerRegistry.lookupByCommonSymbol(InstrumentType.CRYPTO_SPOT, "ZEC/USDT");
         System.out.println("Lookup ZEC/USDT: " + ticker);
 
         BinanceWebSocketClient client = BinanceWebSocketClientBuilder

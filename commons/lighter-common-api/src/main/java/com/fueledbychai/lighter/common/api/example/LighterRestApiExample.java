@@ -33,7 +33,7 @@ import okhttp3.OkHttpClient;
 public class LighterRestApiExample {
 
     private static final Logger logger = LoggerFactory.getLogger(LighterRestApiExample.class);
-    private static final int MAX_PRINT = 10;
+    private static final int MAX_PRINT = 3000;
 
     public static void main(String[] args) {
         String baseUrl = "https://mainnet.zklighter.elliot.ai/api/v1";
@@ -83,7 +83,7 @@ public class LighterRestApiExample {
 
         logger.info("{}: {} instruments (showing up to {})", label, descriptors.length, MAX_PRINT);
         for (int i = 0; i < descriptors.length && i < MAX_PRINT; i++) {
-            logger.info(descriptors[i].toString());
+            logger.info(descriptors[i].toString() + "\n ");
         }
     }
 

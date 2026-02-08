@@ -1242,7 +1242,8 @@ public class ParadexRestApi implements IParadexRestApi {
             String side = positionObject.get("side").getAsString();
             String status = positionObject.get("status").getAsString();
 
-            Ticker ticker = ParadexTickerRegistry.getInstance().lookupByBrokerSymbol(tickerString);
+            Ticker ticker = ParadexTickerRegistry.getInstance().lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES,
+                    tickerString);
             Position position = new Position(ticker);
             position.setSize(new BigDecimal(inventory));
             position.setLiquidationPrice(new BigDecimal(liquidationPrice));
