@@ -12,7 +12,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.stream.Collectors;
 
 import org.json.JSONObject;
 import org.slf4j.Logger;
@@ -42,11 +41,7 @@ import com.google.gson.TypeAdapter;
 import com.google.gson.reflect.TypeToken;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
-import com.swmansion.starknet.data.TypedData;
-import com.swmansion.starknet.data.types.Felt;
-import com.swmansion.starknet.signer.StarkCurveSigner;
 
-import okhttp3.Headers;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -213,7 +208,11 @@ public class ParadexRestApi implements IParadexRestApi {
 
     @Override
     public SystemStatus getSystemStatus() {
+        return getSystemState();
+    }
 
+    @Override
+    public SystemStatus getSystemState() {
         String path = "/system/state";
         String url = baseUrl + path;
         Request request = new Request.Builder().url(url).get().build();
