@@ -5,10 +5,12 @@ This directory contains comprehensive documentation of broker capabilities, supp
 ## 📋 Available Documentation
 
 ### Overview Documents
+
 - **[Broker Comparison](broker-comparison.md)** - Side-by-side feature comparison
 - **[Method Capability Matrix](method-capability-matrix.md)** - Which methods each broker supports
 
 ### Individual Broker Documentation
+
 - **[Hyperliquid](hyperliquid-capabilities.md)** - High-performance perpetual futures DEX with low latency trading
 
 ## 🚀 Quick Start
@@ -49,4 +51,5 @@ java -cp "target/classes:target/dependency/*" \
 ```
 
 ---
-*Generated on: 2026-02-07T21:02:50.442094*
+
+_Generated on: 2026-02-06T11:58:55.418729_
