@@ -12,10 +12,10 @@ import com.fueledbychai.broker.order.OrderTicket.Type;
 import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.broker.paradex.ParadexBroker;
 import com.fueledbychai.broker.paradex.ResilientParadexBroker;
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.QuoteEngine;
-import com.fueledbychai.marketdata.paradex.ParadexQuoteEngine;
 import com.fueledbychai.paradex.common.ParadexTickerRegistry;
 import com.fueledbychai.time.Span;
 
@@ -26,7 +26,7 @@ public class ParadexLatencyTest {
         Ticker btcTicker = ParadexTickerRegistry.getInstance()
                 .lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC-USD-PERP");
 
-        QuoteEngine engine = QuoteEngine.getInstance(ParadexQuoteEngine.class);
+        QuoteEngine engine = QuoteEngine.getInstance(Exchange.PARADEX);
         engine.startEngine();
 
         engine.subscribeLevel1(btcTicker, (level1Quote) -> {
@@ -96,7 +96,7 @@ public class ParadexLatencyTest {
         Ticker btcTicker = ParadexTickerRegistry.getInstance()
                 .lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC-USD-PERP");
 
-        QuoteEngine engine = QuoteEngine.getInstance(ParadexQuoteEngine.class);
+        QuoteEngine engine = QuoteEngine.getInstance(Exchange.PARADEX);
         engine.startEngine();
 
         engine.subscribeLevel1(btcTicker, (level1Quote) -> {
@@ -132,7 +132,7 @@ public class ParadexLatencyTest {
         Ticker btcTicker = ParadexTickerRegistry.getInstance()
                 .lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC-USD-PERP");
 
-        QuoteEngine engine = QuoteEngine.getInstance(ParadexQuoteEngine.class);
+        QuoteEngine engine = QuoteEngine.getInstance(Exchange.PARADEX);
         engine.startEngine();
 
         engine.subscribeLevel1(btcTicker, (level1Quote) -> {
