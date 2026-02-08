@@ -47,6 +47,7 @@ import com.fueledbychai.broker.order.OrderStatus;
 import com.fueledbychai.broker.order.OrderStatus.CancelReason;
 import com.fueledbychai.broker.order.OrderStatus.Status;
 import com.fueledbychai.broker.order.OrderTicket;
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.FueledByChaiException;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.hyperliquid.HyperliquidUtil;
@@ -68,7 +69,6 @@ import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.Level1QuoteListener;
 import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.QuoteType;
-import com.fueledbychai.marketdata.hyperliquid.HyperliquidQuoteEngine;
 import com.fueledbychai.time.Span;
 import com.fueledbychai.util.FillDeduper;
 
@@ -128,7 +128,7 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
         // Initialize using centralized configuration
         this.restApi = HyperliquidApiFactory.getRestApi();
         this.websocketApi = HyperliquidApiFactory.getWebsocketApi();
-        this.quoteEngine = QuoteEngine.getInstance(HyperliquidQuoteEngine.class);
+        this.quoteEngine = QuoteEngine.getInstance(Exchange.HYPERLIQUID);
         this.quoteEngine.startEngine();
         this.quoteEngine.subscribeGlobalLevel1(this);
         this.accountAddress = HyperliquidConfiguration.getInstance().getTradingAccount();

@@ -21,12 +21,12 @@ package com.fueledbychai.paradex.example.market.data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.hyperliquid.ws.HyperliquidTickerRegistry;
 import com.fueledbychai.marketdata.OrderFlow;
 import com.fueledbychai.marketdata.QuoteEngine;
-import com.fueledbychai.marketdata.hyperliquid.HyperliquidQuoteEngine;
 
 public class HyperliquidMarketOrderFlowExample {
 
@@ -37,7 +37,7 @@ public class HyperliquidMarketOrderFlowExample {
         Ticker ticker = HyperliquidTickerRegistry.getInstance()
                 .lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC");
 
-        QuoteEngine quoteEngine = QuoteEngine.getInstance(HyperliquidQuoteEngine.class);
+        QuoteEngine quoteEngine = QuoteEngine.getInstance(Exchange.HYPERLIQUID);
 
         quoteEngine.subscribeOrderFlow(ticker, (OrderFlow orderFlow) -> {
             logger.info("Received Order Flow: {}", orderFlow);
