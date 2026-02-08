@@ -90,7 +90,7 @@ public class LighterRestApi implements ILighterRestApi {
     @Override
     public InstrumentDescriptor[] getAllInstrumentsForType(InstrumentType instrumentType) {
         return executeWithRetry(() -> {
-            String path = "/orderBookDetails";
+            String path = "/orderBooks";
             String url = baseUrl + path;
             HttpUrl.Builder urlBuilder = HttpUrl.parse(url).newBuilder();
             String filter = getOrderBookFilter(instrumentType);
@@ -231,8 +231,8 @@ public class LighterRestApi implements ILighterRestApi {
             String baseCurrency = instrumentObj.get("base_currency").getAsString();
             String quoteCurrency = instrumentObj.get("quote_currency").getAsString();
 
-            // Create common symbol (without exchange-specific suffix)
-            String commonSymbol = symbol + "/USD";
+            // Create common symbol (Lighter uses USDC as quote)
+            String commonSymbol = baseCurrency + "/USDC";
             String exchangeSymbol = symbol;
 
             // Parse tick size and order size increment from the JSON
@@ -257,8 +257,8 @@ public class LighterRestApi implements ILighterRestApi {
     protected InstrumentDescriptor[] parseInstrumentDescriptors(InstrumentType instrumentType, String responseBody) {
         try {
             JsonObject root = JsonParser.parseString(responseBody).getAsJsonObject();
-            // Lighter format: order_book_details / spot_order_book_details
-            if (root.has("order_book_details") || root.has("spot_order_book_details")) {
+            // Lighter format: order_books
+            if (root.has("order_books")) {
                 return parseOrderBookInstrumentDescriptors(instrumentType, root);
             }
 
@@ -309,7 +309,7 @@ public class LighterRestApi implements ILighterRestApi {
                 int fundingPeriodHours = instrumentObj.get("funding_period_hours").getAsInt();
 
                 // Create the InstrumentDescriptor with the provided instrument type
-                InstrumentDescriptor descriptor = new InstrumentDescriptor(instrumentType, Exchange.PARADEX,
+                InstrumentDescriptor descriptor = new InstrumentDescriptor(instrumentType, Exchange.LIGHTER,
                         commonSymbol, exchangeSymbol, baseCurrency, quoteCurrency, orderSizeIncrement, priceTickSize,
                         minNotionalOrderSize, BigDecimal.ZERO, fundingPeriodHours, BigDecimal.ONE, 1, "");
 
@@ -355,12 +355,11 @@ public class LighterRestApi implements ILighterRestApi {
                 continue;
             }
 
-            String commonSymbol = symbol.contains("-") ? symbol.split("-")[0] : symbol;
-            String exchangeSymbol = symbol;
-
             String[] baseQuote = inferBaseQuoteCurrencies(symbol);
             String baseCurrency = baseQuote[0];
             String quoteCurrency = baseQuote[1];
+            String commonSymbol = baseCurrency + "/USDC";
+            String exchangeSymbol = symbol;
 
             int sizeDecimals = getIntFromFields(instrumentObj, 0, "size_decimals", "supported_size_decimals");
             int priceDecimals = getIntFromFields(instrumentObj, 0, "price_decimals", "supported_price_decimals");
@@ -385,7 +384,7 @@ public class LighterRestApi implements ILighterRestApi {
                     ? instrumentObj.get("market_id").getAsString()
                     : "";
 
-            InstrumentDescriptor descriptor = new InstrumentDescriptor(instrumentType, Exchange.PARADEX, commonSymbol,
+            InstrumentDescriptor descriptor = new InstrumentDescriptor(instrumentType, Exchange.LIGHTER, commonSymbol,
                     exchangeSymbol, baseCurrency, quoteCurrency, orderSizeIncrement, priceTickSize,
                     minNotionalOrderSize, minOrderSize, fundingPeriodHours, contractMultiplier, maxLeverage,
                     instrumentId);
@@ -397,6 +396,9 @@ public class LighterRestApi implements ILighterRestApi {
     }
 
     protected JsonArray getOrderBookDetailsForType(JsonObject root, InstrumentType instrumentType) {
+        if (root.has("order_books") && !root.get("order_books").isJsonNull()) {
+            return root.getAsJsonArray("order_books");
+        }
         if (instrumentType == InstrumentType.CRYPTO_SPOT) {
             if (root.has("spot_order_book_details") && !root.get("spot_order_book_details").isJsonNull()) {
                 return root.getAsJsonArray("spot_order_book_details");
@@ -450,7 +452,7 @@ public class LighterRestApi implements ILighterRestApi {
 
     protected String[] inferBaseQuoteCurrencies(String symbol) {
         if (symbol == null) {
-            return new String[] { "", "USD" };
+            return new String[] { "", "USDC" };
         }
 
         String trimmed = symbol.trim();
@@ -470,7 +472,7 @@ public class LighterRestApi implements ILighterRestApi {
             return new String[] { trimmed.substring(0, 3), trimmed.substring(3, 6) };
         }
 
-        return new String[] { trimmed, "USD" };
+        return new String[] { trimmed, "USDC" };
     }
 
     protected BigDecimal decimalFromDecimals(int decimals) {

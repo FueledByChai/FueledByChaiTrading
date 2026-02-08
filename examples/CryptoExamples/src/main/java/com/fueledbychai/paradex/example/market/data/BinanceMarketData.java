@@ -1,6 +1,7 @@
 package com.fueledbychai.paradex.example.market.data;
 
 import com.fueledbychai.binance.BinanceTickerRegistry;
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.binance.BinanceQuoteEngine;
@@ -10,7 +11,8 @@ public class BinanceMarketData {
 
     public void start() throws Exception {
         ProxyConfig.getInstance().setRunningLocally(true);
-        Ticker ticker = BinanceTickerRegistry.getInstance().lookupByCommonSymbol("BTC/USDC");
+        Ticker ticker = BinanceTickerRegistry.getInstance()
+                .lookupByCommonSymbol(InstrumentType.CRYPTO_SPOT, "BTC/USDC");
 
         QuoteEngine quoteEngine = QuoteEngine.getInstance(BinanceQuoteEngine.class);
         quoteEngine.startEngine();

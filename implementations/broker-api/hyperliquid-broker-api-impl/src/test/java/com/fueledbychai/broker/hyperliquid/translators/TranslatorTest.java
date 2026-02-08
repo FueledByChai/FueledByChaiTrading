@@ -25,6 +25,7 @@ import com.fueledbychai.broker.Position;
 import com.fueledbychai.broker.hyperliquid.HyperliquidOrderTicket;
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.broker.order.TradeDirection;
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.hyperliquid.ws.HyperliquidTickerRegistry;
 import com.fueledbychai.hyperliquid.ws.json.OrderJson;
@@ -83,13 +84,13 @@ public class TranslatorTest {
         when(mockUpdate1.getSize()).thenReturn(java.math.BigDecimal.valueOf(2.0));
         when(mockUpdate1.getEntryPrice()).thenReturn(java.math.BigDecimal.valueOf(50000.0));
         when(mockUpdate1.getLiquidationPrice()).thenReturn(java.math.BigDecimal.valueOf(45000.0));
-        when(mockRegistry.lookupByBrokerSymbol("BTCUSD")).thenReturn(mockTicker);
+        when(mockRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "BTCUSD")).thenReturn(mockTicker);
 
         when(mockUpdate2.getTicker()).thenReturn("ETHUSD");
         when(mockUpdate2.getSize()).thenReturn(java.math.BigDecimal.valueOf(1.0));
         when(mockUpdate2.getEntryPrice()).thenReturn(java.math.BigDecimal.valueOf(3000.0));
         when(mockUpdate2.getLiquidationPrice()).thenReturn(java.math.BigDecimal.valueOf(2500.0));
-        when(mockRegistry.lookupByBrokerSymbol("ETHUSD")).thenReturn(mockTicker);
+        when(mockRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "ETHUSD")).thenReturn(mockTicker);
 
         List<HyperliquidPositionUpdate> updates = Arrays.asList(mockUpdate1, mockUpdate2);
         List<Position> positions = translator.translatePositions(updates);
@@ -110,7 +111,7 @@ public class TranslatorTest {
         when(mockUpdate1.getSize()).thenReturn(java.math.BigDecimal.valueOf(2.0));
         when(mockUpdate1.getEntryPrice()).thenReturn(java.math.BigDecimal.valueOf(50000.0));
         when(mockUpdate1.getLiquidationPrice()).thenReturn(java.math.BigDecimal.valueOf(45000.0));
-        when(mockRegistry.lookupByBrokerSymbol("BTCUSD")).thenReturn(mockTicker);
+        when(mockRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "BTCUSD")).thenReturn(mockTicker);
 
         Position pos = translator.translatePosition(mockUpdate1);
         assertNotNull(pos);

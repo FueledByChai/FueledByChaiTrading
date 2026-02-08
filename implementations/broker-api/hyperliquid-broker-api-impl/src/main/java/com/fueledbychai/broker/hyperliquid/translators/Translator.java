@@ -12,6 +12,7 @@ import com.fueledbychai.broker.hyperliquid.HyperliquidOrderTicket;
 import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.broker.order.TradeDirection;
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.hyperliquid.HyperliquidUtil;
 import com.fueledbychai.hyperliquid.ws.HyperliquidTickerRegistry;
@@ -125,7 +126,8 @@ public class Translator implements ITranslator {
     public Position translatePosition(HyperliquidPositionUpdate positionUpdate) {
         if (positionUpdate == null)
             return null;
-        Ticker ticker = HyperliquidTickerRegistry.getInstance().lookupByBrokerSymbol(positionUpdate.getTicker());
+        Ticker ticker = HyperliquidTickerRegistry.getInstance()
+                .lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, positionUpdate.getTicker());
 
         return new Position(ticker).setSize(positionUpdate.getSize()).setAverageCost(positionUpdate.getEntryPrice())
                 .setLiquidationPrice(positionUpdate.getLiquidationPrice());
@@ -151,7 +153,8 @@ public class Translator implements ITranslator {
 
         List<Fill> fills = new ArrayList<>();
         for (WsFill wsFill : wsUserFill.getFills()) {
-            Ticker ticker = HyperliquidTickerRegistry.getInstance().lookupByBrokerSymbol(wsFill.getCoin());
+            Ticker ticker = HyperliquidTickerRegistry.getInstance()
+                    .lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, wsFill.getCoin());
             Fill fill = new Fill();
             fill.setTicker(ticker);
             fill.setSnapshot(wsUserFill.isSnapshot());

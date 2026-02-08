@@ -14,6 +14,7 @@ import com.fueledbychai.broker.order.OrderTicket.Duration;
 import com.fueledbychai.broker.order.OrderTicket.Modifier;
 import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.data.FueledByChaiException;
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.paradex.common.ParadexTickerRegistry;
 import com.fueledbychai.paradex.common.api.ParadexUtil;
@@ -45,7 +46,8 @@ public class ParadexTranslator implements IParadexTranslator {
     @Override
     public OrderStatus translateOrderStatus(IParadexOrderStatusUpdate paradexStatus) {
 
-        Ticker ticker = tickerRegistry.lookupByBrokerSymbol(paradexStatus.getTickerString());
+        Ticker ticker = tickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES,
+                paradexStatus.getTickerString());
         Status status = translateStatusCode(paradexStatus.getStatus(), paradexStatus.getCancelReason(),
                 paradexStatus.getOriginalSize(), paradexStatus.getRemainingSize());
         OrderStatus orderStatus = null;
@@ -107,7 +109,8 @@ public class ParadexTranslator implements IParadexTranslator {
     @Override
     public Fill translateFill(ParadexFill paradexFill) {
         Fill fill = new Fill();
-        fill.setTicker(tickerRegistry.lookupByBrokerSymbol(paradexFill.getMarket()));
+        fill.setTicker(
+                tickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, paradexFill.getMarket()));
         fill.setPrice(new BigDecimal(paradexFill.getPrice()));
         fill.setFillId(paradexFill.getId());
         fill.setSize(new BigDecimal(paradexFill.getSize()));
@@ -126,7 +129,7 @@ public class ParadexTranslator implements IParadexTranslator {
     public OrderTicket translateOrder(ParadexOrder order) {
         OrderTicket tradeOrder = new OrderTicket();
         tradeOrder.setClientOrderId(order.getClientId());
-        Ticker ticker = tickerRegistry.lookupByBrokerSymbol(order.getTicker());
+        Ticker ticker = tickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, order.getTicker());
         tradeOrder.setTicker(ticker);
         tradeOrder.setSize(order.getSize());
         tradeOrder.setLimitPrice(order.getLimitPrice());

@@ -7,6 +7,7 @@ import com.fueledbychai.broker.hyperliquid.HyperliquidBroker;
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.broker.order.OrderTicket.Type;
 import com.fueledbychai.broker.order.TradeDirection;
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.hyperliquid.ws.HyperliquidTickerRegistry;
 import com.fueledbychai.marketdata.QuoteEngine;
@@ -19,7 +20,8 @@ public class HyperliquidTradingExample {
         String tickerString = "BTC";
         String size = "0.01";
         String price = "120000";
-        Ticker ticker = HyperliquidTickerRegistry.getInstance().lookupByBrokerSymbol(tickerString);
+        Ticker ticker = HyperliquidTickerRegistry.getInstance()
+                .lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, tickerString);
 
         QuoteEngine engine = QuoteEngine.getInstance(HyperliquidQuoteEngine.class);
         engine.startEngine();

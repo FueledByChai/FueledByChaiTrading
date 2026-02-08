@@ -11,6 +11,7 @@ import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.broker.paper.PaperBroker;
 import com.fueledbychai.broker.paper.PaperBrokerCommission;
 import com.fueledbychai.broker.paper.PaperBrokerLatency;
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.paradex.ParadexQuoteEngine;
 import com.fueledbychai.paradex.common.ParadexTickerRegistry;
@@ -20,7 +21,8 @@ public class TradingPaperBrokerWithParadexData {
     protected Logger logger = LoggerFactory.getLogger(TradingPaperBrokerWithParadexData.class);
 
     public void runExample() throws Exception {
-        Ticker ticker = ParadexTickerRegistry.getInstance().lookupByBrokerSymbol("BTC-USD-PERP");
+        Ticker ticker = ParadexTickerRegistry.getInstance()
+                .lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC-USD-PERP");
 
         ParadexQuoteEngine quoteEngine = new ParadexQuoteEngine();
         quoteEngine.startEngine();

@@ -12,6 +12,7 @@ import java.util.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.IOrderBook;
@@ -153,7 +154,7 @@ public class ParadexQuoteEngine extends QuoteEngine
     @Override
     public void newTrade(long createdAtTimestamp, String market, String price, String side, String size) {
 
-        Ticker ticker = tickerRegistry.lookupByBrokerSymbol(market);
+        Ticker ticker = tickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, market);
 
         // Format the price according to the ticker's minimum tick size precision
         BigDecimal formattedPrice = ticker.formatPrice(price);
@@ -167,7 +168,7 @@ public class ParadexQuoteEngine extends QuoteEngine
     public void newSummaryUpdate(long createdAtTimestamp, String symbol, String bid, String ask, String lastPrice,
             String markPrice, String openInterest, String volume24h, String underlyingPrice, String fundingRate) {
 
-        Ticker ticker = tickerRegistry.lookupByBrokerSymbol(symbol);
+        Ticker ticker = tickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, symbol);
 
         double hourlyFundingRate = Double.parseDouble(fundingRate) / (double) ticker.getFundingRateInterval();
         double annualizedFundingRate = hourlyFundingRate * 24 * 365 * 100;
