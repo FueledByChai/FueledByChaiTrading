@@ -26,5 +26,10 @@ public class LighterWebSocketClient extends BaseCryptoWebSocketClient {
         subscribeJson.put("channel", channel);
         return subscribeJson.toString();
     }
-}
 
+    @Override
+    public void onError(Exception ex) {
+        super.onError(ex);
+        processor.connectionError(ex);
+    }
+}
