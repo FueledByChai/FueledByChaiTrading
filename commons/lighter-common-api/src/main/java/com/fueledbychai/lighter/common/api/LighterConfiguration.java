@@ -22,6 +22,7 @@ package com.fueledbychai.lighter.common.api;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Locale;
 import java.util.Properties;
 
 import org.slf4j.Logger;
@@ -41,11 +42,16 @@ public class LighterConfiguration {
     public static final String LIGHTER_ENVIRONMENT = "lighter.environment";
     public static final String LIGHTER_MAINNET_REST_URL = "lighter.mainnet.rest.url";
     public static final String LIGHTER_TESTNET_REST_URL = "lighter.testnet.rest.url";
+    public static final String LIGHTER_MAINNET_WS_URL = "lighter.mainnet.ws.url";
+    public static final String LIGHTER_TESTNET_WS_URL = "lighter.testnet.ws.url";
+    public static final String LIGHTER_WEBSOCKET_READONLY = "lighter.websocket.readonly";
     public static final String LIGHTER_ACCOUNT_ADDRESS = "lighter.account.address";
     public static final String LIGHTER_PRIVATE_KEY = "lighter.private.key";
 
     private static final String DEFAULT_ENVIRONMENT = "prod";
     private static final String DEFAULT_MAINNET_REST_URL = "https://mainnet.zklighter.elliot.ai/api/v1";
+    private static final String DEFAULT_MAINNET_WS_URL = "wss://mainnet.zklighter.elliot.ai/stream";
+    private static final boolean DEFAULT_WEBSOCKET_READONLY = true;
 
     private final Properties properties;
     private final String environment;
@@ -108,6 +114,9 @@ public class LighterConfiguration {
     private void loadFromEnvironmentVariables() {
         setIfPresent(LIGHTER_MAINNET_REST_URL, System.getenv("LIGHTER_MAINNET_REST_URL"));
         setIfPresent(LIGHTER_TESTNET_REST_URL, System.getenv("LIGHTER_TESTNET_REST_URL"));
+        setIfPresent(LIGHTER_MAINNET_WS_URL, System.getenv("LIGHTER_MAINNET_WS_URL"));
+        setIfPresent(LIGHTER_TESTNET_WS_URL, System.getenv("LIGHTER_TESTNET_WS_URL"));
+        setIfPresent(LIGHTER_WEBSOCKET_READONLY, System.getenv("LIGHTER_WEBSOCKET_READONLY"));
         setIfPresent(LIGHTER_ACCOUNT_ADDRESS, System.getenv("LIGHTER_ACCOUNT_ADDRESS"));
         setIfPresent(LIGHTER_PRIVATE_KEY, System.getenv("LIGHTER_PRIVATE_KEY"));
         setIfPresent(LIGHTER_ENVIRONMENT, System.getenv("LIGHTER_ENVIRONMENT"));
@@ -130,6 +139,9 @@ public class LighterConfiguration {
     private void setEnvironmentDefaults(String env) {
         if (!properties.containsKey(LIGHTER_MAINNET_REST_URL)) {
             properties.setProperty(LIGHTER_MAINNET_REST_URL, DEFAULT_MAINNET_REST_URL);
+        }
+        if (!properties.containsKey(LIGHTER_MAINNET_WS_URL)) {
+            properties.setProperty(LIGHTER_MAINNET_WS_URL, DEFAULT_MAINNET_WS_URL);
         }
     }
 
@@ -159,11 +171,51 @@ public class LighterConfiguration {
         return testnetUrl;
     }
 
+    public String getWebSocketUrl() {
+        String webSocketUrl;
+        if (isProductionEnvironment()) {
+            webSocketUrl = properties.getProperty(LIGHTER_MAINNET_WS_URL);
+        } else {
+            String testnetUrl = properties.getProperty(LIGHTER_TESTNET_WS_URL);
+            if (testnetUrl == null || testnetUrl.isBlank()) {
+                throw new IllegalStateException(
+                        "Testnet environment configured but no " + LIGHTER_TESTNET_WS_URL + " provided.");
+            }
+            webSocketUrl = testnetUrl;
+        }
+
+        if (webSocketUrl == null || webSocketUrl.isBlank()) {
+            throw new IllegalStateException("No websocket URL is configured.");
+        }
+
+        if (!isWebSocketReadonlyEnabled()) {
+            return webSocketUrl;
+        }
+
+        return appendReadonlyQueryParam(webSocketUrl);
+    }
+
     public String getAccountAddress() {
         return properties.getProperty(LIGHTER_ACCOUNT_ADDRESS);
     }
 
     public String getPrivateKey() {
         return properties.getProperty(LIGHTER_PRIVATE_KEY);
+    }
+
+    public boolean isWebSocketReadonlyEnabled() {
+        return Boolean.parseBoolean(properties.getProperty(LIGHTER_WEBSOCKET_READONLY,
+                Boolean.toString(DEFAULT_WEBSOCKET_READONLY)));
+    }
+
+    private String appendReadonlyQueryParam(String url) {
+        String lower = url.toLowerCase(Locale.ROOT);
+        if (lower.contains("readonly=")) {
+            return url;
+        }
+        if (url.endsWith("?") || url.endsWith("&")) {
+            return url + "readonly=true";
+        }
+        return url.contains("?") ? url + "&readonly=true" : url + "?readonly=true";
     }
 }
