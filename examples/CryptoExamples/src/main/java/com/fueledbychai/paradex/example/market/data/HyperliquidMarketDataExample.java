@@ -24,9 +24,10 @@ import org.slf4j.LoggerFactory;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
-import com.fueledbychai.hyperliquid.ws.HyperliquidTickerRegistry;
 import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.QuoteEngine;
+import com.fueledbychai.util.ITickerRegistry;
+import com.fueledbychai.util.TickerRegistryFactory;
 
 public class HyperliquidMarketDataExample {
 
@@ -34,8 +35,8 @@ public class HyperliquidMarketDataExample {
 
     public void getLevel1Quotes() {
 
-        Ticker ticker = HyperliquidTickerRegistry.getInstance()
-                .lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC");
+        ITickerRegistry registry = TickerRegistryFactory.getInstance(Exchange.HYPERLIQUID);
+        Ticker ticker = registry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC");
 
         QuoteEngine quoteEngine = QuoteEngine.getInstance(Exchange.HYPERLIQUID);
 

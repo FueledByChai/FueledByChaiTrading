@@ -1,14 +1,17 @@
 package com.fueledbychai.hyperliquid.ws;
 
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
-import com.fueledbychai.util.ITickerRegistry;
 import com.fueledbychai.util.AbstractTickerRegistry;
+import com.fueledbychai.util.ExchangeRestApiFactory;
+import com.fueledbychai.util.ITickerRegistry;
 
 public class HyperliquidTickerRegistry extends AbstractTickerRegistry implements ITickerRegistry {
 
     protected static ITickerRegistry instace;
-    protected IHyperliquidRestApi restApi = HyperliquidApiFactory.getRestApi();
+    protected IHyperliquidRestApi restApi = ExchangeRestApiFactory.getPublicApi(Exchange.HYPERLIQUID,
+            IHyperliquidRestApi.class);
 
     public static ITickerRegistry getInstance() {
         if (instace == null) {

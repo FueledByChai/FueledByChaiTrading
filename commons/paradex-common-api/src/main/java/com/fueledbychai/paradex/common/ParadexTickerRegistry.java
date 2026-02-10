@@ -1,17 +1,18 @@
 package com.fueledbychai.paradex.common;
 
 import com.fueledbychai.data.InstrumentDescriptor;
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.TickerTranslator;
 import com.fueledbychai.paradex.common.api.IParadexRestApi;
-import com.fueledbychai.paradex.common.api.ParadexApiFactory;
 import com.fueledbychai.util.AbstractTickerRegistry;
+import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.ITickerRegistry;
 
 public class ParadexTickerRegistry extends AbstractTickerRegistry implements ITickerRegistry {
 
     protected static ITickerRegistry instace;
-    protected IParadexRestApi restApi = ParadexApiFactory.getPublicApi();
+    protected IParadexRestApi restApi = ExchangeRestApiFactory.getPublicApi(Exchange.PARADEX, IParadexRestApi.class);
 
     public static ITickerRegistry getInstance() {
         if (instace == null) {

@@ -1,9 +1,11 @@
 package com.fueledbychai.lighter.common;
 
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.TickerTranslator;
 import com.fueledbychai.lighter.common.api.ILighterRestApi;
 import com.fueledbychai.util.AbstractTickerRegistry;
+import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.ITickerRegistry;
 
 public class LighterTickerRegistry extends AbstractTickerRegistry implements ITickerRegistry {
@@ -20,7 +22,8 @@ public class LighterTickerRegistry extends AbstractTickerRegistry implements ITi
 
     public static ITickerRegistry getInstance() {
         if (instance == null) {
-            throw new IllegalStateException("LighterTickerRegistry not initialized. Call getInstance(restApi) first.");
+            instance = new LighterTickerRegistry(
+                    ExchangeRestApiFactory.getPublicApi(Exchange.LIGHTER, ILighterRestApi.class));
         }
         return instance;
     }

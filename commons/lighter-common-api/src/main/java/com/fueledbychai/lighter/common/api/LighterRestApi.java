@@ -11,7 +11,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
 import org.json.JSONObject;
@@ -26,6 +25,7 @@ import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.ResponseException;
 import com.fueledbychai.data.Side;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.http.BaseRestApi;
 import com.fueledbychai.time.Span;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -45,7 +45,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
-public class LighterRestApi implements ILighterRestApi {
+public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
     protected static Logger logger = LoggerFactory.getLogger(LighterRestApi.class);
     protected static Logger latencyLogger = LoggerFactory.getLogger(Span.LATENCY_LOGGER_NAME);
     private final Gson gson;
@@ -53,10 +53,6 @@ public class LighterRestApi implements ILighterRestApi {
     protected static ILighterRestApi publicOnlyApi;
     protected static ILighterRestApi privateApi;
 
-    @FunctionalInterface
-    public interface RetryableAction {
-        void run() throws Exception; // Allows throwing checked exceptions
-    }
 
     protected OkHttpClient client;
     protected String baseUrl;
@@ -148,56 +144,6 @@ public class LighterRestApi implements ILighterRestApi {
                 throw new RuntimeException(e);
             }
         }, 3, 500);
-    }
-
-    protected void executeWithRetry(RetryableAction action, int maxRetries, long retryDelayMillis) {
-        int retries = 0;
-        while (true) {
-            try {
-                action.run(); // Execute the action
-                return; // Exit after successful execution
-            } catch (java.net.SocketTimeoutException | IllegalStateException e) {
-                if (retries < maxRetries) {
-                    retries++;
-                    logger.error("Request failed. Retrying... Attempt " + retries, e);
-                    try {
-                        Thread.sleep(retryDelayMillis * retries); // Exponential backoff
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        throw new IllegalStateException("Retry interrupted", ie);
-                    }
-                } else {
-                    logger.error("Max retries reached. Failing request.", e);
-                    throw new IllegalStateException("Max retries reached", e);
-                }
-            } catch (Exception ex) {
-                throw new RuntimeException(ex.getMessage(), ex); // Handle other exceptions (e.g., IOException, etc.)
-            }
-        }
-    }
-
-    protected <T> T executeWithRetry(Callable<T> action, int maxRetries, long retryDelayMillis) {
-        int retries = 0;
-        while (true) {
-            try {
-                return action.call(); // Execute the HTTP request
-            } catch (java.net.SocketTimeoutException | IllegalStateException e) {
-                if (retries < maxRetries) {
-                    retries++;
-                    logger.error("Request timed out. Retrying... Attempt " + retries, e);
-                    try {
-                        Thread.sleep(retryDelayMillis * retries); // Exponential backoff
-                    } catch (InterruptedException ie) {
-                        throw new IllegalStateException("Retry interrupted", ie);
-                    }
-                } else {
-                    logger.error("Max retries reached. Failing request.", e);
-                    throw new RuntimeException(e); // Rethrow the exception after max retries
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e.getMessage(), e); // Handle other exceptions (e.g., IOException, etc.)
-            }
-        }
     }
 
     protected InstrumentDescriptor parseInstrumentDescriptor(String responseBody) {

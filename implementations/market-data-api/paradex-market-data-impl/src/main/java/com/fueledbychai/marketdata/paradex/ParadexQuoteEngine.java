@@ -12,6 +12,7 @@ import java.util.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.ILevel1Quote;
@@ -25,8 +26,8 @@ import com.fueledbychai.marketdata.OrderFlow;
 import com.fueledbychai.marketdata.OrderFlowListener;
 import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.QuoteType;
-import com.fueledbychai.paradex.common.ParadexTickerRegistry;
 import com.fueledbychai.util.ITickerRegistry;
+import com.fueledbychai.util.TickerRegistryFactory;
 
 public class ParadexQuoteEngine extends QuoteEngine
         implements OrderBookUpdateListener, TradesUpdateListener, MarketsSummaryUpdateListener {
@@ -39,7 +40,7 @@ public class ParadexQuoteEngine extends QuoteEngine
     protected ITickerRegistry tickerRegistry;
 
     public ParadexQuoteEngine() {
-        tickerRegistry = ParadexTickerRegistry.getInstance();
+        tickerRegistry = TickerRegistryFactory.getInstance(Exchange.PARADEX);
     }
 
     @Override

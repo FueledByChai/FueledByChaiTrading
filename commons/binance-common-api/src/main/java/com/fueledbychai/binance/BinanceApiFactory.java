@@ -7,7 +7,11 @@ import org.slf4j.LoggerFactory;
  * Singleton factory for ParadexRestApi instances with centralized configuration
  * management. Provides thread-safe access to configured API instances without
  * requiring users to know configuration details.
+ *
+ * @deprecated Use {@link com.fueledbychai.util.ExchangeRestApiFactory} with
+ *             {@code Exchange.BINANCE_SPOT} instead.
  */
+@Deprecated(since = "0.2.0", forRemoval = false)
 public class BinanceApiFactory {
     private static final Logger logger = LoggerFactory.getLogger(BinanceApiFactory.class);
 
