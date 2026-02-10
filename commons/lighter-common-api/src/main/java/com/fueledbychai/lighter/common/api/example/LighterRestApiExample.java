@@ -18,17 +18,13 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 package com.fueledbychai.lighter.common.api.example;
 
-import java.net.InetSocketAddress;
-import java.net.Proxy;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
+import com.fueledbychai.lighter.common.api.LighterConfiguration;
 import com.fueledbychai.lighter.common.api.LighterRestApi;
-
-import okhttp3.OkHttpClient;
 
 public class LighterRestApiExample {
 
@@ -36,40 +32,55 @@ public class LighterRestApiExample {
     private static final int MAX_PRINT = 3000;
 
     public static void main(String[] args) {
-        String baseUrl = "https://mainnet.zklighter.elliot.ai/api/v1";
-        String accountAddress = "";
-        String privateKey = "";
-        boolean isTestnet = false;
-        String symbol = "BTC";
-        Proxy proxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", 1080));
-        System.setProperty("socksProxyHost", "127.0.0.1");
-        System.setProperty("socksProxyPort", "1080");
-        OkHttpClient client = new OkHttpClient.Builder().proxy(proxy).build();
+        String baseUrlArg = getArgOrSystemOrEnv(args, 0, "lighter.base.url", "LIGHTER_BASE_URL");
+        String accountAddress = getArgOrSystemOrEnv(args, 1, LighterConfiguration.LIGHTER_ACCOUNT_ADDRESS,
+                "LIGHTER_ACCOUNT_ADDRESS");
+        String privateKey = getArgOrSystemOrEnv(args, 2, LighterConfiguration.LIGHTER_PRIVATE_KEY,
+                "LIGHTER_PRIVATE_KEY");
+        String isTestnetArg = getArgOrSystemOrEnv(args, 3, "lighter.is.testnet", "LIGHTER_IS_TESTNET");
+        String symbol = getArgOrSystemOrEnv(args, 4, "lighter.symbol", "LIGHTER_SYMBOL");
+        String runProxyArg = getArgOrSystemOrEnv(args, 5, LighterConfiguration.LIGHTER_RUN_PROXY, "LIGHTER_RUN_PROXY");
+        String proxyHostArg = getArgOrSystemOrEnv(args, 6, LighterConfiguration.LIGHTER_PROXY_HOST,
+                "LIGHTER_PROXY_HOST");
+        String proxyPortArg = getArgOrSystemOrEnv(args, 7, LighterConfiguration.LIGHTER_PROXY_PORT,
+                "LIGHTER_PROXY_PORT");
 
-        if (baseUrl == null || baseUrl.isBlank()) {
-            logger.error("Missing baseUrl. Provide as arg[0] or env LIGHTER_BASE_URL.");
-            logger.error("Usage: <baseUrl> [account] [privateKey] [isTestnet] [symbol]");
-            return;
+        if (runProxyArg != null && !runProxyArg.isBlank()) {
+            System.setProperty(LighterConfiguration.LIGHTER_RUN_PROXY, runProxyArg);
+        }
+        if (proxyHostArg != null && !proxyHostArg.isBlank()) {
+            System.setProperty(LighterConfiguration.LIGHTER_PROXY_HOST, proxyHostArg);
+        }
+        if (proxyPortArg != null && !proxyPortArg.isBlank()) {
+            System.setProperty(LighterConfiguration.LIGHTER_PROXY_PORT, proxyPortArg);
         }
 
+        LighterConfiguration.reset();
+        LighterConfiguration configuration = LighterConfiguration.getInstance();
+
+        String baseUrl = (baseUrlArg == null || baseUrlArg.isBlank()) ? configuration.getRestUrl() : baseUrlArg;
+        boolean isTestnet = isTestnetArg == null || isTestnetArg.isBlank() ? !configuration.isProductionEnvironment()
+                : Boolean.parseBoolean(isTestnetArg);
+
         LighterRestApi api = (accountAddress == null || privateKey == null || accountAddress.isBlank()
-                || privateKey.isBlank()) ? new LighterRestApi(baseUrl, isTestnet, client)
-                        : new LighterRestApi(baseUrl, accountAddress, privateKey, isTestnet, client);
+                || privateKey.isBlank()) ? new LighterRestApi(baseUrl, isTestnet)
+                        : new LighterRestApi(baseUrl, accountAddress, privateKey, isTestnet);
 
         try {
+            logger.info("Running Lighter REST example with proxyEnabled={} proxy={}:{}", configuration.isProxyEnabled(),
+                    configuration.getProxyHost(), configuration.getProxyPort());
             InstrumentDescriptor[] perps = api.getAllInstrumentsForType(InstrumentType.PERPETUAL_FUTURES);
             logSample("PERPETUAL_FUTURES", perps);
 
-            // InstrumentDescriptor[] spot =
-            // api.getAllInstrumentsForType(InstrumentType.CRYPTO_SPOT);
-            // logSample("CRYPTO_SPOT", spot);
+            InstrumentDescriptor[] spot = api.getAllInstrumentsForType(InstrumentType.CRYPTO_SPOT);
+            logSample("CRYPTO_SPOT", spot);
 
-            // if (symbol != null && !symbol.isBlank()) {
-            // InstrumentDescriptor descriptor = api.getInstrumentDescriptor(symbol);
-            // logger.info("InstrumentDescriptor for {}: {}", symbol, descriptor);
-            // } else {
-            // logger.info("No symbol provided. Skipping getInstrumentDescriptor call.");
-            // }
+            if (symbol != null && !symbol.isBlank()) {
+                InstrumentDescriptor descriptor = api.getInstrumentDescriptor(symbol);
+                logger.info("InstrumentDescriptor for {}: {}", symbol, descriptor);
+            } else {
+                logger.info("No symbol provided. Skipping getInstrumentDescriptor call.");
+            }
         } catch (Exception e) {
             logger.error("Error calling Lighter REST API", e);
         }
@@ -87,11 +98,15 @@ public class LighterRestApiExample {
         }
     }
 
-    private static String getArgOrEnv(String[] args, int index, String envKey) {
+    private static String getArgOrSystemOrEnv(String[] args, int index, String systemPropertyKey, String envKey) {
         if (args != null && args.length > index && args[index] != null && !args[index].isBlank()) {
             return args[index];
         }
-        String env = System.getenv(envKey);
-        return (env == null || env.isBlank()) ? null : env;
+        String systemProperty = System.getProperty(systemPropertyKey);
+        if (systemProperty != null && !systemProperty.isBlank()) {
+            return systemProperty;
+        }
+        String envValue = System.getenv(envKey);
+        return (envValue == null || envValue.isBlank()) ? null : envValue;
     }
 }

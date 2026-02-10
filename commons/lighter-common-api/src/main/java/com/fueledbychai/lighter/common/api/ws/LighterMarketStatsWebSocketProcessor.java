@@ -65,18 +65,40 @@ public class LighterMarketStatsWebSocketProcessor extends AbstractWebSocketProce
             marketId = parseInteger(fallbackMarketId);
         }
         stats.setMarketId(marketId);
-        stats.setMarkPrice(parseBigDecimal(json.opt("mark_price")));
-        stats.setIndexPrice(parseBigDecimal(json.opt("index_price")));
-        stats.setDailyBaseVolume(parseBigDecimal(json.opt("daily_base_volume")));
-        stats.setDailyQuoteVolume(parseBigDecimal(json.opt("daily_quote_volume")));
-        stats.setOpenInterest(parseBigDecimal(json.opt("open_interest")));
-        stats.setFundingRate(parseBigDecimal(json.opt("funding_rate")));
-        stats.setDailyLow(parseBigDecimal(json.opt("daily_low")));
-        stats.setDailyHigh(parseBigDecimal(json.opt("daily_high")));
-        stats.setDailyPriceChange24h(parseBigDecimal(json.opt("daily_price_change_24h")));
-        stats.setDailyPriceChangePercent24h(parseBigDecimal(json.opt("daily_price_change_percent_24h")));
-        stats.setLastPrice(parseBigDecimal(json.opt("last_price")));
+        stats.setMarkPrice(readDecimal(json, "mark_price"));
+        stats.setIndexPrice(readDecimal(json, "index_price"));
+        stats.setDailyBaseVolume(readDecimal(json, "daily_base_volume", "daily_base_token_volume"));
+        stats.setDailyQuoteVolume(readDecimal(json, "daily_quote_volume", "daily_quote_token_volume"));
+        stats.setOpenInterest(readDecimal(json, "open_interest"));
+        BigDecimal currentFundingRate = readDecimal(json, "current_funding_rate");
+        BigDecimal lastFundingRate = readDecimal(json, "funding_rate");
+        stats.setCurrentFundingRate(currentFundingRate);
+        stats.setLastFundingRate(lastFundingRate);
+        stats.setFundingTimestamp(parseLong(json.opt("funding_timestamp")));
+        stats.setDailyLow(readDecimal(json, "daily_low", "daily_price_low"));
+        stats.setDailyHigh(readDecimal(json, "daily_high", "daily_price_high"));
+        stats.setDailyPriceChange24h(readDecimal(json, "daily_price_change_24h", "daily_price_change"));
+        stats.setDailyPriceChangePercent24h(
+                readDecimal(json, "daily_price_change_percent_24h", "daily_price_change_percent"));
+        stats.setLastPrice(readDecimal(json, "last_price", "last_trade_price"));
         return stats;
+    }
+
+    protected BigDecimal readDecimal(JSONObject json, String... keys) {
+        if (json == null || keys == null) {
+            return null;
+        }
+        for (String key : keys) {
+            if (key == null || key.isBlank()) {
+                continue;
+            }
+            Object value = json.opt(key);
+            BigDecimal parsed = parseBigDecimal(value);
+            if (parsed != null) {
+                return parsed;
+            }
+        }
+        return null;
     }
 
     protected BigDecimal parseBigDecimal(Object value) {
@@ -99,6 +121,18 @@ public class LighterMarketStatsWebSocketProcessor extends AbstractWebSocketProce
             return Integer.valueOf(value.toString());
         } catch (Exception e) {
             logger.warn("Unable to parse integer value '{}'", value);
+            return null;
+        }
+    }
+
+    protected Long parseLong(Object value) {
+        if (value == null || value == JSONObject.NULL) {
+            return null;
+        }
+        try {
+            return Long.valueOf(value.toString());
+        } catch (Exception e) {
+            logger.warn("Unable to parse long value '{}'", value);
             return null;
         }
     }
