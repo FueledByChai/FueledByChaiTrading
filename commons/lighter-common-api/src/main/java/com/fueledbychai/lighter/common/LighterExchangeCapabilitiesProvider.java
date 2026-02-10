@@ -35,7 +35,7 @@ public class LighterExchangeCapabilitiesProvider implements ExchangeCapabilities
     @Override
     public ExchangeCapabilities getCapabilities() {
         return DefaultExchangeCapabilities.builder(Exchange.LIGHTER)
-                .supportsStreaming(false)
+                .supportsStreaming(true)
                 .supportsBrokerage(false)
                 .supportsHistoricalData(false)
                 .addInstrumentType(InstrumentType.PERPETUAL_FUTURES)
