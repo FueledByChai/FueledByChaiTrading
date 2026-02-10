@@ -28,6 +28,8 @@ import java.util.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fueledbychai.websocket.ProxyConfig;
+
 /**
  * Centralized configuration management for Lighter API settings. Supports
  * loading configuration from properties files, system properties, environment
@@ -45,12 +47,18 @@ public class LighterConfiguration {
     public static final String LIGHTER_MAINNET_WS_URL = "lighter.mainnet.ws.url";
     public static final String LIGHTER_TESTNET_WS_URL = "lighter.testnet.ws.url";
     public static final String LIGHTER_WEBSOCKET_READONLY = "lighter.websocket.readonly";
+    public static final String LIGHTER_RUN_PROXY = "lighter.run.proxy";
+    public static final String LIGHTER_PROXY_HOST = "lighter.proxy.host";
+    public static final String LIGHTER_PROXY_PORT = "lighter.proxy.port";
     public static final String LIGHTER_ACCOUNT_ADDRESS = "lighter.account.address";
     public static final String LIGHTER_PRIVATE_KEY = "lighter.private.key";
 
     private static final String DEFAULT_ENVIRONMENT = "prod";
     private static final String DEFAULT_MAINNET_REST_URL = "https://mainnet.zklighter.elliot.ai/api/v1";
     private static final String DEFAULT_MAINNET_WS_URL = "wss://mainnet.zklighter.elliot.ai/stream";
+    private static final boolean DEFAULT_RUN_PROXY = false;
+    private static final String DEFAULT_PROXY_HOST = "127.0.0.1";
+    private static final int DEFAULT_PROXY_PORT = 1080;
     private static final boolean DEFAULT_WEBSOCKET_READONLY = true;
 
     private final Properties properties;
@@ -85,6 +93,7 @@ public class LighterConfiguration {
 
         String env = properties.getProperty(LIGHTER_ENVIRONMENT, DEFAULT_ENVIRONMENT);
         setEnvironmentDefaults(env);
+        setProxySetting();
 
         logger.info("Lighter configuration loaded for environment: {}", env);
         return env;
@@ -117,6 +126,9 @@ public class LighterConfiguration {
         setIfPresent(LIGHTER_MAINNET_WS_URL, System.getenv("LIGHTER_MAINNET_WS_URL"));
         setIfPresent(LIGHTER_TESTNET_WS_URL, System.getenv("LIGHTER_TESTNET_WS_URL"));
         setIfPresent(LIGHTER_WEBSOCKET_READONLY, System.getenv("LIGHTER_WEBSOCKET_READONLY"));
+        setIfPresent(LIGHTER_RUN_PROXY, System.getenv("LIGHTER_RUN_PROXY"));
+        setIfPresent(LIGHTER_PROXY_HOST, System.getenv("LIGHTER_PROXY_HOST"));
+        setIfPresent(LIGHTER_PROXY_PORT, System.getenv("LIGHTER_PROXY_PORT"));
         setIfPresent(LIGHTER_ACCOUNT_ADDRESS, System.getenv("LIGHTER_ACCOUNT_ADDRESS"));
         setIfPresent(LIGHTER_PRIVATE_KEY, System.getenv("LIGHTER_PRIVATE_KEY"));
         setIfPresent(LIGHTER_ENVIRONMENT, System.getenv("LIGHTER_ENVIRONMENT"));
@@ -204,8 +216,55 @@ public class LighterConfiguration {
     }
 
     public boolean isWebSocketReadonlyEnabled() {
+        String explicit = properties.getProperty(LIGHTER_WEBSOCKET_READONLY);
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit);
+        }
+        if (isProxyEnabled()) {
+            return false;
+        }
         return Boolean.parseBoolean(properties.getProperty(LIGHTER_WEBSOCKET_READONLY,
                 Boolean.toString(DEFAULT_WEBSOCKET_READONLY)));
+    }
+
+    public boolean isProxyEnabled() {
+        return Boolean.parseBoolean(properties.getProperty(LIGHTER_RUN_PROXY, Boolean.toString(DEFAULT_RUN_PROXY)));
+    }
+
+    public String getProxyHost() {
+        return properties.getProperty(LIGHTER_PROXY_HOST, DEFAULT_PROXY_HOST);
+    }
+
+    public int getProxyPort() {
+        String portText = properties.getProperty(LIGHTER_PROXY_PORT);
+        return parseProxyPort(portText);
+    }
+
+    private int parseProxyPort(String portText) {
+        if (portText == null || portText.isBlank()) {
+            return DEFAULT_PROXY_PORT;
+        }
+        try {
+            int parsed = Integer.parseInt(portText.trim());
+            if (parsed > 0 && parsed <= 65535) {
+                return parsed;
+            }
+            logger.warn("Invalid proxy port '{}', falling back to {}", portText, DEFAULT_PROXY_PORT);
+        } catch (NumberFormatException ex) {
+            logger.warn("Unable to parse proxy port '{}', falling back to {}", portText, DEFAULT_PROXY_PORT);
+        }
+        return DEFAULT_PROXY_PORT;
+    }
+
+    private void setProxySetting() {
+        if (isProxyEnabled()) {
+            ProxyConfig.getInstance().setSocksProxy(getProxyHost(), getProxyPort());
+            logger.info("Lighter proxy enabled: {}:{}", getProxyHost(), getProxyPort());
+            return;
+        }
+
+        ProxyConfig.getInstance().setRunningLocally(false);
+        logger.info("Lighter proxy disabled");
     }
 
     private String appendReadonlyQueryParam(String url) {

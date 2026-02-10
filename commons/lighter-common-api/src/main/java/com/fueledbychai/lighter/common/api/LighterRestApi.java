@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.lang.reflect.Type;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.net.Proxy;
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -27,6 +28,7 @@ import com.fueledbychai.data.Side;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.http.BaseRestApi;
 import com.fueledbychai.time.Span;
+import com.fueledbychai.websocket.ProxyConfig;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
@@ -74,13 +76,22 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
 
     public LighterRestApi(String baseUrl, String accountAddressString, String privateKeyString, boolean isTestnet,
             OkHttpClient client) {
-        this.client = client == null ? new OkHttpClient() : client;
+        this.client = client == null ? buildDefaultHttpClient() : client;
         this.baseUrl = baseUrl;
         this.accountAddressString = accountAddressString;
         this.privateKeyString = privateKeyString;
         // Register the custom adapter
         this.gson = new GsonBuilder().registerTypeAdapter(ZonedDateTime.class, new ZonedDateTimeAdapter()).create();
         publicApiOnly = accountAddressString == null || privateKeyString == null;
+    }
+
+    protected OkHttpClient buildDefaultHttpClient() {
+        Proxy proxy = ProxyConfig.getInstance().getProxy();
+        OkHttpClient.Builder builder = new OkHttpClient.Builder();
+        if (proxy != null && proxy != Proxy.NO_PROXY) {
+            builder.proxy(proxy);
+        }
+        return builder.build();
     }
 
     @Override

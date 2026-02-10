@@ -7,10 +7,17 @@ public class LighterMarketStats {
     private Integer marketId;
     private BigDecimal markPrice;
     private BigDecimal indexPrice;
+    // Base-token units (e.g. BTC for BTC market)
     private BigDecimal dailyBaseVolume;
+    // Quote-token notional (e.g. USDC)
     private BigDecimal dailyQuoteVolume;
     private BigDecimal openInterest;
-    private BigDecimal fundingRate;
+    // Estimated upcoming funding payment rate.
+    private BigDecimal currentFundingRate;
+    // Most recent settled funding payment rate.
+    private BigDecimal lastFundingRate;
+    // Timestamp (epoch millis) when lastFundingRate was settled.
+    private Long fundingTimestamp;
     private BigDecimal dailyLow;
     private BigDecimal dailyHigh;
     private BigDecimal dailyPriceChange24h;
@@ -65,12 +72,28 @@ public class LighterMarketStats {
         this.openInterest = openInterest;
     }
 
-    public BigDecimal getFundingRate() {
-        return fundingRate;
+    public BigDecimal getCurrentFundingRate() {
+        return currentFundingRate;
     }
 
-    public void setFundingRate(BigDecimal fundingRate) {
-        this.fundingRate = fundingRate;
+    public void setCurrentFundingRate(BigDecimal currentFundingRate) {
+        this.currentFundingRate = currentFundingRate;
+    }
+
+    public BigDecimal getLastFundingRate() {
+        return lastFundingRate;
+    }
+
+    public void setLastFundingRate(BigDecimal lastFundingRate) {
+        this.lastFundingRate = lastFundingRate;
+    }
+
+    public Long getFundingTimestamp() {
+        return fundingTimestamp;
+    }
+
+    public void setFundingTimestamp(Long fundingTimestamp) {
+        this.fundingTimestamp = fundingTimestamp;
     }
 
     public BigDecimal getDailyLow() {
@@ -112,5 +135,12 @@ public class LighterMarketStats {
     public void setLastPrice(BigDecimal lastPrice) {
         this.lastPrice = lastPrice;
     }
-}
 
+    public BigDecimal getDailyBaseVolumeUnits() {
+        return dailyBaseVolume;
+    }
+
+    public BigDecimal getDailyQuoteVolumeNotional() {
+        return dailyQuoteVolume;
+    }
+}

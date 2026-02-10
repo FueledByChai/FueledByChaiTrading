@@ -41,7 +41,8 @@ public class LighterMarketStatsWebSocketProcessorTest {
         assertNotNull(stats);
         assertEquals(53, stats.getMarketId());
         assertEquals(new BigDecimal("61.562"), stats.getMarkPrice());
-        assertEquals(new BigDecimal("0.000055"), stats.getFundingRate());
+        assertEquals(new BigDecimal("0.000055"), stats.getLastFundingRate());
+        assertNull(stats.getCurrentFundingRate());
     }
 
     @Test
@@ -109,6 +110,62 @@ public class LighterMarketStatsWebSocketProcessorTest {
         assertNotNull(update);
         assertEquals("market_stats/53", update.getChannel());
         assertEquals(new BigDecimal("61.562"), update.getMarketStats("53").getMarkPrice());
+    }
+
+    @Test
+    void parseCurrentDocFieldNames() {
+        TestableProcessor processor = new TestableProcessor();
+        String message = "{"
+                + "\"type\":\"channel_data\","
+                + "\"channel\":\"market_stats:1\","
+                + "\"market_stats\":{"
+                + "\"market_id\":1,"
+                + "\"mark_price\":\"69229.4\","
+                + "\"last_trade_price\":\"69218.7\","
+                + "\"daily_base_token_volume\":\"104.23\","
+                + "\"daily_quote_token_volume\":\"7213943.82\","
+                + "\"daily_price_low\":\"68100.1\","
+                + "\"daily_price_high\":\"70150.6\","
+                + "\"daily_price_change\":\"-125.7\","
+                + "\"current_funding_rate\":\"-0.0012\","
+                + "\"funding_timestamp\":1739001600000"
+                + "}"
+                + "}";
+
+        LighterMarketStatsUpdate update = processor.parse(message);
+        assertNotNull(update);
+        LighterMarketStats stats = update.getMarketStats("1");
+        assertNotNull(stats);
+        assertEquals(new BigDecimal("69218.7"), stats.getLastPrice());
+        assertEquals(new BigDecimal("7213943.82"), stats.getDailyQuoteVolume());
+        assertEquals(new BigDecimal("104.23"), stats.getDailyBaseVolume());
+        assertEquals(new BigDecimal("-125.7"), stats.getDailyPriceChange24h());
+        assertEquals(new BigDecimal("-0.0012"), stats.getCurrentFundingRate());
+        assertNull(stats.getLastFundingRate());
+        assertEquals(1739001600000L, stats.getFundingTimestamp());
+    }
+
+    @Test
+    void parseBothFundingRates() {
+        TestableProcessor processor = new TestableProcessor();
+        String message = "{"
+                + "\"type\":\"channel_data\","
+                + "\"channel\":\"market_stats:1\","
+                + "\"market_stats\":{"
+                + "\"market_id\":1,"
+                + "\"current_funding_rate\":\"0.0005\","
+                + "\"funding_rate\":\"0.0003\","
+                + "\"funding_timestamp\":1739001600000"
+                + "}"
+                + "}";
+
+        LighterMarketStatsUpdate update = processor.parse(message);
+        assertNotNull(update);
+        LighterMarketStats stats = update.getMarketStats("1");
+        assertNotNull(stats);
+        assertEquals(new BigDecimal("0.0005"), stats.getCurrentFundingRate());
+        assertEquals(new BigDecimal("0.0003"), stats.getLastFundingRate());
+        assertEquals(1739001600000L, stats.getFundingTimestamp());
     }
 
     private static class TestableProcessor extends LighterMarketStatsWebSocketProcessor {
