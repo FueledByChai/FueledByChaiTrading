@@ -13,10 +13,22 @@ import com.fueledbychai.data.IInstrumentLookup;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.util.ExchangeRestApiFactory;
 
 public class BinanceInstrumentLookup implements IInstrumentLookup {
 
-    protected IBinanceRestApi api = BinanceApiFactory.getApi();
+    protected final IBinanceRestApi api;
+
+    public BinanceInstrumentLookup() {
+        this(ExchangeRestApiFactory.getApi(Exchange.BINANCE_SPOT, IBinanceRestApi.class));
+    }
+
+    public BinanceInstrumentLookup(IBinanceRestApi api) {
+        if (api == null) {
+            throw new IllegalArgumentException("api is required");
+        }
+        this.api = api;
+    }
 
     @Override
     public InstrumentDescriptor lookupByCommonSymbol(String commonSymbol) {

@@ -14,9 +14,9 @@ import com.fueledbychai.broker.order.OrderTicket.Duration;
 import com.fueledbychai.broker.order.OrderTicket.Modifier;
 import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.data.FueledByChaiException;
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
-import com.fueledbychai.paradex.common.ParadexTickerRegistry;
 import com.fueledbychai.paradex.common.api.ParadexUtil;
 import com.fueledbychai.paradex.common.api.order.Flag;
 import com.fueledbychai.paradex.common.api.order.Instruction;
@@ -28,12 +28,13 @@ import com.fueledbychai.paradex.common.api.ws.orderstatus.CancelReason;
 import com.fueledbychai.paradex.common.api.ws.orderstatus.IParadexOrderStatusUpdate;
 import com.fueledbychai.paradex.common.api.ws.orderstatus.ParadexOrderStatus;
 import com.fueledbychai.util.ITickerRegistry;
+import com.fueledbychai.util.TickerRegistryFactory;
 import com.fueledbychai.util.Util;
 
 public class ParadexTranslator implements IParadexTranslator {
 
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(ParadexTranslator.class);
-    protected static ITickerRegistry tickerRegistry = ParadexTickerRegistry.getInstance();
+    protected static ITickerRegistry tickerRegistry = TickerRegistryFactory.getInstance(Exchange.PARADEX);
     protected static IParadexTranslator instance;
 
     public static IParadexTranslator getInstance() {

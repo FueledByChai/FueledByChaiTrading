@@ -14,10 +14,10 @@ import java.util.Collections;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
-import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.fueledbychai.BestBidOffer;
@@ -27,16 +27,16 @@ import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
-import com.fueledbychai.hyperliquid.ws.HyperliquidTickerRegistry;
 import com.fueledbychai.hyperliquid.ws.json.OrderJson;
 import com.fueledbychai.hyperliquid.ws.json.LimitType;
 import com.fueledbychai.hyperliquid.ws.listeners.accountinfo.HyperliquidPositionUpdate;
+import com.fueledbychai.util.ITickerRegistry;
 
 @ExtendWith(MockitoExtension.class)
 public class TranslatorTest {
 
     @Mock
-    HyperliquidTickerRegistry mockRegistry;
+    ITickerRegistry mockRegistry;
     @Mock
     Ticker mockTicker;
     @Mock
@@ -46,24 +46,14 @@ public class TranslatorTest {
 
     ITranslator translator = Translator.getInstance();
 
-    private static org.mockito.MockedStatic<HyperliquidTickerRegistry> staticMock;
-
-    @org.junit.jupiter.api.BeforeAll
-    public static void setupAll() {
-        staticMock = Mockito.mockStatic(HyperliquidTickerRegistry.class);
-    }
-
     @BeforeEach
     public void setup() {
-        staticMock.when(HyperliquidTickerRegistry::getInstance).thenReturn(mockRegistry);
+        Translator.tickerRegistry = mockRegistry;
     }
 
-    @org.junit.jupiter.api.AfterAll
-    public static void tearDownAll() {
-        if (staticMock != null) {
-            staticMock.close();
-            staticMock = null;
-        }
+    @AfterEach
+    public void tearDown() {
+        Translator.tickerRegistry = null;
     }
 
     @Test
