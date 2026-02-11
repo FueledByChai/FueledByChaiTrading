@@ -13,8 +13,10 @@ import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.lighter.common.api.ws.ILighterMarketStatsListener;
 import com.fueledbychai.lighter.common.api.ws.ILighterOrderBookListener;
+import com.fueledbychai.lighter.common.api.ws.ILighterTradeListener;
 import com.fueledbychai.lighter.common.api.ws.LighterMarketStatsWebSocketProcessor;
 import com.fueledbychai.lighter.common.api.ws.LighterOrderBookWebSocketProcessor;
+import com.fueledbychai.lighter.common.api.ws.LighterTradesWebSocketProcessor;
 import com.fueledbychai.lighter.common.api.ws.LighterWSClientBuilder;
 import com.fueledbychai.lighter.common.api.ws.LighterWebSocketClient;
 import com.fueledbychai.websocket.IWebSocketProcessor;
@@ -25,13 +27,14 @@ public class LighterWebSocketApi implements ILighterWebSocketApi {
     private static final long DEFAULT_RECONNECT_DELAY_MILLIS = 2_000L;
 
     protected enum ChannelType {
-        MARKET_STATS, ORDER_BOOK
+        MARKET_STATS, ORDER_BOOK, TRADE
     }
 
     private final String webSocketUrl;
     private final Map<String, LighterWebSocketClient> channelClients = new ConcurrentHashMap<>();
     private final Map<String, LighterMarketStatsWebSocketProcessor> marketStatsProcessors = new ConcurrentHashMap<>();
     private final Map<String, LighterOrderBookWebSocketProcessor> orderBookProcessors = new ConcurrentHashMap<>();
+    private final Map<String, LighterTradesWebSocketProcessor> tradeProcessors = new ConcurrentHashMap<>();
     private final Map<String, ScheduledFuture<?>> reconnectTasks = new ConcurrentHashMap<>();
     private final Set<String> manualCloseChannels = ConcurrentHashMap.newKeySet();
     private final ScheduledExecutorService reconnectScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -72,6 +75,15 @@ public class LighterWebSocketApi implements ILighterWebSocketApi {
         }
         String channel = LighterWSClientBuilder.getOrderBookChannel(marketId);
         return subscribeOrderBook(channel, listener);
+    }
+
+    @Override
+    public LighterWebSocketClient subscribeTrades(int marketId, ILighterTradeListener listener) {
+        if (marketId < 0) {
+            throw new IllegalArgumentException("marketId must be >= 0");
+        }
+        String channel = LighterWSClientBuilder.getTradeChannel(marketId);
+        return subscribeTrades(channel, listener);
     }
 
     protected synchronized LighterWebSocketClient subscribeMarketStats(String channel,
@@ -123,6 +135,30 @@ public class LighterWebSocketApi implements ILighterWebSocketApi {
         return channelClients.get(channel);
     }
 
+    protected synchronized LighterWebSocketClient subscribeTrades(String channel, ILighterTradeListener listener) {
+        if (channel == null || channel.isBlank()) {
+            throw new IllegalArgumentException("channel is required");
+        }
+        if (listener == null) {
+            throw new IllegalArgumentException("listener is required");
+        }
+        manualCloseChannels.remove(channel);
+        cancelReconnectTask(channel);
+
+        LighterTradesWebSocketProcessor processor = tradeProcessors.get(channel);
+        if (processor == null) {
+            processor = createTradesProcessor(channel);
+            LighterWebSocketClient client = createClient(channel, processor);
+            tradeProcessors.put(channel, processor);
+            channelClients.put(channel, client);
+            logger.info("Connecting to Lighter websocket channel: {} using {}", channel, webSocketUrl);
+            client.connect();
+        }
+
+        processor.addEventListener(listener);
+        return channelClients.get(channel);
+    }
+
     @Override
     public synchronized void disconnectAll() {
         manualCloseChannels.addAll(channelClients.keySet());
@@ -149,9 +185,17 @@ public class LighterWebSocketApi implements ILighterWebSocketApi {
                 logger.warn("Error shutting down websocket processor", e);
             }
         }
+        for (LighterTradesWebSocketProcessor processor : tradeProcessors.values()) {
+            try {
+                processor.shutdown();
+            } catch (Exception e) {
+                logger.warn("Error shutting down websocket processor", e);
+            }
+        }
         channelClients.clear();
         marketStatsProcessors.clear();
         orderBookProcessors.clear();
+        tradeProcessors.clear();
         manualCloseChannels.clear();
     }
 
@@ -164,6 +208,12 @@ public class LighterWebSocketApi implements ILighterWebSocketApi {
     protected LighterOrderBookWebSocketProcessor createOrderBookProcessor(String channel) {
         return new LighterOrderBookWebSocketProcessor(() -> {
             handleChannelClosed(channel, ChannelType.ORDER_BOOK);
+        });
+    }
+
+    protected LighterTradesWebSocketProcessor createTradesProcessor(String channel) {
+        return new LighterTradesWebSocketProcessor(() -> {
+            handleChannelClosed(channel, ChannelType.TRADE);
         });
     }
 
@@ -233,6 +283,7 @@ public class LighterWebSocketApi implements ILighterWebSocketApi {
         return switch (type) {
             case MARKET_STATS -> marketStatsProcessors.get(channel);
             case ORDER_BOOK -> orderBookProcessors.get(channel);
+            case TRADE -> tradeProcessors.get(channel);
         };
     }
 

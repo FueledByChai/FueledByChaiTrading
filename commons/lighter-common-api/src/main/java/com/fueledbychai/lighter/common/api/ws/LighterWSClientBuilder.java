@@ -7,6 +7,7 @@ public class LighterWSClientBuilder {
     public static final String WS_TYPE_MARKET_STATS = "market_stats";
     public static final String WS_TYPE_MARKET_STATS_ALL = WS_TYPE_MARKET_STATS + "/all";
     public static final String WS_TYPE_ORDER_BOOK = "order_book";
+    public static final String WS_TYPE_TRADE = "trade";
 
     public static LighterWebSocketClient buildClient(String url, String channel, IWebSocketProcessor processor)
             throws Exception {
@@ -28,6 +29,11 @@ public class LighterWSClientBuilder {
         return buildClient(url, getOrderBookChannel(marketId), processor);
     }
 
+    public static LighterWebSocketClient buildTradeClient(String url, int marketId, IWebSocketProcessor processor)
+            throws Exception {
+        return buildClient(url, getTradeChannel(marketId), processor);
+    }
+
     public static String getMarketStatsChannel(int marketId) {
         if (marketId < 0) {
             throw new IllegalArgumentException("marketId must be >= 0");
@@ -40,5 +46,12 @@ public class LighterWSClientBuilder {
             throw new IllegalArgumentException("marketId must be >= 0");
         }
         return WS_TYPE_ORDER_BOOK + "/" + marketId;
+    }
+
+    public static String getTradeChannel(int marketId) {
+        if (marketId < 0) {
+            throw new IllegalArgumentException("marketId must be >= 0");
+        }
+        return WS_TYPE_TRADE + "/" + marketId;
     }
 }
