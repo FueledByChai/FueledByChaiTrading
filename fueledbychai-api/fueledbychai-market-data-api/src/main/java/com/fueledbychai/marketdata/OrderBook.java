@@ -132,14 +132,16 @@ public class OrderBook implements IOrderBook {
         // Populate the new sides with explicit NaN/null checks and warnings
         for (PriceLevel bid : bids) {
             if (bid.getSize() == null || Double.isNaN(bid.getSize())) {
-                logger.warn("NaN or null bid size encountered in updateFromSnapshot for price {}. Skipping.", bid.getPrice());
+                logger.warn("NaN or null bid size encountered in updateFromSnapshot for price {}. Skipping.",
+                        bid.getPrice());
                 continue;
             }
             newBuySide.insertDirectly(bid.getPrice(), bid.getSize());
         }
         for (PriceLevel ask : asks) {
             if (ask.getSize() == null || Double.isNaN(ask.getSize())) {
-                logger.warn("NaN or null ask size encountered in updateFromSnapshot for price {}. Skipping.", ask.getPrice());
+                logger.warn("NaN or null ask size encountered in updateFromSnapshot for price {}. Skipping.",
+                        ask.getPrice());
                 continue;
             }
             newSellSide.insertDirectly(ask.getPrice(), ask.getSize());
@@ -207,7 +209,8 @@ public class OrderBook implements IOrderBook {
         for (int i = 0; i < bidPrices.length; i++) {
             Double size = bidSizes[i];
             if (size == null || Double.isNaN(size)) {
-                logger.warn("NaN or null bid size encountered in updateFromSnapshot (array) for price {}. Skipping.", bidPrices[i]);
+                logger.warn("NaN or null bid size encountered in updateFromSnapshot (array) for price {}. Skipping.",
+                        bidPrices[i]);
                 continue;
             }
             bids.add(new PriceLevel(bidPrices[i], size));
@@ -216,7 +219,8 @@ public class OrderBook implements IOrderBook {
         for (int i = 0; i < askPrices.length; i++) {
             Double size = askSizes[i];
             if (size == null || Double.isNaN(size)) {
-                logger.warn("NaN or null ask size encountered in updateFromSnapshot (array) for price {}. Skipping.", askPrices[i]);
+                logger.warn("NaN or null ask size encountered in updateFromSnapshot (array) for price {}. Skipping.",
+                        askPrices[i]);
                 continue;
             }
             asks.add(new PriceLevel(askPrices[i], size));
@@ -544,8 +548,6 @@ public class OrderBook implements IOrderBook {
 
     @Override
     public void addOrderBookUpdateListener(OrderBookUpdateListener listener) {
-        Exception exception = new Exception();
-        logger.debug("### Exception for debugging listener addition", exception);
         orderbookUpdateListeners.add(listener);
     }
 
@@ -694,7 +696,8 @@ public class OrderBook implements IOrderBook {
          */
         public void insertDirectly(BigDecimal price, Double size) {
             if (size == null || Double.isNaN(size)) {
-                logger.warn("Attempted to insert NaN or null size for price {} (insertDirectly). Ignoring order.", price);
+                logger.warn("Attempted to insert NaN or null size for price {} (insertDirectly). Ignoring order.",
+                        price);
                 return;
             }
             orders.put(price, size);

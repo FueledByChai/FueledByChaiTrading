@@ -11,6 +11,7 @@ import com.fueledbychai.data.Ticker;
 public abstract class AbstractTickerRegistry implements ITickerTranslator, ITickerRegistry {
 
     protected final Map<InstrumentType, Map<String, Ticker>> tickerMap = new HashMap<>();
+    protected final Map<InstrumentType, Map<String, Ticker>> instrumentIdMap = new HashMap<>();
     protected final Map<InstrumentType, Map<String, Ticker>> commonSymbolMap = new HashMap<>();
     protected final Map<InstrumentType, Map<InstrumentDescriptor, Ticker>> descriptorMap = new HashMap<>();
     protected ITickerTranslator tickerBuilder;
@@ -47,6 +48,10 @@ public abstract class AbstractTickerRegistry implements ITickerTranslator, ITick
         return commonSymbolMap.computeIfAbsent(instrumentType, key -> new HashMap<>());
     }
 
+    protected Map<String, Ticker> getInstrumentIdMap(InstrumentType instrumentType) {
+        return instrumentIdMap.computeIfAbsent(instrumentType, key -> new HashMap<>());
+    }
+
     protected Map<InstrumentDescriptor, Ticker> getDescriptorMap(InstrumentType instrumentType) {
         return descriptorMap.computeIfAbsent(instrumentType, key -> new HashMap<>());
     }
@@ -56,6 +61,10 @@ public abstract class AbstractTickerRegistry implements ITickerTranslator, ITick
         getDescriptorMap(instrumentType).put(descriptor, ticker);
         getCommonSymbolMap(instrumentType).put(descriptor.getCommonSymbol(), ticker);
         getTickerMap(instrumentType).put(ticker.getSymbol(), ticker);
+        String instrumentId = ticker.getId();
+        if (instrumentId != null && !instrumentId.isBlank()) {
+            getInstrumentIdMap(instrumentType).put(instrumentId, ticker);
+        }
     }
 
     protected void registerDescriptors(InstrumentDescriptor[] descriptors) {
@@ -89,10 +98,17 @@ public abstract class AbstractTickerRegistry implements ITickerTranslator, ITick
             return null;
         }
         Map<String, Ticker> map = tickerMap.get(instrumentType);
-        if (map == null) {
+        if (map != null) {
+            Ticker ticker = map.get(tickerString);
+            if (ticker != null) {
+                return ticker;
+            }
+        }
+        Map<String, Ticker> idLookup = instrumentIdMap.get(instrumentType);
+        if (idLookup == null) {
             return null;
         }
-        return map.get(tickerString);
+        return idLookup.get(tickerString);
     }
 
     @Override

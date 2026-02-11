@@ -2,6 +2,7 @@ package com.fueledbychai.marketdata.lighter;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.Date;
@@ -23,11 +24,14 @@ import com.fueledbychai.lighter.common.api.ws.LighterMarketStats;
 import com.fueledbychai.lighter.common.api.ws.LighterMarketStatsUpdate;
 import com.fueledbychai.lighter.common.api.ws.LighterOrderBookLevel;
 import com.fueledbychai.lighter.common.api.ws.LighterOrderBookUpdate;
+import com.fueledbychai.lighter.common.api.ws.LighterTrade;
+import com.fueledbychai.lighter.common.api.ws.LighterTradesUpdate;
 import com.fueledbychai.marketdata.Level1Quote;
 import com.fueledbychai.marketdata.Level1QuoteListener;
 import com.fueledbychai.marketdata.Level2Quote;
 import com.fueledbychai.marketdata.Level2QuoteListener;
 import com.fueledbychai.marketdata.OrderBook;
+import com.fueledbychai.marketdata.OrderFlow;
 import com.fueledbychai.marketdata.OrderFlowListener;
 import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.QuoteType;
@@ -51,9 +55,11 @@ public class LighterQuoteEngine extends QuoteEngine {
     protected final ITickerRegistry tickerRegistry;
     protected final Map<Integer, Ticker> marketStatsTickerByMarketId = new ConcurrentHashMap<>();
     protected final Map<Integer, Ticker> orderBookTickerByMarketId = new ConcurrentHashMap<>();
+    protected final Map<Integer, Ticker> orderFlowTickerByMarketId = new ConcurrentHashMap<>();
     protected final Map<Integer, MarketOrderBookState> orderBookStateByMarketId = new ConcurrentHashMap<>();
     protected final Set<Integer> marketStatsSubscriptions = ConcurrentHashMap.newKeySet();
     protected final Set<Integer> orderBookSubscriptions = ConcurrentHashMap.newKeySet();
+    protected final Set<Integer> orderFlowSubscriptions = ConcurrentHashMap.newKeySet();
 
     protected volatile boolean started;
 
@@ -109,8 +115,10 @@ public class LighterQuoteEngine extends QuoteEngine {
         webSocketApi.disconnectAll();
         marketStatsSubscriptions.clear();
         orderBookSubscriptions.clear();
+        orderFlowSubscriptions.clear();
         marketStatsTickerByMarketId.clear();
         orderBookTickerByMarketId.clear();
+        orderFlowTickerByMarketId.clear();
         orderBookStateByMarketId.clear();
     }
 
@@ -149,7 +157,11 @@ public class LighterQuoteEngine extends QuoteEngine {
     @Override
     public synchronized void subscribeOrderFlow(Ticker ticker, OrderFlowListener listener) {
         validateTickerAndListener(ticker, listener);
-        logger.warn("Order flow is not currently implemented for Lighter quote engine");
+        int marketId = resolveMarketId(ticker);
+        orderFlowTickerByMarketId.put(marketId, ticker);
+        if (orderFlowSubscriptions.add(marketId)) {
+            webSocketApi.subscribeTrades(marketId, this::handleTradesUpdate);
+        }
         super.subscribeOrderFlow(ticker, listener);
     }
 
@@ -219,6 +231,25 @@ public class LighterQuoteEngine extends QuoteEngine {
         }
     }
 
+    protected void handleTradesUpdate(LighterTradesUpdate update) {
+        if (update == null || update.getTrades() == null || update.getTrades().isEmpty()) {
+            return;
+        }
+        for (LighterTrade trade : update.getTrades()) {
+            if (trade == null || trade.getMarketId() == null) {
+                continue;
+            }
+            Ticker ticker = orderFlowTickerByMarketId.get(trade.getMarketId());
+            if (ticker == null || !hasOrderFlowListeners(ticker)) {
+                continue;
+            }
+            OrderFlow orderFlow = toOrderFlow(ticker, trade);
+            if (orderFlow != null) {
+                fireOrderFlow(orderFlow);
+            }
+        }
+    }
+
     protected Level1Quote buildMarketStatsQuote(Ticker ticker, LighterMarketStats stats, ZonedDateTime timestamp) {
         Level1Quote quote = new Level1Quote(ticker, timestamp);
         if (stats == null) {
@@ -250,27 +281,76 @@ public class LighterQuoteEngine extends QuoteEngine {
         return quote;
     }
 
+    protected OrderFlow toOrderFlow(Ticker ticker, LighterTrade trade) {
+        if (ticker == null || trade == null || trade.getPrice() == null || trade.getSize() == null) {
+            return null;
+        }
+
+        OrderFlow.Side side = resolveOrderFlowSide(trade);
+        if (side == null) {
+            return null;
+        }
+
+        ZonedDateTime timestamp = toZonedDateTime(trade.getTimestamp());
+        BigDecimal formattedPrice = ticker.formatPrice(trade.getPrice());
+        return new OrderFlow(ticker, formattedPrice, trade.getSize(), side, timestamp);
+    }
+
+    protected OrderFlow.Side resolveOrderFlowSide(LighterTrade trade) {
+        if (trade == null) {
+            return null;
+        }
+        String side = trade.getType();
+        if (side != null) {
+            if ("buy".equalsIgnoreCase(side)) {
+                return OrderFlow.Side.BUY;
+            }
+            if ("sell".equalsIgnoreCase(side)) {
+                return OrderFlow.Side.SELL;
+            }
+        }
+        if (trade.getMakerAsk() != null) {
+            // is_maker_ask=true means the resting maker order was an ask, so the taker flow was BUY.
+            return trade.getMakerAsk() ? OrderFlow.Side.BUY : OrderFlow.Side.SELL;
+        }
+        return null;
+    }
+
+    protected ZonedDateTime toZonedDateTime(Long timestamp) {
+        if (timestamp == null) {
+            return ZonedDateTime.now(UTC);
+        }
+        long epochMillis = timestamp;
+        if (Math.abs(epochMillis) < 100_000_000_000L) {
+            epochMillis = epochMillis * 1000L;
+        }
+        return ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), UTC);
+    }
+
     protected void addFundingQuotes(Ticker ticker, LighterMarketStats stats, Level1Quote quote) {
         if (ticker == null || stats == null || quote == null) {
             return;
         }
-        BigDecimal fundingRateForPeriod = stats.getCurrentFundingRate();
-        if (fundingRateForPeriod == null) {
-            return;
-        }
-        int fundingIntervalHours = resolveFundingIntervalHours(ticker);
-        if (fundingIntervalHours <= 0) {
+        BigDecimal hourlyFundingRate = toHourlyFundingRate(stats);
+        if (hourlyFundingRate == null) {
             return;
         }
 
-        BigDecimal hourlyFundingRate = fundingRateForPeriod.divide(BigDecimal.valueOf(fundingIntervalHours),
-                MathContext.DECIMAL64);
         BigDecimal fundingRateHourlyBps = hourlyFundingRate.multiply(BPS_MULTIPLIER);
         BigDecimal fundingRateApr = hourlyFundingRate.multiply(HOURS_PER_DAY).multiply(DAYS_PER_YEAR)
                 .multiply(PERCENT_MULTIPLIER);
 
         quote.addQuote(QuoteType.FUNDING_RATE_HOURLY_BPS, fundingRateHourlyBps);
         quote.addQuote(QuoteType.FUNDING_RATE_APR, fundingRateApr);
+    }
+
+    protected BigDecimal toHourlyFundingRate(LighterMarketStats stats) {
+        if (stats == null || stats.getCurrentFundingRate() == null) {
+            return null;
+        }
+        // Lighter `current_funding_rate` is published as percentage points per hour.
+        // Convert to a decimal hourly rate before deriving BPS/APR quote fields.
+        return stats.getCurrentFundingRate().divide(PERCENT_MULTIPLIER, MathContext.DECIMAL64);
     }
 
     protected int resolveFundingIntervalHours(Ticker ticker) {
@@ -498,6 +578,18 @@ public class LighterQuoteEngine extends QuoteEngine {
     protected boolean hasLevel2Listeners(Ticker ticker) {
         synchronized (level2ListenerMap) {
             List<Level2QuoteListener> listeners = level2ListenerMap.get(ticker);
+            if (listeners == null) {
+                return false;
+            }
+            synchronized (listeners) {
+                return !listeners.isEmpty();
+            }
+        }
+    }
+
+    protected boolean hasOrderFlowListeners(Ticker ticker) {
+        synchronized (orderFlowListenerMap) {
+            List<OrderFlowListener> listeners = orderFlowListenerMap.get(ticker);
             if (listeners == null) {
                 return false;
             }
