@@ -12,9 +12,9 @@ public class LighterMarketStats {
     // Quote-token notional (e.g. USDC)
     private BigDecimal dailyQuoteVolume;
     private BigDecimal openInterest;
-    // Estimated upcoming funding payment rate.
+    // Estimated upcoming funding payment rate (% per hour).
     private BigDecimal currentFundingRate;
-    // Most recent settled funding payment rate.
+    // Most recent settled funding payment rate (% per hour).
     private BigDecimal lastFundingRate;
     // Timestamp (epoch millis) when lastFundingRate was settled.
     private Long fundingTimestamp;

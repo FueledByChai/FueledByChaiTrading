@@ -199,11 +199,13 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
             // Parse min_notional and funding_period_hours
             int minNotionalOrderSize = instrumentObj.get("min_notional").getAsInt();
             int fundingPeriodHours = instrumentObj.get("funding_period_hours").getAsInt();
+            String instrumentId = getStringFromFields(instrumentObj, "market_id", "marketId", "instrument_id",
+                    "instrumentId", "id");
 
             // Create and return the InstrumentDescriptor
             return new InstrumentDescriptor(InstrumentType.PERPETUAL_FUTURES, Exchange.LIGHTER, commonSymbol,
                     exchangeSymbol, baseCurrency, quoteCurrency, orderSizeIncrement, priceTickSize,
-                    minNotionalOrderSize, BigDecimal.ZERO, fundingPeriodHours, BigDecimal.ONE, 1, "");
+                    minNotionalOrderSize, BigDecimal.ZERO, fundingPeriodHours, BigDecimal.ONE, 1, instrumentId);
 
         } catch (Exception e) {
             logger.error("Error parsing instrument descriptor: " + e.getMessage(), e);
@@ -214,8 +216,8 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
     protected InstrumentDescriptor[] parseInstrumentDescriptors(InstrumentType instrumentType, String responseBody) {
         try {
             JsonObject root = JsonParser.parseString(responseBody).getAsJsonObject();
-            // Lighter format: order_books
-            if (root.has("order_books")) {
+            // Lighter format: order_books/order_book_details/spot_order_book_details
+            if (getOrderBookDetailsForType(root, instrumentType) != null) {
                 return parseOrderBookInstrumentDescriptors(instrumentType, root);
             }
 
@@ -264,11 +266,13 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
                 // Parse min_notional and funding_period_hours
                 int minNotionalOrderSize = instrumentObj.get("min_notional").getAsInt();
                 int fundingPeriodHours = instrumentObj.get("funding_period_hours").getAsInt();
+                String instrumentId = getStringFromFields(instrumentObj, "market_id", "marketId", "instrument_id",
+                        "instrumentId", "id");
 
                 // Create the InstrumentDescriptor with the provided instrument type
                 InstrumentDescriptor descriptor = new InstrumentDescriptor(instrumentType, Exchange.LIGHTER,
                         commonSymbol, exchangeSymbol, baseCurrency, quoteCurrency, orderSizeIncrement, priceTickSize,
-                        minNotionalOrderSize, BigDecimal.ZERO, fundingPeriodHours, BigDecimal.ONE, 1, "");
+                        minNotionalOrderSize, BigDecimal.ZERO, fundingPeriodHours, BigDecimal.ONE, 1, instrumentId);
 
                 descriptors.add(descriptor);
             }
@@ -337,9 +341,8 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
                 maxLeverage = 1;
             }
 
-            String instrumentId = instrumentObj.has("market_id") && !instrumentObj.get("market_id").isJsonNull()
-                    ? instrumentObj.get("market_id").getAsString()
-                    : "";
+            String instrumentId = getStringFromFields(instrumentObj, "market_id", "marketId", "instrument_id",
+                    "instrumentId", "id");
 
             InstrumentDescriptor descriptor = new InstrumentDescriptor(instrumentType, Exchange.LIGHTER, commonSymbol,
                     exchangeSymbol, baseCurrency, quoteCurrency, orderSizeIncrement, priceTickSize,
@@ -451,6 +454,18 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
             return obj.get(field).getAsString();
         }
         return null;
+    }
+
+    protected String getStringFromFields(JsonObject obj, String... fields) {
+        if (obj == null || fields == null) {
+            return "";
+        }
+        for (String field : fields) {
+            if (field != null && obj.has(field) && !obj.get(field).isJsonNull()) {
+                return obj.get(field).getAsString();
+            }
+        }
+        return "";
     }
 
     protected int getIntFromFields(JsonObject obj, int defaultValue, String... fields) {

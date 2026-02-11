@@ -31,11 +31,15 @@ import com.fueledbychai.lighter.common.api.ws.LighterMarketStats;
 import com.fueledbychai.lighter.common.api.ws.LighterMarketStatsUpdate;
 import com.fueledbychai.lighter.common.api.ws.LighterOrderBookLevel;
 import com.fueledbychai.lighter.common.api.ws.LighterOrderBookUpdate;
+import com.fueledbychai.lighter.common.api.ws.LighterTrade;
+import com.fueledbychai.lighter.common.api.ws.LighterTradesUpdate;
 import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.ILevel2Quote;
 import com.fueledbychai.marketdata.IOrderBook;
 import com.fueledbychai.marketdata.Level1QuoteListener;
 import com.fueledbychai.marketdata.Level2QuoteListener;
+import com.fueledbychai.marketdata.OrderFlow;
+import com.fueledbychai.marketdata.OrderFlowListener;
 import com.fueledbychai.marketdata.QuoteType;
 import com.fueledbychai.util.ITickerRegistry;
 
@@ -53,6 +57,9 @@ public class LighterQuoteEngineTest {
 
     @Mock
     private Level2QuoteListener level2Listener;
+
+    @Mock
+    private OrderFlowListener orderFlowListener;
 
     @Test
     void startStopEngine() {
@@ -91,6 +98,18 @@ public class LighterQuoteEngineTest {
         });
 
         verify(webSocketApi, times(1)).subscribeOrderBook(eq(2048), any());
+    }
+
+    @Test
+    void subscribeOrderFlowSubscribesTradesOnlyOncePerMarket() {
+        LighterQuoteEngine engine = new LighterQuoteEngine(webSocketApi, tickerRegistry);
+        Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES);
+
+        engine.subscribeOrderFlow(ticker, orderFlowListener);
+        engine.subscribeOrderFlow(ticker, orderFlow -> {
+        });
+
+        verify(webSocketApi, times(1)).subscribeTrades(eq(1), any());
     }
 
     @Test
@@ -148,8 +167,8 @@ public class LighterQuoteEngineTest {
         assertEquals(new BigDecimal("1560.00"), quote.getValue(QuoteType.VOLUME_NOTIONAL));
         assertEquals(new BigDecimal("200"), quote.getValue(QuoteType.OPEN_INTEREST));
         assertEquals(new BigDecimal("20250.00"), quote.getValue(QuoteType.OPEN_INTEREST_NOTIONAL));
-        assertEquals(0, quote.getValue(QuoteType.FUNDING_RATE_HOURLY_BPS).compareTo(new BigDecimal("1.0")));
-        assertEquals(0, quote.getValue(QuoteType.FUNDING_RATE_APR).compareTo(new BigDecimal("87.6")));
+        assertEquals(0, quote.getValue(QuoteType.FUNDING_RATE_HOURLY_BPS).compareTo(new BigDecimal("0.08")));
+        assertEquals(0, quote.getValue(QuoteType.FUNDING_RATE_APR).compareTo(new BigDecimal("7.008")));
     }
 
     @Test
@@ -441,6 +460,52 @@ public class LighterQuoteEngineTest {
 
         engine.handleOrderBookUpdate(update);
         verify(engine, never()).fireMarketDepthQuote(any(ILevel2Quote.class));
+    }
+
+    @Test
+    void handleTradesUpdateFiresOrderFlow() {
+        LighterQuoteEngine engine = spy(new LighterQuoteEngine(webSocketApi, tickerRegistry));
+        AtomicReference<OrderFlow> capturedOrderFlow = new AtomicReference<>();
+        Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES);
+
+        doAnswer(invocation -> {
+            capturedOrderFlow.set(invocation.getArgument(0));
+            return null;
+        }).when(engine).fireOrderFlow(any(OrderFlow.class));
+
+        engine.subscribeOrderFlow(ticker, orderFlowListener);
+
+        LighterTrade trade = new LighterTrade();
+        trade.setMarketId(1);
+        trade.setType("sell");
+        trade.setPrice(new BigDecimal("101.25"));
+        trade.setSize(new BigDecimal("0.010"));
+        trade.setTimestamp(1700000000000L);
+        LighterTradesUpdate update = new LighterTradesUpdate("trade/1", "update/trade", List.of(trade));
+
+        engine.handleTradesUpdate(update);
+
+        OrderFlow orderFlow = capturedOrderFlow.get();
+        assertNotNull(orderFlow);
+        assertEquals(ticker, orderFlow.getTicker());
+        assertEquals(OrderFlow.Side.SELL, orderFlow.getSide());
+        assertEquals(new BigDecimal("101.25"), orderFlow.getPrice());
+        assertEquals(new BigDecimal("0.010"), orderFlow.getSize());
+    }
+
+    @Test
+    void handleTradesUpdateSkipsUnknownMarket() {
+        LighterQuoteEngine engine = spy(new LighterQuoteEngine(webSocketApi, tickerRegistry));
+
+        LighterTrade trade = new LighterTrade();
+        trade.setMarketId(999);
+        trade.setType("buy");
+        trade.setPrice(new BigDecimal("101.25"));
+        trade.setSize(new BigDecimal("0.010"));
+        LighterTradesUpdate update = new LighterTradesUpdate("trade/999", "update/trade", List.of(trade));
+
+        engine.handleTradesUpdate(update);
+        verify(engine, never()).fireOrderFlow(any(OrderFlow.class));
     }
 
     private Ticker createTicker(String symbol, String id, InstrumentType instrumentType) {
