@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import com.fueledbychai.lighter.common.api.ws.ILighterMarketStatsListener;
 import com.fueledbychai.lighter.common.api.ws.ILighterOrderBookListener;
+import com.fueledbychai.lighter.common.api.ws.ILighterTradeListener;
 import com.fueledbychai.lighter.common.api.ws.LighterWebSocketClient;
 import com.fueledbychai.websocket.IWebSocketProcessor;
 
@@ -64,21 +65,41 @@ public class LighterWebSocketApiTest {
     }
 
     @Test
+    void subscribeTradesReusesConnectionForSameMarket() {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
+        ILighterTradeListener listener = update -> {
+        };
+
+        LighterWebSocketClient client1 = api.subscribeTrades(53, listener);
+        LighterWebSocketClient client2 = api.subscribeTrades(53, listener);
+
+        assertNotNull(client1);
+        assertNotNull(client2);
+        assertEquals(client1, client2);
+        assertEquals(1, api.createdClients.size());
+        assertEquals(1, api.connectCountByChannel.get("trade/53").intValue());
+    }
+
+    @Test
     void disconnectAllClosesAllConnections() {
         TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
         ILighterMarketStatsListener listener = update -> {
         };
         ILighterOrderBookListener orderBookListener = update -> {
         };
+        ILighterTradeListener tradeListener = update -> {
+        };
 
         api.subscribeMarketStats(53, listener);
         api.subscribeAllMarketStats(listener);
         api.subscribeOrderBook(53, orderBookListener);
+        api.subscribeTrades(53, tradeListener);
         api.disconnectAll();
 
         assertEquals(1, api.closeCountByChannel.get("market_stats/53").intValue());
         assertEquals(1, api.closeCountByChannel.get("market_stats/all").intValue());
         assertEquals(1, api.closeCountByChannel.get("order_book/53").intValue());
+        assertEquals(1, api.closeCountByChannel.get("trade/53").intValue());
     }
 
     @Test
@@ -95,6 +116,14 @@ public class LighterWebSocketApiTest {
         ILighterOrderBookListener listener = update -> {
         };
         assertThrows(IllegalArgumentException.class, () -> api.subscribeOrderBook(-1, listener));
+    }
+
+    @Test
+    void rejectNegativeTradeMarketId() {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
+        ILighterTradeListener listener = update -> {
+        };
+        assertThrows(IllegalArgumentException.class, () -> api.subscribeTrades(-1, listener));
     }
 
     @Test

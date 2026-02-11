@@ -2,6 +2,7 @@ package com.fueledbychai.lighter.common.api;
 
 import com.fueledbychai.lighter.common.api.ws.ILighterMarketStatsListener;
 import com.fueledbychai.lighter.common.api.ws.ILighterOrderBookListener;
+import com.fueledbychai.lighter.common.api.ws.ILighterTradeListener;
 import com.fueledbychai.lighter.common.api.ws.LighterWebSocketClient;
 
 public interface ILighterWebSocketApi {
@@ -11,6 +12,8 @@ public interface ILighterWebSocketApi {
     LighterWebSocketClient subscribeAllMarketStats(ILighterMarketStatsListener listener);
 
     LighterWebSocketClient subscribeOrderBook(int marketId, ILighterOrderBookListener listener);
+
+    LighterWebSocketClient subscribeTrades(int marketId, ILighterTradeListener listener);
 
     void disconnectAll();
 }
