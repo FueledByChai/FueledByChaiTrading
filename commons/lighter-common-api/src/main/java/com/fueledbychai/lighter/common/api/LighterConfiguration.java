@@ -52,6 +52,9 @@ public class LighterConfiguration {
     public static final String LIGHTER_PROXY_PORT = "lighter.proxy.port";
     public static final String LIGHTER_ACCOUNT_ADDRESS = "lighter.account.address";
     public static final String LIGHTER_PRIVATE_KEY = "lighter.private.key";
+    public static final String LIGHTER_ACCOUNT_INDEX = "lighter.account.index";
+    public static final String LIGHTER_API_KEY_INDEX = "lighter.api.key.index";
+    public static final String LIGHTER_SIGNER_LIBRARY_PATH = "lighter.signer.library.path";
 
     private static final String DEFAULT_ENVIRONMENT = "prod";
     private static final String DEFAULT_MAINNET_REST_URL = "https://mainnet.zklighter.elliot.ai/api/v1";
@@ -60,6 +63,8 @@ public class LighterConfiguration {
     private static final String DEFAULT_PROXY_HOST = "127.0.0.1";
     private static final int DEFAULT_PROXY_PORT = 1080;
     private static final boolean DEFAULT_WEBSOCKET_READONLY = true;
+    private static final long DEFAULT_ACCOUNT_INDEX = 0L;
+    private static final int DEFAULT_API_KEY_INDEX = 255;
 
     private final Properties properties;
     private final String environment;
@@ -131,6 +136,9 @@ public class LighterConfiguration {
         setIfPresent(LIGHTER_PROXY_PORT, System.getenv("LIGHTER_PROXY_PORT"));
         setIfPresent(LIGHTER_ACCOUNT_ADDRESS, System.getenv("LIGHTER_ACCOUNT_ADDRESS"));
         setIfPresent(LIGHTER_PRIVATE_KEY, System.getenv("LIGHTER_PRIVATE_KEY"));
+        setIfPresent(LIGHTER_ACCOUNT_INDEX, System.getenv("LIGHTER_ACCOUNT_INDEX"));
+        setIfPresent(LIGHTER_API_KEY_INDEX, System.getenv("LIGHTER_API_KEY_INDEX"));
+        setIfPresent(LIGHTER_SIGNER_LIBRARY_PATH, System.getenv("LIGHTER_SIGNER_LIBRARY_PATH"));
         setIfPresent(LIGHTER_ENVIRONMENT, System.getenv("LIGHTER_ENVIRONMENT"));
     }
 
@@ -215,6 +223,18 @@ public class LighterConfiguration {
         return properties.getProperty(LIGHTER_PRIVATE_KEY);
     }
 
+    public long getAccountIndex() {
+        return parseLong(properties.getProperty(LIGHTER_ACCOUNT_INDEX), DEFAULT_ACCOUNT_INDEX, LIGHTER_ACCOUNT_INDEX);
+    }
+
+    public int getApiKeyIndex() {
+        return parseInt(properties.getProperty(LIGHTER_API_KEY_INDEX), DEFAULT_API_KEY_INDEX, LIGHTER_API_KEY_INDEX);
+    }
+
+    public String getSignerLibraryPath() {
+        return properties.getProperty(LIGHTER_SIGNER_LIBRARY_PATH);
+    }
+
     public boolean isWebSocketReadonlyEnabled() {
         String explicit = properties.getProperty(LIGHTER_WEBSOCKET_READONLY);
         if (explicit != null && !explicit.isBlank()) {
@@ -254,6 +274,32 @@ public class LighterConfiguration {
             logger.warn("Unable to parse proxy port '{}', falling back to {}", portText, DEFAULT_PROXY_PORT);
         }
         return DEFAULT_PROXY_PORT;
+    }
+
+    private int parseInt(String value, int defaultValue, String propertyName) {
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException ex) {
+            logger.warn("Unable to parse integer property {}='{}', falling back to {}", propertyName, value,
+                    defaultValue);
+            return defaultValue;
+        }
+    }
+
+    private long parseLong(String value, long defaultValue, String propertyName) {
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException ex) {
+            logger.warn("Unable to parse long property {}='{}', falling back to {}", propertyName, value,
+                    defaultValue);
+            return defaultValue;
+        }
     }
 
     private void setProxySetting() {
