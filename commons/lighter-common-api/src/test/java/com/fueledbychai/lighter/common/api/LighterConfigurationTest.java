@@ -24,7 +24,10 @@ public class LighterConfigurationTest {
             LighterConfiguration.LIGHTER_RUN_PROXY,
             LighterConfiguration.LIGHTER_PROXY_HOST,
             LighterConfiguration.LIGHTER_PROXY_PORT,
-            LighterConfiguration.LIGHTER_WEBSOCKET_READONLY);
+            LighterConfiguration.LIGHTER_WEBSOCKET_READONLY,
+            LighterConfiguration.LIGHTER_ACCOUNT_INDEX,
+            LighterConfiguration.LIGHTER_API_KEY_INDEX,
+            LighterConfiguration.LIGHTER_SIGNER_LIBRARY_PATH);
 
     @BeforeEach
     void setup() {
