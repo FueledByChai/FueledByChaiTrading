@@ -27,6 +27,9 @@ import com.fueledbychai.data.ResponseException;
 import com.fueledbychai.data.Side;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.http.BaseRestApi;
+import com.fueledbychai.lighter.common.api.auth.LighterApiTokenResponse;
+import com.fueledbychai.lighter.common.api.auth.LighterCreateApiTokenRequest;
+import com.fueledbychai.lighter.common.api.signer.LighterNativeTransactionSigner;
 import com.fueledbychai.time.Span;
 import com.fueledbychai.websocket.ProxyConfig;
 import com.google.gson.Gson;
@@ -50,17 +53,19 @@ import okhttp3.Response;
 public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
     protected static Logger logger = LoggerFactory.getLogger(LighterRestApi.class);
     protected static Logger latencyLogger = LoggerFactory.getLogger(Span.LATENCY_LOGGER_NAME);
+    protected static final long DEFAULT_AUTH_TOKEN_TTL_SECONDS = 60L * 60L;
+    protected static final long DEFAULT_API_TOKEN_TTL_SECONDS = 7L * 24L * 60L * 60L;
     private final Gson gson;
 
     protected static ILighterRestApi publicOnlyApi;
     protected static ILighterRestApi privateApi;
-
 
     protected OkHttpClient client;
     protected String baseUrl;
     protected String accountAddressString;
     protected String privateKeyString;
     protected boolean publicApiOnly = true;
+    protected volatile LighterNativeTransactionSigner authSigner;
 
     public LighterRestApi(String baseUrl, boolean isTestnet) {
         this(baseUrl, null, null, isTestnet, null);
@@ -155,6 +160,140 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
                 throw new RuntimeException(e);
             }
         }, 3, 500);
+    }
+
+    @Override
+    public LighterApiTokenResponse createApiToken(String authToken, LighterCreateApiTokenRequest request) {
+        if (authToken == null || authToken.isBlank()) {
+            throw new IllegalArgumentException("authToken is required");
+        }
+        if (request == null) {
+            throw new IllegalArgumentException("request is required");
+        }
+        request.validate();
+
+        return executeWithRetry(() -> {
+            String url = baseUrl + "/tokens/create";
+            JSONObject requestBody = new JSONObject();
+            requestBody.put("name", request.getName());
+            requestBody.put("account_index", request.getAccountIndex());
+            requestBody.put("expiry", request.getExpiry());
+            requestBody.put("sub_account_access", request.isSubAccountAccess());
+            if (request.getScopes() != null && !request.getScopes().isBlank()) {
+                requestBody.put("scopes", request.getScopes());
+            }
+
+            Request requestBuilder = new Request.Builder().url(url)
+                    .addHeader("Authorization", authToken)
+                    .post(RequestBody.create(requestBody.toString(), MediaType.get("application/json; charset=utf-8")))
+                    .build();
+            logger.info("Request: {}", requestBuilder);
+
+            try (Response response = client.newCall(requestBuilder).execute()) {
+                if (!response.isSuccessful()) {
+                    logger.error("Error response: {}", response.body().string());
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
+                }
+
+                String responseBody = response.body().string();
+                logger.info("Response output: {}", responseBody);
+                return parseApiTokenResponse(responseBody);
+            } catch (IOException e) {
+                logger.error(e.getMessage(), e);
+                throw new ResponseException("Network error creating Lighter API token: " + e.getMessage(), e);
+            }
+        }, 3, 500);
+    }
+
+    @Override
+    public LighterApiTokenResponse createApiToken(LighterCreateApiTokenRequest request) {
+        checkPrivateApi();
+        if (request == null) {
+            throw new IllegalArgumentException("request is required");
+        }
+        request.validate();
+
+        long timestamp = System.currentTimeMillis() / 1000L;
+        long expiry = Math.min(request.getExpiry(), timestamp + DEFAULT_AUTH_TOKEN_TTL_SECONDS);
+        if (expiry <= timestamp) {
+            expiry = timestamp + DEFAULT_AUTH_TOKEN_TTL_SECONDS;
+        }
+
+        int apiKeyIndex = LighterConfiguration.getInstance().getApiKeyIndex();
+        String authToken = getOrCreateAuthSigner().createAuthTokenWithExpiry(timestamp, expiry, apiKeyIndex,
+                request.getAccountIndex());
+        return createApiToken(authToken, request);
+    }
+
+    @Override
+    public String getApiToken() {
+        LighterCreateApiTokenRequest request = buildDefaultApiTokenRequest();
+        return createApiToken(request).getApiToken();
+    }
+
+    protected LighterCreateApiTokenRequest buildDefaultApiTokenRequest() {
+        LighterConfiguration configuration = LighterConfiguration.getInstance();
+        long timestamp = System.currentTimeMillis() / 1000L;
+
+        LighterCreateApiTokenRequest request = new LighterCreateApiTokenRequest();
+        request.setName("fueledbychai-readonly-" + timestamp);
+        request.setAccountIndex(configuration.getAccountIndex());
+        request.setExpiry(timestamp + DEFAULT_API_TOKEN_TTL_SECONDS);
+        request.setSubAccountAccess(false);
+        request.setScopes(LighterCreateApiTokenRequest.DEFAULT_SCOPES);
+        return request;
+    }
+
+    protected LighterApiTokenResponse parseApiTokenResponse(String responseBody) {
+        try {
+            JsonObject root = JsonParser.parseString(responseBody).getAsJsonObject();
+            LighterApiTokenResponse response = new LighterApiTokenResponse();
+            response.setCode(readInt(root, "code", 0));
+            response.setMessage(getString(root, "message"));
+            response.setTokenId(readLong(root, "token_id", 0L));
+            response.setApiToken(getString(root, "api_token"));
+            response.setName(getString(root, "name"));
+            response.setAccountIndex(readLong(root, "account_index", 0L));
+            response.setExpiry(readLong(root, "expiry", 0L));
+            response.setSubAccountAccess(readBoolean(root, "sub_account_access", false));
+            response.setRevoked(readBoolean(root, "revoked", false));
+            response.setScopes(getString(root, "scopes"));
+
+            if (response.getApiToken() == null || response.getApiToken().isBlank()) {
+                throw new FueledByChaiException("api_token not found in response");
+            }
+            return response;
+        } catch (Exception e) {
+            logger.error("Error parsing Lighter API token response: {}", e.getMessage(), e);
+            throw new FueledByChaiException(e);
+        }
+    }
+
+    protected void checkPrivateApi() {
+        if (publicApiOnly) {
+            throw new IllegalStateException(
+                    "Private key configuration not available. Set both " + LighterConfiguration.LIGHTER_ACCOUNT_ADDRESS
+                            + " and " + LighterConfiguration.LIGHTER_PRIVATE_KEY + " to use createApiToken(request).");
+        }
+    }
+
+    protected LighterNativeTransactionSigner getOrCreateAuthSigner() {
+        LighterNativeTransactionSigner signer = authSigner;
+        if (signer != null) {
+            return signer;
+        }
+        synchronized (this) {
+            if (authSigner == null) {
+                LighterConfiguration configuration = LighterConfiguration.getInstance();
+                String privateKey = (privateKeyString == null || privateKeyString.isBlank())
+                        ? configuration.getPrivateKey()
+                        : privateKeyString;
+                authSigner = new LighterNativeTransactionSigner(baseUrl, privateKey, configuration.getApiKeyIndex(),
+                        configuration.getAccountIndex(), configuration.getSignerLibraryPath());
+            }
+            return authSigner;
+        }
     }
 
     protected InstrumentDescriptor parseInstrumentDescriptor(String responseBody) {
@@ -454,6 +593,27 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
             return obj.get(field).getAsString();
         }
         return null;
+    }
+
+    protected int readInt(JsonObject obj, String field, int defaultValue) {
+        if (obj.has(field) && !obj.get(field).isJsonNull()) {
+            return obj.get(field).getAsInt();
+        }
+        return defaultValue;
+    }
+
+    protected long readLong(JsonObject obj, String field, long defaultValue) {
+        if (obj.has(field) && !obj.get(field).isJsonNull()) {
+            return obj.get(field).getAsLong();
+        }
+        return defaultValue;
+    }
+
+    protected boolean readBoolean(JsonObject obj, String field, boolean defaultValue) {
+        if (obj.has(field) && !obj.get(field).isJsonNull()) {
+            return obj.get(field).getAsBoolean();
+        }
+        return defaultValue;
     }
 
     protected String getStringFromFields(JsonObject obj, String... fields) {
