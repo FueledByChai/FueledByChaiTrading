@@ -25,18 +25,22 @@ public class LighterNativeTransactionSigner implements ILighterTransactionSigner
     private final LighterNativeSignerLibrary nativeSigner;
 
     public LighterNativeTransactionSigner(LighterConfiguration configuration) {
-        if (configuration == null) {
-            throw new IllegalArgumentException("configuration is required");
+        this(getRestUrl(configuration), getPrivateKey(configuration), getApiKeyIndex(configuration),
+                getAccountIndex(configuration), getSignerLibraryPath(configuration));
+    }
+
+    public LighterNativeTransactionSigner(String restUrl, String privateKey, int apiKeyIndex, long accountIndex,
+            String signerLibraryPath) {
+        if (restUrl == null || restUrl.isBlank()) {
+            throw new IllegalArgumentException("restUrl is required");
         }
-        String restUrl = configuration.getRestUrl();
-        String privateKey = normalizePrivateKey(configuration.getPrivateKey());
+
+        String normalizedPrivateKey = normalizePrivateKey(privateKey);
         int chainId = resolveChainId(restUrl);
-        int apiKeyIndex = configuration.getApiKeyIndex();
-        long accountIndex = configuration.getAccountIndex();
-        this.nativeSigner = loadNativeSigner(configuration.getSignerLibraryPath());
+        this.nativeSigner = loadNativeSigner(signerLibraryPath);
 
         String createError = trimToNull(
-                nativeSigner.CreateClient(restUrl, privateKey, chainId, apiKeyIndex, accountIndex));
+                nativeSigner.CreateClient(restUrl, normalizedPrivateKey, chainId, apiKeyIndex, accountIndex));
         if (createError != null) {
             throw new IllegalStateException("Unable to initialize Lighter signer client: " + createError);
         }
@@ -45,6 +49,33 @@ public class LighterNativeTransactionSigner implements ILighterTransactionSigner
         if (checkError != null) {
             throw new IllegalStateException("Lighter signer self-check failed: " + checkError);
         }
+    }
+
+    private static LighterConfiguration requireConfiguration(LighterConfiguration configuration) {
+        if (configuration == null) {
+            throw new IllegalArgumentException("configuration is required");
+        }
+        return configuration;
+    }
+
+    private static String getRestUrl(LighterConfiguration configuration) {
+        return requireConfiguration(configuration).getRestUrl();
+    }
+
+    private static String getPrivateKey(LighterConfiguration configuration) {
+        return requireConfiguration(configuration).getPrivateKey();
+    }
+
+    private static int getApiKeyIndex(LighterConfiguration configuration) {
+        return requireConfiguration(configuration).getApiKeyIndex();
+    }
+
+    private static long getAccountIndex(LighterConfiguration configuration) {
+        return requireConfiguration(configuration).getAccountIndex();
+    }
+
+    private static String getSignerLibraryPath(LighterConfiguration configuration) {
+        return requireConfiguration(configuration).getSignerLibraryPath();
     }
 
     @Override
