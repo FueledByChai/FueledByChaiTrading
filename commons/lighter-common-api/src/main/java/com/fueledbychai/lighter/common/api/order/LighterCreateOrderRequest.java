@@ -169,6 +169,7 @@ public class LighterCreateOrderRequest {
         request.setAsk(isAsk);
         request.setOrderType(LighterOrderType.MARKET);
         request.setTimeInForce(LighterTimeInForce.IOC);
+        request.setOrderExpiry(0L);
         return request;
     }
 }
