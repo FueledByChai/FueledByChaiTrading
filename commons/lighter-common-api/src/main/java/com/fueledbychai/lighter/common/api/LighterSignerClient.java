@@ -15,7 +15,7 @@ import com.fueledbychai.lighter.common.api.ws.LighterSendTxResponse;
 
 /**
  * Java counterpart of Lighter's Python SignerClient workflow:
- * 1) sign transaction payload with native signer
+ * 1) sign transaction payload
  * 2) submit signed tx using jsonapi/sendtx
  */
 public class LighterSignerClient {
@@ -154,6 +154,6 @@ public class LighterSignerClient {
             return nativeSigner;
         }
         throw new IllegalStateException(
-                "Configured signer does not support native signer client operations.");
+                "Configured signer does not support signer client operations.");
     }
 }

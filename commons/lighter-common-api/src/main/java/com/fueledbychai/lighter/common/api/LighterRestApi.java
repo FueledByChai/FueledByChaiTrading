@@ -28,6 +28,8 @@ import com.fueledbychai.data.Side;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.http.BaseRestApi;
 import com.fueledbychai.lighter.common.api.auth.LighterApiTokenResponse;
+import com.fueledbychai.lighter.common.api.auth.LighterChangeAccountTierRequest;
+import com.fueledbychai.lighter.common.api.auth.LighterChangeAccountTierResponse;
 import com.fueledbychai.lighter.common.api.auth.LighterCreateApiTokenRequest;
 import com.fueledbychai.lighter.common.api.signer.LighterNativeTransactionSigner;
 import com.fueledbychai.time.Span;
@@ -43,6 +45,7 @@ import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
 import okhttp3.Headers;
+import okhttp3.FormBody;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -227,9 +230,120 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
     }
 
     @Override
+    public LighterChangeAccountTierResponse changeAccountTier(String authToken, LighterChangeAccountTierRequest request) {
+        if (authToken == null || authToken.isBlank()) {
+            throw new IllegalArgumentException("authToken is required");
+        }
+        if (request == null) {
+            throw new IllegalArgumentException("request is required");
+        }
+        request.validate();
+
+        return executeWithRetry(() -> {
+            String url = baseUrl + "/changeAccountTier";
+            FormBody.Builder formBodyBuilder = new FormBody.Builder()
+                    .add("account_index", Long.toString(request.getAccountIndex()))
+                    .add("new_tier", request.getNewTier());
+            if (request.getAuth() != null && !request.getAuth().isBlank()) {
+                formBodyBuilder.add("auth", request.getAuth());
+            }
+
+            Request requestBuilder = new Request.Builder().url(url)
+                    .addHeader("Authorization", authToken)
+                    .post(formBodyBuilder.build())
+                    .build();
+            logger.info("Request: {}", requestBuilder);
+
+            try (Response response = client.newCall(requestBuilder).execute()) {
+                if (!response.isSuccessful()) {
+                    logger.error("Error response: {}", response.body().string());
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
+                }
+
+                String responseBody = response.body().string();
+                logger.info("Response output: {}", responseBody);
+                return parseChangeAccountTierResponse(responseBody);
+            } catch (IOException e) {
+                logger.error(e.getMessage(), e);
+                throw new ResponseException("Network error changing Lighter account tier: " + e.getMessage(), e);
+            }
+        }, 3, 500);
+    }
+
+    @Override
+    public LighterChangeAccountTierResponse changeAccountTier(LighterChangeAccountTierRequest request) {
+        checkPrivateApi();
+        if (request == null) {
+            throw new IllegalArgumentException("request is required");
+        }
+        request.validate();
+
+        long timestamp = System.currentTimeMillis() / 1000L;
+        long expiry = timestamp + DEFAULT_AUTH_TOKEN_TTL_SECONDS;
+        int apiKeyIndex = LighterConfiguration.getInstance().getApiKeyIndex();
+        String authToken = getOrCreateAuthSigner().createAuthTokenWithExpiry(timestamp, expiry, apiKeyIndex,
+                request.getAccountIndex());
+        return changeAccountTier(authToken, request);
+    }
+
+    @Override
     public String getApiToken() {
         LighterCreateApiTokenRequest request = buildDefaultApiTokenRequest();
         return createApiToken(request).getApiToken();
+    }
+
+    @Override
+    public long getNextNonce(long accountIndex, int apiKeyIndex) {
+        if (accountIndex < 0) {
+            throw new IllegalArgumentException("accountIndex must be >= 0");
+        }
+        if (apiKeyIndex < 0) {
+            throw new IllegalArgumentException("apiKeyIndex must be >= 0");
+        }
+
+        return executeWithRetry(() -> {
+            String url = baseUrl + "/nextNonce";
+            HttpUrl.Builder urlBuilder = HttpUrl.parse(url).newBuilder();
+            urlBuilder.addQueryParameter("account_index", Long.toString(accountIndex));
+            urlBuilder.addQueryParameter("api_key_index", Integer.toString(apiKeyIndex));
+            String newUrl = urlBuilder.build().toString();
+
+            Request request = new Request.Builder().url(newUrl).get().build();
+            logger.info("Request: {}", request);
+
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    String error = response.body() == null ? "" : response.body().string();
+                    logger.error("Error response: {}", error);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
+                }
+
+                String responseBody = response.body() == null ? "" : response.body().string();
+                logger.info("Response output: {}", responseBody);
+
+                JsonObject root = JsonParser.parseString(responseBody).getAsJsonObject();
+                int code = readInt(root, "code", response.code());
+                if (code != 200) {
+                    String message = getString(root, "message");
+                    if (message == null || message.isBlank()) {
+                        message = getString(root, "msg");
+                    }
+                    if (message == null || message.isBlank()) {
+                        message = responseBody;
+                    }
+                    throw new ResponseException("Unable to get Lighter next nonce: " + message, code);
+                }
+                if (!root.has("nonce") || root.get("nonce").isJsonNull()) {
+                    throw new ResponseException("Lighter nextNonce response missing nonce", code);
+                }
+                return root.get("nonce").getAsLong();
+            } catch (IOException e) {
+                logger.error(e.getMessage(), e);
+                throw new ResponseException("Network error getting Lighter next nonce: " + e.getMessage(), e);
+            }
+        }, 3, 500);
     }
 
     protected LighterCreateApiTokenRequest buildDefaultApiTokenRequest() {
@@ -270,11 +384,25 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
         }
     }
 
+    protected LighterChangeAccountTierResponse parseChangeAccountTierResponse(String responseBody) {
+        try {
+            JsonObject root = JsonParser.parseString(responseBody).getAsJsonObject();
+            LighterChangeAccountTierResponse response = new LighterChangeAccountTierResponse();
+            response.setCode(readInt(root, "code", 0));
+            response.setMessage(getString(root, "message"));
+            return response;
+        } catch (Exception e) {
+            logger.error("Error parsing Lighter change account tier response: {}", e.getMessage(), e);
+            throw new FueledByChaiException(e);
+        }
+    }
+
     protected void checkPrivateApi() {
         if (publicApiOnly) {
             throw new IllegalStateException(
                     "Private key configuration not available. Set both " + LighterConfiguration.LIGHTER_ACCOUNT_ADDRESS
-                            + " and " + LighterConfiguration.LIGHTER_PRIVATE_KEY + " to use createApiToken(request).");
+                            + " and " + LighterConfiguration.LIGHTER_PRIVATE_KEY
+                            + " to use authenticated Lighter REST API calls.");
         }
     }
 
@@ -290,7 +418,7 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
                         ? configuration.getPrivateKey()
                         : privateKeyString;
                 authSigner = new LighterNativeTransactionSigner(baseUrl, privateKey, configuration.getApiKeyIndex(),
-                        configuration.getAccountIndex(), configuration.getSignerLibraryPath());
+                        configuration.getAccountIndex());
             }
             return authSigner;
         }

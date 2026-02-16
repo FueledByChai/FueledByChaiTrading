@@ -1,54 +1,84 @@
 package com.fueledbychai.lighter.common.api.signer;
 
-import java.io.File;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
+import java.security.SecureRandom;
 
 import org.json.JSONObject;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.lighter.common.api.LighterConfiguration;
+import com.fueledbychai.lighter.common.api.ILighterRestApi;
+import com.fueledbychai.lighter.common.api.LighterRestApi;
 import com.fueledbychai.lighter.common.api.order.LighterCancelOrderRequest;
 import com.fueledbychai.lighter.common.api.order.LighterCreateOrderRequest;
 import com.fueledbychai.lighter.common.api.order.LighterModifyOrderRequest;
-import com.sun.jna.Native;
+import com.fueledbychai.lighter.common.api.order.LighterOrderType;
+import com.fueledbychai.lighter.common.api.order.LighterTimeInForce;
 
 /**
- * Wraps the official Lighter signer shared library.
+ * Java implementation of Lighter tx signing flow (matching lighter-go).
  */
 public class LighterNativeTransactionSigner implements ILighterTransactionSigner {
 
-    private static final Logger logger = LoggerFactory.getLogger(LighterNativeTransactionSigner.class);
     private static final int MAINNET_CHAIN_ID = 304;
     private static final int TESTNET_CHAIN_ID = 300;
 
-    private final LighterNativeSignerLibrary nativeSigner;
+    private static final int TX_TYPE_L2_CREATE_ORDER = 14;
+    private static final int TX_TYPE_L2_CANCEL_ORDER = 15;
+    private static final int TX_TYPE_L2_MODIFY_ORDER = 17;
+
+    private static final long DEFAULT_TX_EXPIRY_MILLIS = Duration.ofMinutes(10).minusSeconds(1).toMillis();
+    private static final long DEFAULT_ORDER_EXPIRY_MILLIS = Duration.ofDays(28).toMillis();
+    private static final long DEFAULT_AUTH_TOKEN_TTL_SECONDS = Duration.ofMinutes(10).toSeconds();
+
+    private final ILighterRestApi restApi;
+    private final int chainId;
+    private final int configuredApiKeyIndex;
+    private final long configuredAccountIndex;
+    private final String normalizedPrivateKey;
+    private final LighterSignerMath.Scalar apiPrivateKey;
+    private final LighterSignerMath.Fp5 apiPublicKey;
+    private final SecureRandom secureRandom;
 
     public LighterNativeTransactionSigner(LighterConfiguration configuration) {
         this(getRestUrl(configuration), getPrivateKey(configuration), getApiKeyIndex(configuration),
-                getAccountIndex(configuration), getSignerLibraryPath(configuration));
+                getAccountIndex(configuration), createDefaultRestApi(getRestUrl(configuration)));
+    }
+
+    public LighterNativeTransactionSigner(String restUrl, String privateKey, int apiKeyIndex, long accountIndex) {
+        this(restUrl, privateKey, apiKeyIndex, accountIndex, createDefaultRestApi(restUrl), new SecureRandom());
+    }
+
+    public LighterNativeTransactionSigner(String restUrl, String privateKey, int apiKeyIndex, long accountIndex,
+            ILighterRestApi restApi) {
+        this(restUrl, privateKey, apiKeyIndex, accountIndex, restApi, new SecureRandom());
     }
 
     public LighterNativeTransactionSigner(String restUrl, String privateKey, int apiKeyIndex, long accountIndex,
             String signerLibraryPath) {
-        if (restUrl == null || restUrl.isBlank()) {
-            throw new IllegalArgumentException("restUrl is required");
-        }
+        this(restUrl, privateKey, apiKeyIndex, accountIndex);
+    }
 
-        String normalizedPrivateKey = normalizePrivateKey(privateKey);
-        int chainId = resolveChainId(restUrl);
-        this.nativeSigner = loadNativeSigner(signerLibraryPath);
+    protected LighterNativeTransactionSigner(String restUrl, String privateKey, int apiKeyIndex, long accountIndex,
+            SecureRandom secureRandom) {
+        this(restUrl, privateKey, apiKeyIndex, accountIndex, createDefaultRestApi(restUrl), secureRandom);
+    }
 
-        String createError = trimToNull(
-                nativeSigner.CreateClient(restUrl, normalizedPrivateKey, chainId, apiKeyIndex, accountIndex));
-        if (createError != null) {
-            throw new IllegalStateException("Unable to initialize Lighter signer client: " + createError);
-        }
-
-        String checkError = trimToNull(nativeSigner.CheckClient(apiKeyIndex, accountIndex));
-        if (checkError != null) {
-            throw new IllegalStateException("Lighter signer self-check failed: " + checkError);
-        }
+    protected LighterNativeTransactionSigner(String restUrl, String privateKey, int apiKeyIndex, long accountIndex,
+            ILighterRestApi restApi, SecureRandom secureRandom) {
+        String normalizedRestUrl = requireNonBlank(restUrl, "restUrl");
+        this.restApi = Objects.requireNonNull(restApi, "restApi is required");
+        this.normalizedPrivateKey = normalizePrivateKey(privateKey);
+        this.apiPrivateKey = LighterSignerMath.parsePrivateKeyHex(this.normalizedPrivateKey);
+        this.apiPublicKey = LighterSignerMath.publicKeyFromPrivateKey(this.apiPrivateKey);
+        this.configuredApiKeyIndex = apiKeyIndex;
+        this.configuredAccountIndex = accountIndex;
+        this.chainId = resolveChainId(normalizedRestUrl);
+        this.secureRandom = Objects.requireNonNull(secureRandom, "secureRandom is required");
     }
 
     private static LighterConfiguration requireConfiguration(LighterConfiguration configuration) {
@@ -74,8 +104,13 @@ public class LighterNativeTransactionSigner implements ILighterTransactionSigner
         return requireConfiguration(configuration).getAccountIndex();
     }
 
-    private static String getSignerLibraryPath(LighterConfiguration configuration) {
-        return requireConfiguration(configuration).getSignerLibraryPath();
+    private static ILighterRestApi createDefaultRestApi(String restUrl) {
+        return new LighterRestApi(restUrl, !isMainnetUrl(restUrl));
+    }
+
+    private static boolean isMainnetUrl(String restUrl) {
+        String url = restUrl == null ? "" : restUrl.toLowerCase(Locale.ROOT);
+        return url.contains("mainnet");
     }
 
     @Override
@@ -85,22 +120,39 @@ public class LighterNativeTransactionSigner implements ILighterTransactionSigner
         }
         orderRequest.validate();
 
-        LighterNativeSignerLibrary.SignedTxResponse response = nativeSigner.SignCreateOrder(
-                orderRequest.getMarketIndex(),
-                orderRequest.getClientOrderIndex(),
-                orderRequest.getBaseAmount(),
-                orderRequest.getPrice(),
-                orderRequest.isAsk() ? 1 : 0,
-                orderRequest.getOrderType().getCode(),
-                orderRequest.getTimeInForce().getCode(),
-                orderRequest.isReduceOnly() ? 1 : 0,
-                orderRequest.getTriggerPrice(),
-                orderRequest.getOrderExpiry(),
-                orderRequest.getNonce(),
-                orderRequest.getApiKeyIndex(),
-                orderRequest.getAccountIndex());
+        int apiKeyIndex = resolveApiKeyIndex(orderRequest.getApiKeyIndex());
+        long accountIndex = resolveAccountIndex(orderRequest.getAccountIndex());
+        validateSignerIdentity(apiKeyIndex, accountIndex);
 
-        return mapSignedTxResponse(response, "create-order");
+        long nonce = resolveNonce(orderRequest.getNonce(), accountIndex, apiKeyIndex);
+        long expiredAt = nowMillis() + DEFAULT_TX_EXPIRY_MILLIS;
+        long orderExpiry = resolveOrderExpiry(orderRequest);
+
+        LighterSignerMath.Fp5 txHashField = hashCreateOrder(orderRequest, accountIndex, apiKeyIndex, nonce, expiredAt,
+                orderExpiry);
+        byte[] txHashBytes = txHashField.toLittleEndian40();
+        LighterSignerMath.SchnorrSignature signature = LighterSignerMath.signHashedMessage(txHashField,
+                apiPrivateKey, secureRandom);
+
+        JSONObject txInfo = new JSONObject();
+        txInfo.put("AccountIndex", accountIndex);
+        txInfo.put("ApiKeyIndex", apiKeyIndex);
+        txInfo.put("MarketIndex", orderRequest.getMarketIndex());
+        txInfo.put("ClientOrderIndex", orderRequest.getClientOrderIndex());
+        txInfo.put("BaseAmount", orderRequest.getBaseAmount());
+        txInfo.put("Price", Integer.toUnsignedLong(orderRequest.getPrice()));
+        txInfo.put("IsAsk", orderRequest.isAsk() ? 1 : 0);
+        txInfo.put("Type", orderRequest.getOrderType().getCode());
+        txInfo.put("TimeInForce", orderRequest.getTimeInForce().getCode());
+        txInfo.put("ReduceOnly", orderRequest.isReduceOnly() ? 1 : 0);
+        txInfo.put("TriggerPrice", Integer.toUnsignedLong(orderRequest.getTriggerPrice()));
+        txInfo.put("OrderExpiry", orderExpiry);
+        txInfo.put("ExpiredAt", expiredAt);
+        txInfo.put("Nonce", nonce);
+        txInfo.put("Sig", Base64.getEncoder().encodeToString(signature.toBytes()));
+
+        return new LighterSignedTransaction(TX_TYPE_L2_CREATE_ORDER, txInfo, LighterSignerMath.toHex(txHashBytes),
+                null);
     }
 
     @Override
@@ -110,14 +162,30 @@ public class LighterNativeTransactionSigner implements ILighterTransactionSigner
         }
         cancelRequest.validate();
 
-        LighterNativeSignerLibrary.SignedTxResponse response = nativeSigner.SignCancelOrder(
-                cancelRequest.getMarketIndex(),
-                cancelRequest.getOrderIndex(),
-                cancelRequest.getNonce(),
-                cancelRequest.getApiKeyIndex(),
-                cancelRequest.getAccountIndex());
+        int apiKeyIndex = resolveApiKeyIndex(cancelRequest.getApiKeyIndex());
+        long accountIndex = resolveAccountIndex(cancelRequest.getAccountIndex());
+        validateSignerIdentity(apiKeyIndex, accountIndex);
 
-        return mapSignedTxResponse(response, "cancel-order");
+        long nonce = resolveNonce(cancelRequest.getNonce(), accountIndex, apiKeyIndex);
+        long expiredAt = nowMillis() + DEFAULT_TX_EXPIRY_MILLIS;
+
+        LighterSignerMath.Fp5 txHashField = hashCancelOrder(cancelRequest, accountIndex, apiKeyIndex, nonce,
+                expiredAt);
+        byte[] txHashBytes = txHashField.toLittleEndian40();
+        LighterSignerMath.SchnorrSignature signature = LighterSignerMath.signHashedMessage(txHashField,
+                apiPrivateKey, secureRandom);
+
+        JSONObject txInfo = new JSONObject();
+        txInfo.put("AccountIndex", accountIndex);
+        txInfo.put("ApiKeyIndex", apiKeyIndex);
+        txInfo.put("MarketIndex", cancelRequest.getMarketIndex());
+        txInfo.put("Index", cancelRequest.getOrderIndex());
+        txInfo.put("ExpiredAt", expiredAt);
+        txInfo.put("Nonce", nonce);
+        txInfo.put("Sig", Base64.getEncoder().encodeToString(signature.toBytes()));
+
+        return new LighterSignedTransaction(TX_TYPE_L2_CANCEL_ORDER, txInfo, LighterSignerMath.toHex(txHashBytes),
+                null);
     }
 
     @Override
@@ -127,80 +195,86 @@ public class LighterNativeTransactionSigner implements ILighterTransactionSigner
         }
         modifyRequest.validate();
 
-        LighterNativeSignerLibrary.SignedTxResponse response = nativeSigner.SignModifyOrder(
-                modifyRequest.getMarketIndex(),
-                modifyRequest.getOrderIndex(),
-                modifyRequest.getBaseAmount(),
-                modifyRequest.getPrice(),
-                modifyRequest.isAsk() ? 1 : 0,
-                modifyRequest.getOrderType().getCode(),
-                modifyRequest.getTimeInForce().getCode(),
-                modifyRequest.isReduceOnly() ? 1 : 0,
-                modifyRequest.getTriggerPrice(),
-                modifyRequest.getOrderExpiry(),
-                modifyRequest.getNonce(),
-                modifyRequest.getApiKeyIndex(),
-                modifyRequest.getAccountIndex());
+        int apiKeyIndex = resolveApiKeyIndex(modifyRequest.getApiKeyIndex());
+        long accountIndex = resolveAccountIndex(modifyRequest.getAccountIndex());
+        validateSignerIdentity(apiKeyIndex, accountIndex);
 
-        return mapSignedTxResponse(response, "modify-order");
-    }
+        long nonce = resolveNonce(modifyRequest.getNonce(), accountIndex, apiKeyIndex);
+        long expiredAt = nowMillis() + DEFAULT_TX_EXPIRY_MILLIS;
 
-    protected LighterSignedTransaction mapSignedTxResponse(LighterNativeSignerLibrary.SignedTxResponse response,
-            String actionName) {
-        if (response == null) {
-            throw new IllegalStateException("Signer returned null response for " + actionName);
-        }
+        LighterSignerMath.Fp5 txHashField = hashModifyOrder(modifyRequest, accountIndex, apiKeyIndex, nonce,
+                expiredAt);
+        byte[] txHashBytes = txHashField.toLittleEndian40();
+        LighterSignerMath.SchnorrSignature signature = LighterSignerMath.signHashedMessage(txHashField,
+                apiPrivateKey, secureRandom);
 
-        String err = trimToNull(response.err);
-        if (err != null) {
-            throw new IllegalStateException("Unable to sign Lighter " + actionName + ": " + err);
-        }
-        if (response.txType <= 0) {
-            throw new IllegalStateException("Signer returned invalid tx type: " + response.txType);
-        }
+        JSONObject txInfo = new JSONObject();
+        txInfo.put("AccountIndex", accountIndex);
+        txInfo.put("ApiKeyIndex", apiKeyIndex);
+        txInfo.put("MarketIndex", modifyRequest.getMarketIndex());
+        txInfo.put("Index", modifyRequest.getOrderIndex());
+        txInfo.put("BaseAmount", modifyRequest.getBaseAmount());
+        txInfo.put("Price", Integer.toUnsignedLong(modifyRequest.getPrice()));
+        txInfo.put("TriggerPrice", Integer.toUnsignedLong(modifyRequest.getTriggerPrice()));
+        txInfo.put("ExpiredAt", expiredAt);
+        txInfo.put("Nonce", nonce);
+        txInfo.put("Sig", Base64.getEncoder().encodeToString(signature.toBytes()));
 
-        String txInfoText = trimToNull(response.txInfo);
-        if (txInfoText == null) {
-            throw new IllegalStateException("Signer returned empty tx_info");
-        }
-        JSONObject txInfo = new JSONObject(txInfoText);
-        return new LighterSignedTransaction(response.txType, txInfo, trimToNull(response.txHash),
-                trimToNull(response.messageToSign));
+        return new LighterSignedTransaction(TX_TYPE_L2_MODIFY_ORDER, txInfo, LighterSignerMath.toHex(txHashBytes),
+                null);
     }
 
     public LighterApiKey generateApiKey() {
-        LighterNativeSignerLibrary.ApiKeyResponse response = nativeSigner.GenerateAPIKey();
-        String err = trimToNull(response.err);
-        if (err != null) {
-            throw new IllegalStateException("Unable to generate Lighter API key: " + err);
-        }
-        String publicKey = trimToNull(response.publicKey);
-        String privateKey = trimToNull(response.privateKey);
-        if (publicKey == null || privateKey == null) {
-            throw new IllegalStateException("Signer returned invalid API key response");
-        }
-        return new LighterApiKey(publicKey, privateKey);
+        LighterSignerMath.Scalar privateKey = LighterSignerMath.sampleScalar(secureRandom);
+        LighterSignerMath.Fp5 publicKey = LighterSignerMath.publicKeyFromPrivateKey(privateKey);
+
+        return new LighterApiKey(
+                prefixHex(LighterSignerMath.toHex(publicKey.toLittleEndian40())),
+                prefixHex(LighterSignerMath.toHex(privateKey.toLittleEndian40())));
     }
 
     public String createAuthTokenWithExpiry(long timestamp, long expiry, int apiKeyIndex, long accountIndex) {
-        String response = trimToNull(nativeSigner.CreateAuthTokenWithExpiry(timestamp, expiry, apiKeyIndex,
-                accountIndex));
-        if (response == null) {
-            throw new IllegalStateException("Signer returned empty auth token");
+        int effectiveApiKeyIndex = resolveApiKeyIndex(apiKeyIndex);
+        long effectiveAccountIndex = resolveAccountIndex(accountIndex);
+        validateSignerIdentity(effectiveApiKeyIndex, effectiveAccountIndex);
+
+        long deadline = expiry;
+        long nowSeconds = nowSeconds();
+        long baseSeconds = timestamp > 0 ? timestamp : nowSeconds;
+
+        if (deadline <= 0) {
+            deadline = baseSeconds + DEFAULT_AUTH_TOKEN_TTL_SECONDS;
         }
-        return response;
+        if (deadline <= baseSeconds) {
+            deadline = baseSeconds + DEFAULT_AUTH_TOKEN_TTL_SECONDS;
+        }
+
+        String message = deadline + ":" + effectiveAccountIndex + ":" + effectiveApiKeyIndex;
+        LighterSignerMath.Fp5 messageHash = LighterSignerMath.hashAuthTokenMessage(message);
+        LighterSignerMath.SchnorrSignature signature = LighterSignerMath.signHashedMessage(messageHash,
+                apiPrivateKey, secureRandom);
+
+        return message + ":" + LighterSignerMath.toHex(signature.toBytes());
     }
 
     public String getPublicKey(int apiKeyIndex, long accountIndex) {
-        return trimToNull(nativeSigner.GetPublicKey(apiKeyIndex, accountIndex));
+        return getApiPublicKey(apiKeyIndex, accountIndex);
     }
 
     public String getApiPublicKey(int apiKeyIndex, long accountIndex) {
-        return trimToNull(nativeSigner.GetApiPublicKey(apiKeyIndex, accountIndex));
+        int effectiveApiKeyIndex = resolveApiKeyIndex(apiKeyIndex);
+        long effectiveAccountIndex = resolveAccountIndex(accountIndex);
+        validateSignerIdentity(effectiveApiKeyIndex, effectiveAccountIndex);
+
+        return LighterSignerMath.toHex(apiPublicKey.toLittleEndian40());
     }
 
     public String getApiPrivateKey(int apiKeyIndex, long accountIndex) {
-        return trimToNull(nativeSigner.GetApiPrivateKey(apiKeyIndex, accountIndex));
+        int effectiveApiKeyIndex = resolveApiKeyIndex(apiKeyIndex);
+        long effectiveAccountIndex = resolveAccountIndex(accountIndex);
+        validateSignerIdentity(effectiveApiKeyIndex, effectiveAccountIndex);
+
+        return normalizedPrivateKey;
     }
 
     protected int resolveChainId(String restUrl) {
@@ -208,47 +282,130 @@ public class LighterNativeTransactionSigner implements ILighterTransactionSigner
         return url.contains("mainnet") ? MAINNET_CHAIN_ID : TESTNET_CHAIN_ID;
     }
 
-    protected LighterNativeSignerLibrary loadNativeSigner(String configuredLibraryPath) {
-        String target = resolveLibraryTarget(configuredLibraryPath);
-        logger.info("Loading Lighter signer library from '{}'", target);
-        return Native.load(target, LighterNativeSignerLibrary.class);
+    protected long nowMillis() {
+        return System.currentTimeMillis();
     }
 
-    protected String resolveLibraryTarget(String configuredLibraryPath) {
-        String path = trimToNull(configuredLibraryPath);
-        if (path == null) {
-            throw new IllegalStateException("Missing signer library path. Set "
-                    + LighterConfiguration.LIGHTER_SIGNER_LIBRARY_PATH + " to a signer file or directory.");
-        }
-
-        File file = new File(path);
-        if (file.isDirectory()) {
-            return new File(file, getPlatformLibraryFilename()).getAbsolutePath();
-        }
-        return file.getAbsolutePath();
+    protected long nowSeconds() {
+        return System.currentTimeMillis() / 1000L;
     }
 
-    protected String getPlatformLibraryFilename() {
-        String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
+    protected long fetchNextNonce(long accountIndex, int apiKeyIndex) {
+        return restApi.getNextNonce(accountIndex, apiKeyIndex);
+    }
 
-        if (osName.contains("mac")) {
-            if (arch.contains("aarch64") || arch.contains("arm64")) {
-                return "lighter-signer-darwin-arm64.dylib";
-            }
-            return "lighter-signer-darwin-amd64.dylib";
+    protected long resolveNonce(long nonce, long accountIndex, int apiKeyIndex) {
+        if (nonce >= 0) {
+            return nonce;
         }
-        if (osName.contains("win")) {
-            return "lighter-signer-windows-amd64.dll";
+        return fetchNextNonce(accountIndex, apiKeyIndex);
+    }
+
+    protected long resolveOrderExpiry(LighterCreateOrderRequest request) {
+        long orderExpiry = request.getOrderExpiry();
+        if (orderExpiry != LighterCreateOrderRequest.DEFAULT_ORDER_EXPIRY) {
+            return orderExpiry;
         }
-        if (osName.contains("linux")) {
-            if (arch.contains("aarch64") || arch.contains("arm64")) {
-                return "lighter-signer-linux-arm64.so";
-            }
-            return "lighter-signer-linux-amd64.so";
+
+        if (request.getOrderType() == LighterOrderType.MARKET
+                || request.getTimeInForce() == LighterTimeInForce.IOC) {
+            return 0L;
         }
-        throw new IllegalStateException("Unsupported platform for Lighter signer library: os=" + osName
-                + ", arch=" + arch);
+        return nowMillis() + DEFAULT_ORDER_EXPIRY_MILLIS;
+    }
+
+    protected int resolveApiKeyIndex(int requestedApiKeyIndex) {
+        if (requestedApiKeyIndex == LighterCreateOrderRequest.DEFAULT_API_KEY_INDEX
+                && configuredApiKeyIndex != LighterCreateOrderRequest.DEFAULT_API_KEY_INDEX) {
+            return configuredApiKeyIndex;
+        }
+        return requestedApiKeyIndex;
+    }
+
+    protected long resolveAccountIndex(long requestedAccountIndex) {
+        if (requestedAccountIndex == LighterCreateOrderRequest.DEFAULT_ACCOUNT_INDEX
+                && configuredAccountIndex != LighterCreateOrderRequest.DEFAULT_ACCOUNT_INDEX) {
+            return configuredAccountIndex;
+        }
+        return requestedAccountIndex;
+    }
+
+    protected void validateSignerIdentity(int apiKeyIndex, long accountIndex) {
+        if (apiKeyIndex != configuredApiKeyIndex || accountIndex != configuredAccountIndex) {
+            throw new IllegalArgumentException("Signer was initialized for accountIndex=" + configuredAccountIndex
+                    + " apiKeyIndex=" + configuredApiKeyIndex + ", but request was accountIndex=" + accountIndex
+                    + " apiKeyIndex=" + apiKeyIndex + ".");
+        }
+    }
+
+    protected LighterSignerMath.Fp5 hashCreateOrder(LighterCreateOrderRequest request, long accountIndex,
+            int apiKeyIndex, long nonce, long expiredAt, long orderExpiry) {
+        List<LighterSignerMath.GoldilocksField> elems = new ArrayList<>(16);
+
+        elems.add(unsigned32(chainId));
+        elems.add(unsigned32(TX_TYPE_L2_CREATE_ORDER));
+        elems.add(signed64(nonce));
+        elems.add(signed64(expiredAt));
+
+        elems.add(signed64(accountIndex));
+        elems.add(unsigned32(apiKeyIndex));
+        elems.add(unsigned32(request.getMarketIndex()));
+        elems.add(signed64(request.getClientOrderIndex()));
+        elems.add(signed64(request.getBaseAmount()));
+        elems.add(unsigned32(Integer.toUnsignedLong(request.getPrice())));
+        elems.add(unsigned32(request.isAsk() ? 1L : 0L));
+        elems.add(unsigned32(request.getOrderType().getCode()));
+        elems.add(unsigned32(request.getTimeInForce().getCode()));
+        elems.add(unsigned32(request.isReduceOnly() ? 1L : 0L));
+        elems.add(unsigned32(Integer.toUnsignedLong(request.getTriggerPrice())));
+        elems.add(signed64(orderExpiry));
+
+        return LighterSignerMath.hashToQuinticExtension(elems);
+    }
+
+    protected LighterSignerMath.Fp5 hashCancelOrder(LighterCancelOrderRequest request, long accountIndex,
+            int apiKeyIndex, long nonce, long expiredAt) {
+        List<LighterSignerMath.GoldilocksField> elems = new ArrayList<>(8);
+
+        elems.add(unsigned32(chainId));
+        elems.add(unsigned32(TX_TYPE_L2_CANCEL_ORDER));
+        elems.add(signed64(nonce));
+        elems.add(signed64(expiredAt));
+
+        elems.add(signed64(accountIndex));
+        elems.add(unsigned32(apiKeyIndex));
+        elems.add(unsigned32(request.getMarketIndex()));
+        elems.add(signed64(request.getOrderIndex()));
+
+        return LighterSignerMath.hashToQuinticExtension(elems);
+    }
+
+    protected LighterSignerMath.Fp5 hashModifyOrder(LighterModifyOrderRequest request, long accountIndex,
+            int apiKeyIndex, long nonce, long expiredAt) {
+        List<LighterSignerMath.GoldilocksField> elems = new ArrayList<>(11);
+
+        elems.add(unsigned32(chainId));
+        elems.add(unsigned32(TX_TYPE_L2_MODIFY_ORDER));
+        elems.add(signed64(nonce));
+        elems.add(signed64(expiredAt));
+
+        elems.add(signed64(accountIndex));
+        elems.add(unsigned32(apiKeyIndex));
+        elems.add(unsigned32(request.getMarketIndex()));
+        elems.add(signed64(request.getOrderIndex()));
+        elems.add(signed64(request.getBaseAmount()));
+        elems.add(unsigned32(Integer.toUnsignedLong(request.getPrice())));
+        elems.add(unsigned32(Integer.toUnsignedLong(request.getTriggerPrice())));
+
+        return LighterSignerMath.hashToQuinticExtension(elems);
+    }
+
+    protected LighterSignerMath.GoldilocksField signed64(long value) {
+        return LighterSignerMath.GoldilocksField.fromSignedLong(value);
+    }
+
+    protected LighterSignerMath.GoldilocksField unsigned32(long value) {
+        return LighterSignerMath.GoldilocksField.fromUnsignedLong(value);
     }
 
     protected String normalizePrivateKey(String privateKey) {
@@ -257,7 +414,7 @@ public class LighterNativeTransactionSigner implements ILighterTransactionSigner
             throw new IllegalStateException("Missing private key configuration for Lighter signing.");
         }
         if (value.startsWith("0x") || value.startsWith("0X")) {
-            return value.substring(2);
+            value = value.substring(2);
         }
         return value;
     }
@@ -268,5 +425,19 @@ public class LighterNativeTransactionSigner implements ILighterTransactionSigner
         }
         String trimmed = text.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static String requireNonBlank(String value, String fieldName) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(fieldName + " is required");
+        }
+        return value;
+    }
+
+    private static String prefixHex(String hex) {
+        if (hex == null || hex.isBlank()) {
+            return "0x";
+        }
+        return hex.startsWith("0x") || hex.startsWith("0X") ? hex : "0x" + hex;
     }
 }

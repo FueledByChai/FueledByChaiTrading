@@ -566,7 +566,7 @@ public class LighterWebSocketApi
         if (signer == null) {
             throw new IllegalStateException("No Lighter signer configured. Set "
                     + LighterConfiguration.LIGHTER_PRIVATE_KEY + ", " + LighterConfiguration.LIGHTER_ACCOUNT_INDEX
-                    + ", and " + LighterConfiguration.LIGHTER_SIGNER_LIBRARY_PATH + ".");
+                    + ", and " + LighterConfiguration.LIGHTER_API_KEY_INDEX + ".");
         }
         return signer;
     }
