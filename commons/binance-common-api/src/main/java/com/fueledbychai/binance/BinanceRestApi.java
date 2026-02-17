@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fueledbychai.binance.model.BinanceInstrumentDescriptorResult;
 import com.fueledbychai.data.InstrumentType;
+import com.fueledbychai.http.BaseRestApi;
 import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
@@ -21,7 +22,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
-public class BinanceRestApi implements IBinanceRestApi {
+public class BinanceRestApi extends BaseRestApi implements IBinanceRestApi {
     protected static Logger logger = LoggerFactory.getLogger(BinanceRestApi.class);
     private final ObjectMapper objectMapper;
 
@@ -40,11 +41,6 @@ public class BinanceRestApi implements IBinanceRestApi {
             privateApi = new BinanceRestApi(baseUrl, accountAddress, privateKey);
         }
         return privateApi;
-    }
-
-    @FunctionalInterface
-    public interface RetryableAction {
-        void run() throws Exception; // Allows throwing checked exceptions
     }
 
     protected OkHttpClient client;

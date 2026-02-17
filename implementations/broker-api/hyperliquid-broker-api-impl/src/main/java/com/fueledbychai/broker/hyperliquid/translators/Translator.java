@@ -12,20 +12,24 @@ import com.fueledbychai.broker.hyperliquid.HyperliquidOrderTicket;
 import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.broker.order.TradeDirection;
+import com.fueledbychai.data.Exchange;
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.hyperliquid.HyperliquidUtil;
-import com.fueledbychai.hyperliquid.ws.HyperliquidTickerRegistry;
 import com.fueledbychai.hyperliquid.ws.json.LimitType;
 import com.fueledbychai.hyperliquid.ws.json.OrderAction;
 import com.fueledbychai.hyperliquid.ws.json.OrderJson;
 import com.fueledbychai.hyperliquid.ws.listeners.accountinfo.HyperliquidPositionUpdate;
 import com.fueledbychai.hyperliquid.ws.listeners.userfills.WsFill;
 import com.fueledbychai.hyperliquid.ws.listeners.userfills.WsUserFill;
+import com.fueledbychai.util.ITickerRegistry;
+import com.fueledbychai.util.TickerRegistryFactory;
 import com.fueledbychai.util.Util;
 
 public class Translator implements ITranslator {
 
     protected static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Translator.class);
+    protected static ITickerRegistry tickerRegistry;
 
     protected static double SLIPPAGE_PERCENTAGE = 5.0; // 5.0%
     protected static ITranslator instance;
@@ -35,6 +39,13 @@ public class Translator implements ITranslator {
             instance = new Translator();
         }
         return instance;
+    }
+
+    protected static ITickerRegistry getTickerRegistry() {
+        if (tickerRegistry == null) {
+            tickerRegistry = TickerRegistryFactory.getInstance(Exchange.HYPERLIQUID);
+        }
+        return tickerRegistry;
     }
 
     @Override
@@ -125,7 +136,8 @@ public class Translator implements ITranslator {
     public Position translatePosition(HyperliquidPositionUpdate positionUpdate) {
         if (positionUpdate == null)
             return null;
-        Ticker ticker = HyperliquidTickerRegistry.getInstance().lookupByBrokerSymbol(positionUpdate.getTicker());
+        Ticker ticker = getTickerRegistry().lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES,
+                positionUpdate.getTicker());
 
         return new Position(ticker).setSize(positionUpdate.getSize()).setAverageCost(positionUpdate.getEntryPrice())
                 .setLiquidationPrice(positionUpdate.getLiquidationPrice());
@@ -151,7 +163,7 @@ public class Translator implements ITranslator {
 
         List<Fill> fills = new ArrayList<>();
         for (WsFill wsFill : wsUserFill.getFills()) {
-            Ticker ticker = HyperliquidTickerRegistry.getInstance().lookupByBrokerSymbol(wsFill.getCoin());
+            Ticker ticker = getTickerRegistry().lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, wsFill.getCoin());
             Fill fill = new Fill();
             fill.setTicker(ticker);
             fill.setSnapshot(wsUserFill.isSnapshot());

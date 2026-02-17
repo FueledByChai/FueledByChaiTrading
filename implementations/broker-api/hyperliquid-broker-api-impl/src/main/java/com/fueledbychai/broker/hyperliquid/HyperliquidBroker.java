@@ -47,10 +47,10 @@ import com.fueledbychai.broker.order.OrderStatus;
 import com.fueledbychai.broker.order.OrderStatus.CancelReason;
 import com.fueledbychai.broker.order.OrderStatus.Status;
 import com.fueledbychai.broker.order.OrderTicket;
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.FueledByChaiException;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.hyperliquid.HyperliquidUtil;
-import com.fueledbychai.hyperliquid.ws.HyperliquidApiFactory;
 import com.fueledbychai.hyperliquid.ws.HyperliquidConfiguration;
 import com.fueledbychai.hyperliquid.ws.HyperliquidWebSocketClient;
 import com.fueledbychai.hyperliquid.ws.HyperliquidWebSocketClientBuilder;
@@ -68,8 +68,9 @@ import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.Level1QuoteListener;
 import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.QuoteType;
-import com.fueledbychai.marketdata.hyperliquid.HyperliquidQuoteEngine;
 import com.fueledbychai.time.Span;
+import com.fueledbychai.util.ExchangeRestApiFactory;
+import com.fueledbychai.util.ExchangeWebSocketApiFactory;
 import com.fueledbychai.util.FillDeduper;
 
 /**
@@ -126,16 +127,19 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
      */
     public HyperliquidBroker() {
         // Initialize using centralized configuration
-        this.restApi = HyperliquidApiFactory.getRestApi();
-        this.websocketApi = HyperliquidApiFactory.getWebsocketApi();
-        this.quoteEngine = QuoteEngine.getInstance(HyperliquidQuoteEngine.class);
+        HyperliquidConfiguration config = HyperliquidConfiguration.getInstance();
+        this.restApi = ExchangeRestApiFactory.getApi(Exchange.HYPERLIQUID, IHyperliquidRestApi.class);
+        this.websocketApi = ExchangeWebSocketApiFactory.getApi(Exchange.HYPERLIQUID, IHyperliquidWebsocketApi.class);
+        this.quoteEngine = QuoteEngine.getInstance(Exchange.HYPERLIQUID);
         this.quoteEngine.startEngine();
         this.quoteEngine.subscribeGlobalLevel1(this);
-        this.accountAddress = HyperliquidConfiguration.getInstance().getTradingAccount();
-        this.wsUrl = HyperliquidConfiguration.getInstance().getWebSocketUrl();
+        this.accountAddress = config.getTradingAccount();
+        this.wsUrl = config.getWebSocketUrl();
 
-        logger.info("HyperliquidBroker initialized with configuration: {}",
-                HyperliquidApiFactory.getConfigurationInfo());
+        logger.info(
+                "HyperliquidBroker initialized with configuration: Environment: {}, REST URL: {}, WebSocket URL: {}, Private API Available: {}, Sub Account Address Configured: {}",
+                config.getEnvironment(), config.getRestUrl(), config.getWebSocketUrl(),
+                config.hasPrivateKeyConfiguration(), config.getSubAccountAddress());
     }
 
     /**

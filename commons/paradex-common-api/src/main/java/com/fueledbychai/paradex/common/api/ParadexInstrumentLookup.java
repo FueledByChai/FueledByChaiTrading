@@ -3,11 +3,13 @@ package com.fueledbychai.paradex.common.api;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.FueledByChaiException;
 import com.fueledbychai.data.IInstrumentLookup;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.Util;
 
 import io.github.resilience4j.retry.Retry;
@@ -21,7 +23,7 @@ public class ParadexInstrumentLookup implements IInstrumentLookup {
     private final Retry retry;
 
     public ParadexInstrumentLookup() {
-        this.api = ParadexApiFactory.getPublicApi();
+        this.api = ExchangeRestApiFactory.getPublicApi(Exchange.PARADEX, IParadexRestApi.class);
         this.retry = createRetryConfig(ParadexLookupRetryConfig.defaultConfig());
     }
 

@@ -21,6 +21,7 @@ package com.fueledbychai.paradex.example.market.data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.hyperliquid.ws.HyperliquidTickerRegistry;
 import com.fueledbychai.util.ITickerRegistry;
 
@@ -31,11 +32,11 @@ public class HyperliquidLookupExample {
     public void start() {
 
         ITickerRegistry registry = HyperliquidTickerRegistry.getInstance();
-        logger.info(registry.lookupByCommonSymbol("BTC").toString());
+        logger.info(registry.lookupByCommonSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC").toString());
 
-        logger.info(registry.lookupByCommonSymbol("ETH").toString());
+        logger.info(registry.lookupByCommonSymbol(InstrumentType.PERPETUAL_FUTURES, "ETH").toString());
 
-        logger.info(registry.lookupByCommonSymbol("SOL").toString());
+        logger.info(registry.lookupByCommonSymbol(InstrumentType.PERPETUAL_FUTURES, "SOL").toString());
 
     }
 

@@ -20,11 +20,6 @@
             <artifactId>fueledbychai-commons-api</artifactId>
             <version>${project.version}</version>
         </dependency>
-                <dependency>  
-            <groupId>${project.groupId}</groupId>
-            <artifactId>fueledbychai-broker-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
                <dependency>
             <groupId>com.jayway.restassured</groupId>
             <artifactId>rest-assured</artifactId>
@@ -54,6 +49,11 @@
             <groupId>com.swmansion.starknet</groupId>
             <artifactId>starknet</artifactId>
             <version>0.17.0</version>
+        </dependency>
+        <dependency>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna</artifactId>
+            <version>5.14.0</version>
         </dependency>
 
                     <dependency>
