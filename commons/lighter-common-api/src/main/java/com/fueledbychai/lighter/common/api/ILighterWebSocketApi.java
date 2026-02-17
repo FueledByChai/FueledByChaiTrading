@@ -2,6 +2,7 @@ package com.fueledbychai.lighter.common.api;
 
 import com.fueledbychai.lighter.common.api.ws.ILighterMarketStatsListener;
 import com.fueledbychai.lighter.common.api.ws.ILighterOrderBookListener;
+import com.fueledbychai.lighter.common.api.ws.ILighterAccountAllTradesListener;
 import com.fueledbychai.lighter.common.api.ws.ILighterTradeListener;
 import com.fueledbychai.lighter.common.api.order.LighterCancelOrderRequest;
 import com.fueledbychai.lighter.common.api.order.LighterCreateOrderRequest;
@@ -20,6 +21,9 @@ public interface ILighterWebSocketApi {
     LighterWebSocketClient subscribeOrderBook(int marketId, ILighterOrderBookListener listener);
 
     LighterWebSocketClient subscribeTrades(int marketId, ILighterTradeListener listener);
+
+    LighterWebSocketClient subscribeAccountAllTrades(long accountIndex, String authToken,
+            ILighterAccountAllTradesListener listener);
 
     LighterSignedTransaction signOrder(LighterCreateOrderRequest orderRequest);
 

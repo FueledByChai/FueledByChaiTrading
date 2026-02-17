@@ -243,7 +243,7 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
             String url = baseUrl + "/changeAccountTier";
             FormBody.Builder formBodyBuilder = new FormBody.Builder()
                     .add("account_index", Long.toString(request.getAccountIndex()))
-                    .add("new_tier", request.getNewTier());
+                    .add("new_tier", request.getNewTier().getApiValue());
             if (request.getAuth() != null && !request.getAuth().isBlank()) {
                 formBodyBuilder.add("auth", request.getAuth());
             }
