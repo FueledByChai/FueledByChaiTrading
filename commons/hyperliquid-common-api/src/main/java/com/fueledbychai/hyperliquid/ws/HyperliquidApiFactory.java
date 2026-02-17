@@ -7,7 +7,12 @@ import org.slf4j.LoggerFactory;
  * Singleton factory for ParadexRestApi instances with centralized configuration
  * management. Provides thread-safe access to configured API instances without
  * requiring users to know configuration details.
+ *
+ * @deprecated Use {@link com.fueledbychai.util.ExchangeRestApiFactory} and
+ *             {@link com.fueledbychai.util.ExchangeWebSocketApiFactory} with
+ *             {@code Exchange.HYPERLIQUID} instead.
  */
+@Deprecated(since = "0.2.0", forRemoval = false)
 public class HyperliquidApiFactory {
     private static final Logger logger = LoggerFactory.getLogger(HyperliquidApiFactory.class);
 

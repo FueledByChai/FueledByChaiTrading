@@ -1,22 +1,17 @@
 package com.fueledbychai.hyperliquid.ws;
 
-import java.util.HashMap;
-import java.util.Map;
-
-import com.fueledbychai.data.ITickerTranslator;
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
-import com.fueledbychai.data.Ticker;
+import com.fueledbychai.util.AbstractTickerRegistry;
+import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.ITickerRegistry;
 
-public class HyperliquidTickerRegistry implements ITickerTranslator, ITickerRegistry {
+public class HyperliquidTickerRegistry extends AbstractTickerRegistry implements ITickerRegistry {
 
     protected static ITickerRegistry instace;
-    protected Map<String, Ticker> tickerMap = new HashMap<>();
-    protected Map<String, Ticker> commonSymbolMap = new HashMap<>();
-    protected Map<InstrumentDescriptor, Ticker> descriptorMap = new HashMap<>();
-    protected IHyperliquidRestApi restApi = HyperliquidApiFactory.getRestApi();
-    protected ITickerTranslator tickerBuilder = new HyperliquidTickerBuilder();
+    protected IHyperliquidRestApi restApi = ExchangeRestApiFactory.getPublicApi(Exchange.HYPERLIQUID,
+            IHyperliquidRestApi.class);
 
     public static ITickerRegistry getInstance() {
         if (instace == null) {
@@ -26,6 +21,11 @@ public class HyperliquidTickerRegistry implements ITickerTranslator, ITickerRegi
     }
 
     protected HyperliquidTickerRegistry() {
+        super(new HyperliquidTickerBuilder());
+        initialize();
+    }
+
+    protected void initialize() {
         try {
             for (InstrumentDescriptor descriptor : restApi.getAllInstrumentsForType(InstrumentType.PERPETUAL_FUTURES)) {
                 translateTicker(descriptor);
@@ -36,33 +36,17 @@ public class HyperliquidTickerRegistry implements ITickerTranslator, ITickerRegi
     }
 
     @Override
-    public Ticker lookupByBrokerSymbol(String tickerString) {
-        return (Ticker) tickerMap.get(tickerString);
+    protected boolean supportsInstrumentType(InstrumentType instrumentType) {
+        return instrumentType == InstrumentType.PERPETUAL_FUTURES;
     }
 
     @Override
-    public Ticker lookupByCommonSymbol(String commonSymbol) {
-        return (Ticker) commonSymbolMap.get(commonSymbol);
-    }
-
-    @Override
-    public Ticker translateTicker(InstrumentDescriptor descriptor) {
-        if (descriptor.getInstrumentType() == InstrumentType.PERPETUAL_FUTURES) {
-
-            Ticker ticker = tickerBuilder.translateTicker(descriptor);
-            descriptorMap.put(descriptor, ticker);
-            commonSymbolMap.put(descriptor.getCommonSymbol(), ticker);
-            tickerMap.put(ticker.getSymbol(), ticker);
-
-            return ticker;
-        } else {
-            throw new IllegalArgumentException("Unsupported instrument type: " + descriptor.getInstrumentType());
-        }
-    }
-
-    @Override
-    public String commonSymbolToExchangeSymbol(String commonSymbol) {
+    public String commonSymbolToExchangeSymbol(InstrumentType instrumentType, String commonSymbol) {
         // common symbol is like BTC/USDT, exchange symbol is BTC-USDT
+        requireSupportedInstrumentType(instrumentType);
+        if (commonSymbol == null) {
+            return null;
+        }
         String exchangeSymbol = commonSymbol.replace("/", "-");
         return exchangeSymbol;
     }

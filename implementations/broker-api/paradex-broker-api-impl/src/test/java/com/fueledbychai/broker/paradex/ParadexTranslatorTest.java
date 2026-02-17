@@ -27,6 +27,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.broker.order.TradeDirection;
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.paradex.common.api.ParadexUtil;
 import com.fueledbychai.paradex.common.api.order.OrderType;
@@ -75,7 +76,8 @@ class ParadexTranslatorTest {
                                                                                                  // UTC
         );
 
-        when(mockTickerRegistry.lookupByBrokerSymbol("BTC-USD-PERP")).thenReturn(mockTicker);
+        when(mockTickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC-USD-PERP"))
+                .thenReturn(mockTicker);
 
         // When
         Fill result = translator.translateFill(paradexFill);
@@ -100,7 +102,8 @@ class ParadexTranslatorTest {
                 1633111200000L // 2021-10-02 00:00:00 UTC
         );
 
-        when(mockTickerRegistry.lookupByBrokerSymbol("ETH-USD-PERP")).thenReturn(mockTicker);
+        when(mockTickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "ETH-USD-PERP"))
+                .thenReturn(mockTicker);
 
         // When
         Fill result = translator.translateFill(paradexFill);
@@ -125,7 +128,8 @@ class ParadexTranslatorTest {
                                                                                                  // UTC
         );
 
-        when(mockTickerRegistry.lookupByBrokerSymbol("SOL-USD-PERP")).thenReturn(mockTicker);
+        when(mockTickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "SOL-USD-PERP"))
+                .thenReturn(mockTicker);
 
         // When
         Fill result = translator.translateFill(paradexFill);

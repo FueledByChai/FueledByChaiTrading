@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.fueledbychai.data.InstrumentType;
+
 /**
  * Unit tests for ParadexTickerRegistry.
  */
@@ -23,65 +25,65 @@ public class ParadexTickerRegistryTest {
     @Test
     public void testCommonSymbolToExchangeSymbol_BTC_USD() {
         // Test BTC/USD -> BTC-USD-PERP
-        String result = tickerRegistry.commonSymbolToExchangeSymbol("BTC/USD");
+        String result = tickerRegistry.commonSymbolToExchangeSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC/USD");
         assertEquals("BTC-USD-PERP", result, "BTC/USD should convert to BTC-USD-PERP");
     }
 
     @Test
     public void testCommonSymbolToExchangeSymbol_BTC_USDT() {
         // Test BTC/USDT -> BTC-USD-PERP
-        String result = tickerRegistry.commonSymbolToExchangeSymbol("BTC/USDT");
+        String result = tickerRegistry.commonSymbolToExchangeSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC/USDT");
         assertEquals("BTC-USD-PERP", result, "BTC/USDT should convert to BTC-USD-PERP");
     }
 
     @Test
     public void testCommonSymbolToExchangeSymbol_BTC_USDC() {
         // Test BTC/USDC -> BTC-USD-PERP
-        String result = tickerRegistry.commonSymbolToExchangeSymbol("BTC/USDC");
+        String result = tickerRegistry.commonSymbolToExchangeSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC/USDC");
         assertEquals("BTC-USD-PERP", result, "BTC/USDC should convert to BTC-USD-PERP");
     }
 
     @Test
     public void testCommonSymbolToExchangeSymbol_ETH_USD() {
         // Test ETH/USD -> ETH-USD-PERP
-        String result = tickerRegistry.commonSymbolToExchangeSymbol("ETH/USD");
+        String result = tickerRegistry.commonSymbolToExchangeSymbol(InstrumentType.PERPETUAL_FUTURES, "ETH/USD");
         assertEquals("ETH-USD-PERP", result, "ETH/USD should convert to ETH-USD-PERP");
     }
 
     @Test
     public void testCommonSymbolToExchangeSymbol_ETH_USDT() {
         // Test ETH/USDT -> ETH-USD-PERP
-        String result = tickerRegistry.commonSymbolToExchangeSymbol("ETH/USDT");
+        String result = tickerRegistry.commonSymbolToExchangeSymbol(InstrumentType.PERPETUAL_FUTURES, "ETH/USDT");
         assertEquals("ETH-USD-PERP", result, "ETH/USDT should convert to ETH-USD-PERP");
     }
 
     @Test
     public void testCommonSymbolToExchangeSymbol_ETH_USDC() {
         // Test ETH/USDC -> ETH-USD-PERP
-        String result = tickerRegistry.commonSymbolToExchangeSymbol("ETH/USDC");
+        String result = tickerRegistry.commonSymbolToExchangeSymbol(InstrumentType.PERPETUAL_FUTURES, "ETH/USDC");
         assertEquals("ETH-USD-PERP", result, "ETH/USDC should convert to ETH-USD-PERP");
     }
 
     @Test
     public void testCommonSymbolToExchangeSymbol_Other_Pairs() {
         // Test other currency pairs
-        String result1 = tickerRegistry.commonSymbolToExchangeSymbol("SOL/USDT");
+        String result1 = tickerRegistry.commonSymbolToExchangeSymbol(InstrumentType.PERPETUAL_FUTURES, "SOL/USDT");
         assertEquals("SOL-USD-PERP", result1, "SOL/USDT should convert to SOL-USD-PERP");
 
-        String result2 = tickerRegistry.commonSymbolToExchangeSymbol("AVAX/USDC");
+        String result2 = tickerRegistry.commonSymbolToExchangeSymbol(InstrumentType.PERPETUAL_FUTURES, "AVAX/USDC");
         assertEquals("AVAX-USD-PERP", result2, "AVAX/USDC should convert to AVAX-USD-PERP");
 
-        String result3 = tickerRegistry.commonSymbolToExchangeSymbol("DOGE/USD");
+        String result3 = tickerRegistry.commonSymbolToExchangeSymbol(InstrumentType.PERPETUAL_FUTURES, "DOGE/USD");
         assertEquals("DOGE-USD-PERP", result3, "DOGE/USD should convert to DOGE-USD-PERP");
     }
 
     @Test
     public void testCommonSymbolToExchangeSymbol_EdgeCases() {
         // Test edge cases and different formats
-        String result1 = tickerRegistry.commonSymbolToExchangeSymbol("BTC/EUR");
+        String result1 = tickerRegistry.commonSymbolToExchangeSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC/EUR");
         assertEquals("BTC-EUR-PERP", result1, "BTC/EUR should convert to BTC-EUR-PERP (not USD)");
 
-        String result2 = tickerRegistry.commonSymbolToExchangeSymbol("BTCUSD");
+        String result2 = tickerRegistry.commonSymbolToExchangeSymbol(InstrumentType.PERPETUAL_FUTURES, "BTCUSD");
         assertEquals("BTCUSD-PERP", result2, "BTCUSD should convert to BTCUSD-PERP (no slash)");
     }
 
@@ -92,13 +94,13 @@ public class ParadexTickerRegistryTest {
      */
     private static class TestableParadexTickerRegistry extends ParadexTickerRegistry {
 
-        // Override the constructor to prevent API initialization
         public TestableParadexTickerRegistry() {
-            // Don't call super() to avoid API initialization
-            // Just initialize the necessary fields for our test
-            super.tickerMap = new java.util.HashMap<>();
-            super.commonSymbolMap = new java.util.HashMap<>();
-            super.descriptorMap = new java.util.HashMap<>();
+            super();
+        }
+
+        @Override
+        protected void initialize() {
+            // Skip API initialization for tests.
         }
     }
 }

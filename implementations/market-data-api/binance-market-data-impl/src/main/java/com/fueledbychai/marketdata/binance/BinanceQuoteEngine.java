@@ -13,7 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.binance.BinanceConfiguration;
-import com.fueledbychai.binance.BinanceTickerRegistry;
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.binance.ws.BinanceWebSocketClient;
 import com.fueledbychai.binance.ws.BinanceWebSocketClientBuilder;
 import com.fueledbychai.binance.ws.aggtrade.AggTradeRecordProcessor;
@@ -31,6 +31,7 @@ import com.fueledbychai.marketdata.OrderFlowListener;
 import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.QuoteType;
 import com.fueledbychai.util.ITickerRegistry;
+import com.fueledbychai.util.TickerRegistryFactory;
 
 public class BinanceQuoteEngine extends QuoteEngine {
 
@@ -48,7 +49,8 @@ public class BinanceQuoteEngine extends QuoteEngine {
     protected ITickerRegistry tickerRegistry;
 
     public BinanceQuoteEngine() {
-        this(BinanceConfiguration.getInstance().getWebSocketUrl(), BinanceTickerRegistry.getInstance());
+        this(BinanceConfiguration.getInstance().getWebSocketUrl(),
+                TickerRegistryFactory.getInstance(Exchange.BINANCE_SPOT));
     }
 
     protected BinanceQuoteEngine(String wsUrl, ITickerRegistry tickerRegistry) {

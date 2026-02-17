@@ -45,8 +45,8 @@ public class ParadexInstrumentLookupExample {
         });
 
         ITickerRegistry registry = ParadexTickerRegistry.getInstance();
-        logger.info(registry.lookupByCommonSymbol("BTC").toString());
-        logger.info(registry.lookupByBrokerSymbol("BTC-USD-PERP").toString());
+        logger.info(registry.lookupByCommonSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC").toString());
+        logger.info(registry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC-USD-PERP").toString());
 
     }
 

@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.ServiceLoader;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -36,6 +37,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.Ticker;
 
 /**
@@ -51,6 +53,8 @@ public abstract class QuoteEngine implements IQuoteEngine {
     private final ThreadPoolExecutor quoteExecutor;
 
     private static final Map<Class<? extends QuoteEngine>, QuoteEngine> instances = new ConcurrentHashMap<>();
+    private static final Map<Exchange, Class<? extends QuoteEngine>> registry = new ConcurrentHashMap<>();
+    private static volatile boolean providersLoaded = false;
     ScheduledExecutorService monitor = Executors.newSingleThreadScheduledExecutor();
 
 
@@ -75,6 +79,60 @@ public abstract class QuoteEngine implements IQuoteEngine {
                 throw new RuntimeException("Failed to instantiate QuoteEngine: " + c.getName(), e);
             }
         });
+    }
+
+    public static void registerQuoteEngine(Exchange exchange, Class<? extends QuoteEngine> clazz) {
+        if (exchange == null) {
+            throw new IllegalArgumentException("Exchange is required");
+        }
+        if (clazz == null) {
+            throw new IllegalArgumentException("QuoteEngine class is required");
+        }
+        Class<? extends QuoteEngine> existing = registry.putIfAbsent(exchange, clazz);
+        if (existing != null && !existing.equals(clazz)) {
+            throw new IllegalStateException("QuoteEngine already registered for " + exchange.getExchangeName()
+                    + ": " + existing.getName());
+        }
+    }
+
+    private static void ensureProvidersLoaded() {
+        if (providersLoaded) {
+            return;
+        }
+        synchronized (QuoteEngine.class) {
+            if (providersLoaded) {
+                return;
+            }
+            ServiceLoader<QuoteEngineProvider> loader = ServiceLoader.load(QuoteEngineProvider.class);
+            for (QuoteEngineProvider provider : loader) {
+                try {
+                    registerQuoteEngine(provider.getExchange(), provider.getQuoteEngineClass());
+                } catch (RuntimeException e) {
+                    logger.warn("Failed to register QuoteEngine provider: {}", provider.getClass().getName(), e);
+                }
+            }
+            providersLoaded = true;
+        }
+    }
+
+    public static boolean isRegistered(Exchange exchange) {
+        if (exchange == null) {
+            return false;
+        }
+        ensureProvidersLoaded();
+        return registry.containsKey(exchange);
+    }
+
+    public static QuoteEngine getInstance(Exchange exchange) {
+        if (exchange == null) {
+            throw new IllegalArgumentException("Exchange is required");
+        }
+        ensureProvidersLoaded();
+        Class<? extends QuoteEngine> clazz = registry.get(exchange);
+        if (clazz == null) {
+            throw new IllegalStateException("No QuoteEngine registered for exchange " + exchange.getExchangeName());
+        }
+        return getInstance(clazz);
     }
 
     protected List<ErrorListener> errorListeners;

@@ -21,6 +21,7 @@ package com.fueledbychai.paradex.example.market.data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.paradex.ParadexQuoteEngine;
 import com.fueledbychai.paradex.common.ParadexTickerRegistry;
@@ -36,7 +37,7 @@ public class ParadexMarketDepthExample {
         ParadexQuoteEngine quoteEngine = new ParadexQuoteEngine();
         quoteEngine.startEngine();
 
-        Ticker btcTicker = registry.lookupByCommonSymbol("ASTER/USDT");
+        Ticker btcTicker = registry.lookupByCommonSymbol(InstrumentType.PERPETUAL_FUTURES, "ASTER/USDT");
 
         quoteEngine.subscribeMarketDepth(btcTicker, (orderBook) -> {
             logger.info("Order Book Update: " + orderBook);
