@@ -19,6 +19,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.fueledbychai.broker.order.OrderStatus;
 import com.fueledbychai.broker.order.OrderStatus.Status;
 import com.fueledbychai.data.FueledByChaiException;
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.paradex.common.ParadexTickerRegistry;
 import com.fueledbychai.paradex.common.api.ws.orderstatus.CancelReason;
@@ -68,7 +69,8 @@ public class ParadexBrokerUtilTest {
         BigDecimal averageFillPrice = BigDecimal.ZERO;
         long timestamp = 1693036800000L;
 
-        when(mockTickerRegistry.lookupByBrokerSymbol(tickerString)).thenReturn(mockTicker);
+        when(mockTickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, tickerString))
+                .thenReturn(mockTicker);
 
         ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId,
                 remainingSize, originalSize, "NEW", "NONE", averageFillPrice, "LIMIT", "BUY", timestamp);
@@ -85,7 +87,7 @@ public class ParadexBrokerUtilTest {
         assertEquals(mockTicker, result.getTicker());
         assertEquals(timestamp, result.getTimestamp().toInstant().toEpochMilli());
 
-        verify(mockTickerRegistry).lookupByBrokerSymbol(tickerString);
+        verify(mockTickerRegistry).lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, tickerString);
     }
 
     @Test
@@ -99,7 +101,8 @@ public class ParadexBrokerUtilTest {
         BigDecimal averageFillPrice = new BigDecimal("2000.50");
         long timestamp = 1693036900000L;
 
-        when(mockTickerRegistry.lookupByBrokerSymbol(tickerString)).thenReturn(mockTicker);
+        when(mockTickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, tickerString))
+                .thenReturn(mockTicker);
 
         ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId,
                 remainingSize, originalSize, "OPEN", "NONE", averageFillPrice, "MARKET", "SELL", timestamp);
@@ -124,7 +127,8 @@ public class ParadexBrokerUtilTest {
         BigDecimal averageFillPrice = new BigDecimal("45.25");
         long timestamp = 1693037000000L;
 
-        when(mockTickerRegistry.lookupByBrokerSymbol(tickerString)).thenReturn(mockTicker);
+        when(mockTickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, tickerString))
+                .thenReturn(mockTicker);
 
         ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId,
                 remainingSize, originalSize, "CLOSED", "NONE", averageFillPrice, "LIMIT", "BUY", timestamp);
@@ -149,7 +153,8 @@ public class ParadexBrokerUtilTest {
         BigDecimal averageFillPrice = new BigDecimal("12.50");
         long timestamp = 1693037100000L;
 
-        when(mockTickerRegistry.lookupByBrokerSymbol(tickerString)).thenReturn(mockTicker);
+        when(mockTickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, tickerString))
+                .thenReturn(mockTicker);
 
         ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId,
                 remainingSize, originalSize, "CLOSED", "USER_CANCELED", averageFillPrice, "STOP", "SELL", timestamp);
@@ -172,7 +177,8 @@ public class ParadexBrokerUtilTest {
         BigDecimal remainingSize = new BigDecimal("25.0");
         BigDecimal averageFillPrice = BigDecimal.ZERO;
 
-        when(mockTickerRegistry.lookupByBrokerSymbol(tickerString)).thenReturn(mockTicker);
+        when(mockTickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, tickerString))
+                .thenReturn(mockTicker);
 
         ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId,
                 remainingSize, originalSize, "NEW", "NONE", averageFillPrice, "LIMIT", "BUY", 0L // Zero timestamp

@@ -1,24 +1,13 @@
 package com.fueledbychai.hyperliquid.ws;
 
 import java.util.Map;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-
-import org.java_websocket.handshake.ServerHandshake;
-
 import com.google.gson.JsonObject;
-import com.fueledbychai.websocket.AbstractWebSocketClient;
+import com.fueledbychai.websocket.BaseCryptoWebSocketClient;
 import com.fueledbychai.websocket.IWebSocketProcessor;
 
-public class HyperliquidWebSocketClient extends AbstractWebSocketClient {
+public class HyperliquidWebSocketClient extends BaseCryptoWebSocketClient {
 
     protected Map<String, String> params = null;
-
-    private ScheduledExecutorService pingScheduler;
-    private ScheduledFuture<?> pingTask;
-    private static final long PING_INTERVAL_SECONDS = 30;
 
     public HyperliquidWebSocketClient(String serverUri, IWebSocketProcessor processor) throws Exception {
         this(serverUri, "", processor);
@@ -41,17 +30,15 @@ public class HyperliquidWebSocketClient extends AbstractWebSocketClient {
     }
 
     @Override
-    public void onOpen(ServerHandshake handshakedata) {
-        logger.info("Connected to Hyperliquid WebSocket");
-        startPingTask();
-
-        if (channel != null && !channel.isEmpty()) {
-            subscribeToChannel();
-        }
-
+    protected String getProviderName() {
+        return "Hyperliquid";
     }
 
-    protected void subscribeToChannel() {
+    @Override
+    protected String buildSubscribeMessage() {
+        if (channel == null || channel.isEmpty()) {
+            return null;
+        }
         JsonObject subscribeJson = new JsonObject();
         subscribeJson.addProperty("jsonrpc", "2.0");
         subscribeJson.addProperty("method", "subscribe");
@@ -65,9 +52,7 @@ public class HyperliquidWebSocketClient extends AbstractWebSocketClient {
 
         subscribeJson.add("subscription", subscription);
 
-        logger.info("Subscribing to channel: " + subscribeJson.toString());
-
-        send(subscribeJson.toString());
+        return subscribeJson.toString();
     }
 
     public void postMessage(String message) {
@@ -76,64 +61,13 @@ public class HyperliquidWebSocketClient extends AbstractWebSocketClient {
     }
 
     @Override
-    public void onClose(int code, String reason, boolean remote) {
-        super.onClose(code, reason, remote);
-        stopPingScheduler();
+    protected long getPingIntervalSeconds() {
+        return 30;
     }
 
     @Override
-    public void onError(Exception ex) {
-        super.onError(ex);
-        stopPingScheduler();
-    }
-
-    // Start a scheduled task to send a lightweight ping message every 30 seconds.
-    // We use a text heartbeat here (JSON) to be compatible with servers that
-    // don't rely on WebSocket-level ping frames. If you'd prefer a ping frame
-    // instead, we can switch to using the library's sendPing API.
-
-    protected void startPingTask() {
-        pingScheduler = Executors.newSingleThreadScheduledExecutor(r ->
-
-        {
-            Thread t = new Thread(r, "hl-ping-thread");
-            t.setDaemon(true);
-            return t;
-        });
-        pingTask = pingScheduler.scheduleAtFixedRate(() -> {
-
-            try {
-                if (isOpen()) {
-                    // Send a small JSON heartbeat. Adjust payload if the server expects a different
-                    // format.
-                    logger.info(channel + ": Sending ping");
-                    send("{\"method\":\"ping\"}");
-                } else {
-                    // Connection closed, cancel the scheduled task to avoid unnecessary work.
-                    if (pingTask != null && !pingTask.isCancelled()) {
-                        pingTask.cancel(false);
-                    }
-                }
-            } catch (Exception e) {
-                logger.error("Error sending ping", e);
-            }
-        }, PING_INTERVAL_SECONDS, PING_INTERVAL_SECONDS, TimeUnit.SECONDS);
-    }
-
-    private void stopPingScheduler() {
-        try {
-            if (pingTask != null && !pingTask.isCancelled()) {
-                pingTask.cancel(false);
-            }
-            if (pingScheduler != null && !pingScheduler.isShutdown()) {
-                pingScheduler.shutdownNow();
-            }
-        } catch (Exception e) {
-            logger.warn("Error shutting down ping scheduler", e);
-        } finally {
-            pingTask = null;
-            pingScheduler = null;
-        }
+    protected String buildPingMessage() {
+        return "{\"method\":\"ping\"}";
     }
 
 }

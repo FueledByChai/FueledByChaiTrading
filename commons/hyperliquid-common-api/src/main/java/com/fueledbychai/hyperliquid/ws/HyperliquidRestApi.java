@@ -6,7 +6,6 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Callable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +24,7 @@ import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.FueledByChaiException;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.http.BaseRestApi;
 import com.fueledbychai.hyperliquid.ws.json.SignableExchangeOrderRequest;
 
 import okhttp3.HttpUrl;
@@ -34,7 +34,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
-public class HyperliquidRestApi implements IHyperliquidRestApi {
+public class HyperliquidRestApi extends BaseRestApi implements IHyperliquidRestApi {
     protected static Logger logger = LoggerFactory.getLogger(HyperliquidRestApi.class);
     private final Gson gson;
 
@@ -55,10 +55,6 @@ public class HyperliquidRestApi implements IHyperliquidRestApi {
         return privateApi;
     }
 
-    @FunctionalInterface
-    public interface RetryableAction {
-        void run() throws Exception; // Allows throwing checked exceptions
-    }
 
     protected OkHttpClient client;
     protected String baseUrl;
@@ -152,56 +148,6 @@ public class HyperliquidRestApi implements IHyperliquidRestApi {
             }
         }
         throw new IllegalArgumentException("Instrument with symbol '" + symbol + "' not found.");
-    }
-
-    protected void executeWithRetry(RetryableAction action, int maxRetries, long retryDelayMillis) {
-        int retries = 0;
-        while (true) {
-            try {
-                action.run(); // Execute the action
-                return; // Exit after successful execution
-            } catch (java.net.SocketTimeoutException | IllegalStateException e) {
-                if (retries < maxRetries) {
-                    retries++;
-                    logger.error("Request failed. Retrying... Attempt " + retries, e);
-                    try {
-                        Thread.sleep(retryDelayMillis * retries); // Exponential backoff
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        throw new IllegalStateException("Retry interrupted", ie);
-                    }
-                } else {
-                    logger.error("Max retries reached. Failing request.", e);
-                    throw new IllegalStateException("Max retries reached", e);
-                }
-            } catch (Exception ex) {
-                throw new RuntimeException(ex.getMessage(), ex); // Handle other exceptions (e.g., IOException, etc.)
-            }
-        }
-    }
-
-    protected <T> T executeWithRetry(Callable<T> action, int maxRetries, long retryDelayMillis) {
-        int retries = 0;
-        while (true) {
-            try {
-                return action.call(); // Execute the HTTP request
-            } catch (java.net.SocketTimeoutException | IllegalStateException e) {
-                if (retries < maxRetries) {
-                    retries++;
-                    logger.error("Request timed out. Retrying... Attempt " + retries, e);
-                    try {
-                        Thread.sleep(retryDelayMillis * retries); // Exponential backoff
-                    } catch (InterruptedException ie) {
-                        throw new IllegalStateException("Retry interrupted", ie);
-                    }
-                } else {
-                    logger.error("Max retries reached. Failing request.", e);
-                    throw new RuntimeException(e); // Rethrow the exception after max retries
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e.getMessage(), e); // Handle other exceptions (e.g., IOException, etc.)
-            }
-        }
     }
 
     @Override

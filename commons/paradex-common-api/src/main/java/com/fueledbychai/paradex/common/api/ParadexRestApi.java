@@ -11,8 +11,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
-import java.util.stream.Collectors;
 
 import org.json.JSONObject;
 import org.slf4j.Logger;
@@ -26,13 +24,14 @@ import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.ResponseException;
 import com.fueledbychai.data.Side;
 import com.fueledbychai.data.Ticker;
-import com.fueledbychai.paradex.common.ParadexTickerRegistry;
+import com.fueledbychai.http.BaseRestApi;
 import com.fueledbychai.paradex.common.api.historical.OHLCBar;
 import com.fueledbychai.paradex.common.api.order.Flag;
 import com.fueledbychai.paradex.common.api.order.OrderType;
 import com.fueledbychai.paradex.common.api.order.ParadexOrder;
 import com.fueledbychai.paradex.common.api.ws.SystemStatus;
 import com.fueledbychai.time.Span;
+import com.fueledbychai.util.TickerRegistryFactory;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
@@ -42,11 +41,7 @@ import com.google.gson.TypeAdapter;
 import com.google.gson.reflect.TypeToken;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
-import com.swmansion.starknet.data.TypedData;
-import com.swmansion.starknet.data.types.Felt;
-import com.swmansion.starknet.signer.StarkCurveSigner;
 
-import okhttp3.Headers;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -54,7 +49,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
-public class ParadexRestApi implements IParadexRestApi {
+public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
     protected static Logger logger = LoggerFactory.getLogger(ParadexRestApi.class);
     protected static Logger latencyLogger = LoggerFactory.getLogger(Span.LATENCY_LOGGER_NAME);
     private final Gson gson;
@@ -82,10 +77,6 @@ public class ParadexRestApi implements IParadexRestApi {
         return privateApi;
     }
 
-    @FunctionalInterface
-    public interface RetryableAction {
-        void run() throws Exception; // Allows throwing checked exceptions
-    }
 
     protected OkHttpClient client;
     protected String baseUrl;
@@ -213,7 +204,11 @@ public class ParadexRestApi implements IParadexRestApi {
 
     @Override
     public SystemStatus getSystemStatus() {
+        return getSystemState();
+    }
 
+    @Override
+    public SystemStatus getSystemState() {
         String path = "/system/state";
         String url = baseUrl + path;
         Request request = new Request.Builder().url(url).get().build();
@@ -717,56 +712,6 @@ public class ParadexRestApi implements IParadexRestApi {
         }, 3, 500);
     }
 
-    protected void executeWithRetry(RetryableAction action, int maxRetries, long retryDelayMillis) {
-        int retries = 0;
-        while (true) {
-            try {
-                action.run(); // Execute the action
-                return; // Exit after successful execution
-            } catch (java.net.SocketTimeoutException | IllegalStateException e) {
-                if (retries < maxRetries) {
-                    retries++;
-                    logger.error("Request failed. Retrying... Attempt " + retries, e);
-                    try {
-                        Thread.sleep(retryDelayMillis * retries); // Exponential backoff
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        throw new IllegalStateException("Retry interrupted", ie);
-                    }
-                } else {
-                    logger.error("Max retries reached. Failing request.", e);
-                    throw new IllegalStateException("Max retries reached", e);
-                }
-            } catch (Exception ex) {
-                throw new RuntimeException(ex.getMessage(), ex); // Handle other exceptions (e.g., IOException, etc.)
-            }
-        }
-    }
-
-    protected <T> T executeWithRetry(Callable<T> action, int maxRetries, long retryDelayMillis) {
-        int retries = 0;
-        while (true) {
-            try {
-                return action.call(); // Execute the HTTP request
-            } catch (java.net.SocketTimeoutException | IllegalStateException e) {
-                if (retries < maxRetries) {
-                    retries++;
-                    logger.error("Request timed out. Retrying... Attempt " + retries, e);
-                    try {
-                        Thread.sleep(retryDelayMillis * retries); // Exponential backoff
-                    } catch (InterruptedException ie) {
-                        throw new IllegalStateException("Retry interrupted", ie);
-                    }
-                } else {
-                    logger.error("Max retries reached. Failing request.", e);
-                    throw new RuntimeException(e); // Rethrow the exception after max retries
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e.getMessage(), e); // Handle other exceptions (e.g., IOException, etc.)
-            }
-        }
-    }
-
     protected String getJwtTokenSingleTry() throws Exception {
 
         logger.info("Getting JWT token for account: " + accountAddressString);
@@ -1242,7 +1187,8 @@ public class ParadexRestApi implements IParadexRestApi {
             String side = positionObject.get("side").getAsString();
             String status = positionObject.get("status").getAsString();
 
-            Ticker ticker = ParadexTickerRegistry.getInstance().lookupByBrokerSymbol(tickerString);
+            Ticker ticker = TickerRegistryFactory.getInstance(Exchange.PARADEX)
+                    .lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, tickerString);
             Position position = new Position(ticker);
             position.setSize(new BigDecimal(inventory));
             position.setLiquidationPrice(new BigDecimal(liquidationPrice));

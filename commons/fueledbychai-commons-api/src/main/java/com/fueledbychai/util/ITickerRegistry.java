@@ -1,15 +1,16 @@
 package com.fueledbychai.util;
 
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 
 public interface ITickerRegistry {
 
-    Ticker lookupByBrokerSymbol(String tickerString);
+    Ticker lookupByBrokerSymbol(InstrumentType instrumentType, String tickerString);
 
-    Ticker lookupByCommonSymbol(String commonSymbol);
+    Ticker lookupByCommonSymbol(InstrumentType instrumentType, String commonSymbol);
 
     // Common symbol is like BTC/USDT, exchange symbol is like BTCUSDT or
-    // BTC-USD-PERP
-    String commonSymbolToExchangeSymbol(String commonSymbol);
+    // BTC-USD-PERP. InstrumentType disambiguates symbol formats.
+    String commonSymbolToExchangeSymbol(InstrumentType instrumentType, String commonSymbol);
 
 }

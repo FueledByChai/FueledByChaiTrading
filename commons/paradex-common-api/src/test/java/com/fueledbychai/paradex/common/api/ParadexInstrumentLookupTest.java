@@ -25,6 +25,7 @@ import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.util.ExchangeRestApiFactory;
 
 @ExtendWith(MockitoExtension.class)
 class ParadexInstrumentLookupTest {
@@ -269,10 +270,11 @@ class ParadexInstrumentLookupTest {
     @Test
     void testApiIntegration_UsesCorrectApiInstance() throws IOException {
         // Test that the class uses the API factory correctly
-        try (MockedStatic<ParadexApiFactory> mockedFactory = Mockito.mockStatic(ParadexApiFactory.class)) {
+        try (MockedStatic<ExchangeRestApiFactory> mockedFactory = Mockito.mockStatic(ExchangeRestApiFactory.class)) {
             // Given
             IParadexRestApi factoryApi = mock(IParadexRestApi.class);
-            mockedFactory.when(ParadexApiFactory::getPublicApi).thenReturn(factoryApi);
+            mockedFactory.when(() -> ExchangeRestApiFactory.getPublicApi(Exchange.PARADEX, IParadexRestApi.class))
+                    .thenReturn(factoryApi);
 
             when(factoryApi.getInstrumentDescriptor("BTC-USD-PERP")).thenReturn(mockInstrumentDescriptor);
 
@@ -281,7 +283,7 @@ class ParadexInstrumentLookupTest {
             newLookup.lookupByExchangeSymbol("BTC-USD-PERP");
 
             // Then
-            mockedFactory.verify(ParadexApiFactory::getPublicApi);
+            mockedFactory.verify(() -> ExchangeRestApiFactory.getPublicApi(Exchange.PARADEX, IParadexRestApi.class));
             verify(factoryApi).getInstrumentDescriptor("BTC-USD-PERP");
         }
     }

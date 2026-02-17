@@ -21,6 +21,7 @@ package com.fueledbychai.paradex.example.market.data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.OrderFlow;
@@ -33,7 +34,8 @@ public class ParadexMarketDataExample {
 
     public void getLevel1Quotes() {
 
-        Ticker ticker = ParadexTickerRegistry.getInstance().lookupByBrokerSymbol("IP-USD-PERP");
+        Ticker ticker = ParadexTickerRegistry.getInstance()
+                .lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "IP-USD-PERP");
 
         ParadexQuoteEngine quoteEngine = new ParadexQuoteEngine();
 
@@ -44,7 +46,8 @@ public class ParadexMarketDataExample {
     }
 
     public void getOrderFlow() {
-        Ticker ticker = ParadexTickerRegistry.getInstance().lookupByBrokerSymbol("BTC-USD-PERP");
+        Ticker ticker = ParadexTickerRegistry.getInstance()
+                .lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC-USD-PERP");
 
         ParadexQuoteEngine quoteEngine = new ParadexQuoteEngine();
 

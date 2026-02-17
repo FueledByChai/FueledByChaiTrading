@@ -1,13 +1,11 @@
 package com.fueledbychai.paradex.common.api.ws;
 
-import org.java_websocket.handshake.ServerHandshake;
-
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.fueledbychai.websocket.AbstractWebSocketClient;
+import com.fueledbychai.websocket.BaseCryptoWebSocketClient;
 import com.fueledbychai.websocket.IWebSocketProcessor;
 
-public class ParadexWebSocketClient extends AbstractWebSocketClient {
+public class ParadexWebSocketClient extends BaseCryptoWebSocketClient {
 
     protected String jwtToken = null;
 
@@ -22,28 +20,30 @@ public class ParadexWebSocketClient extends AbstractWebSocketClient {
     }
 
     @Override
-    public void onOpen(ServerHandshake handshakedata) {
-        logger.info("Connected to Paradex WebSocket");
+    protected String getProviderName() {
+        return "Paradex";
+    }
 
-        if (jwtToken != null) {
-            JsonObject authJson = new JsonObject();
-            authJson.addProperty("jsonrpc", "2.0");
-            authJson.addProperty("method", "auth");
-            JsonObject params = new JsonObject();
-            params.addProperty("bearer", jwtToken);
-            authJson.add("params", params);
-            authJson.addProperty("id", 0);
-
-            logger.info("Authenticating with JWT token");
-            send(authJson.toString());
-
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-                logger.error(e.getMessage(), e);
-            }
+    @Override
+    protected String buildAuthMessage() {
+        if (jwtToken == null) {
+            return null;
         }
+        JsonObject authJson = new JsonObject();
+        authJson.addProperty("jsonrpc", "2.0");
+        authJson.addProperty("method", "auth");
+        JsonObject params = new JsonObject();
+        params.addProperty("bearer", jwtToken);
+        authJson.add("params", params);
+        authJson.addProperty("id", 0);
+        return authJson.toString();
+    }
 
+    @Override
+    protected String buildSubscribeMessage() {
+        if (channel == null || channel.isBlank()) {
+            return null;
+        }
         JsonObject subscribeJson = new JsonObject();
         subscribeJson.addProperty("jsonrpc", "2.0");
         subscribeJson.addProperty("method", "subscribe");
@@ -51,11 +51,12 @@ public class ParadexWebSocketClient extends AbstractWebSocketClient {
         params.getAsJsonObject().addProperty("channel", channel);
         subscribeJson.add("params", params);
         subscribeJson.addProperty("id", 1);
+        return subscribeJson.toString();
+    }
 
-        logger.info("Subscribing to channel: " + subscribeJson.toString());
-
-        send(subscribeJson.toString());
-
+    @Override
+    protected long getAuthSubscribeDelayMillis() {
+        return jwtToken == null ? 0 : 500;
     }
 
 }
