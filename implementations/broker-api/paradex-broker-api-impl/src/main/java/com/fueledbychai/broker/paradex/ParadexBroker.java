@@ -36,9 +36,9 @@ import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.OrderEvent;
 import com.fueledbychai.broker.order.OrderStatus;
 import com.fueledbychai.broker.order.OrderTicket;
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.paradex.common.api.IParadexRestApi;
-import com.fueledbychai.paradex.common.api.ParadexApiFactory;
 import com.fueledbychai.paradex.common.api.ParadexConfiguration;
 import com.fueledbychai.paradex.common.api.RestResponse;
 import com.fueledbychai.paradex.common.api.order.ParadexOrder;
@@ -52,6 +52,7 @@ import com.fueledbychai.paradex.common.api.ws.fills.ParadexFillsWebSocketProcess
 import com.fueledbychai.paradex.common.api.ws.orderstatus.IParadexOrderStatusUpdate;
 import com.fueledbychai.paradex.common.api.ws.orderstatus.OrderStatusWebSocketProcessor;
 import com.fueledbychai.time.Span;
+import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.FillDeduper;
 
 /**
@@ -68,6 +69,7 @@ public class ParadexBroker extends AbstractBasicBroker {
     protected IParadexRestApi restApi;
     protected String jwtToken;
     protected int jwtRefreshInSeconds = 60;
+    protected String wsUrl;
     protected boolean connected = false;
 
     protected ParadexWebSocketClient accountInfoWSClient;
@@ -93,15 +95,19 @@ public class ParadexBroker extends AbstractBasicBroker {
     public ParadexBroker() {
         if (!unitTestMode) {
             // Initialize using centralized configuration
-            this.restApi = ParadexApiFactory.getPrivateApi();
+            this.restApi = ExchangeRestApiFactory.getPrivateApi(Exchange.PARADEX, IParadexRestApi.class);
 
             // Get JWT refresh interval from configuration
             ParadexConfiguration config = ParadexConfiguration.getInstance();
             this.jwtRefreshInSeconds = config.getJwtRefreshSeconds();
+            this.wsUrl = config.getWebSocketUrl();
 
             this.translator = ParadexTranslator.getInstance();
 
-            logger.info("ParadexBroker initialized with configuration: {}", ParadexApiFactory.getConfigurationInfo());
+            logger.info(
+                    "ParadexBroker initialized with configuration: Environment: {}, REST URL: {}, WebSocket URL: {}, Private API Available: {}",
+                    config.getEnvironment(), config.getRestUrl(), config.getWebSocketUrl(),
+                    config.hasPrivateKeyConfiguration());
         }
     }
 
@@ -113,6 +119,7 @@ public class ParadexBroker extends AbstractBasicBroker {
     public ParadexBroker(IParadexRestApi restApi) {
         this.restApi = restApi;
         this.jwtRefreshInSeconds = 60; // default
+        this.wsUrl = ParadexConfiguration.getInstance().getWebSocketUrl();
         this.translator = ParadexTranslator.getInstance();
     }
 
@@ -455,10 +462,17 @@ public class ParadexBroker extends AbstractBasicBroker {
         return jwtToken;
     }
 
+    protected String getWebSocketUrl() {
+        if (wsUrl != null && !wsUrl.isBlank()) {
+            return wsUrl;
+        }
+        return ParadexConfiguration.getInstance().getWebSocketUrl();
+    }
+
     public void startAccountInfoWSClient() {
         logger.info("Starting account info WebSocket client");
         String jwtToken = restApi.getJwtToken();
-        String wsUrl = ParadexApiFactory.getWebSocketUrl();
+        String wsUrl = getWebSocketUrl();
 
         try {
             accountInfoWSClient = ParadexWSClientBuilder.buildAccountInfoClient(wsUrl, accountWebSocketProcessor,
@@ -474,7 +488,7 @@ public class ParadexBroker extends AbstractBasicBroker {
     public void startOrderStatusWSClient() {
         logger.info("Starting order status WebSocket client");
         String jwtToken = restApi.getJwtToken();
-        String wsUrl = ParadexApiFactory.getWebSocketUrl();
+        String wsUrl = getWebSocketUrl();
 
         try {
             orderStatusWSClient = ParadexWSClientBuilder.buildOrderStatusClient(wsUrl, orderStatusProcessor, jwtToken);
@@ -489,7 +503,7 @@ public class ParadexBroker extends AbstractBasicBroker {
     public void startFillsWSClient() {
         logger.info("Starting fills WebSocket client");
         String jwtToken = restApi.getJwtToken();
-        String wsUrl = ParadexApiFactory.getWebSocketUrl();
+        String wsUrl = getWebSocketUrl();
 
         try {
             fillsWebSocketProcessor = new ParadexFillsWebSocketProcessor(() -> {

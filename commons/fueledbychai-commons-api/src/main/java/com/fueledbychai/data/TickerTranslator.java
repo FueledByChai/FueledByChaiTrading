@@ -13,7 +13,7 @@ public class TickerTranslator implements ITickerTranslator {
                 .setOrderSizeIncrement(descriptor.getOrderSizeIncrement()).setPrimaryExchange(descriptor.getExchange())
                 .setSymbol(descriptor.getExchangeSymbol()).setFundingRateInterval(descriptor.getFundingPeriodHours())
                 .setMinimumOrderSizeNotional(BigDecimal.valueOf(descriptor.getMinNotionalOrderSize()))
-                .setMinimumOrderSize(descriptor.getMinOrderSize());
+                .setMinimumOrderSize(descriptor.getMinOrderSize()).setId(descriptor.getInstrumentId());
 
         return ticker;
     }

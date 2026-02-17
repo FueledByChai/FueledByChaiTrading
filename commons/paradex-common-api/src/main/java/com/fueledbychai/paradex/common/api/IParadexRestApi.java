@@ -57,8 +57,23 @@ public interface IParadexRestApi {
 
     boolean onboardAccount(String ethereumAddress, String starketAddress, boolean isTestnet) throws Exception;
 
+    /**
+     * Returns the current status of the Paradex system.
+     *
+     * This is the canonical method for retrieving system status information.
+     *
+     * @return the current {@link SystemStatus} of the system
+     */
     SystemStatus getSystemStatus();
 
+    /**
+     * Alias for {@link #getSystemStatus()} retained for backward compatibility.
+     * <p>
+     * New code should call {@link #getSystemStatus()} instead.
+     *
+     * @return the current {@link SystemStatus} of the system
+     */
+    @Deprecated
     SystemStatus getSystemState();
 
 }
