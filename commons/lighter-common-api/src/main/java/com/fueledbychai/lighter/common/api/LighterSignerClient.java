@@ -11,7 +11,7 @@ import com.fueledbychai.lighter.common.api.signer.ILighterTransactionSigner;
 import com.fueledbychai.lighter.common.api.signer.LighterApiKey;
 import com.fueledbychai.lighter.common.api.signer.LighterNativeTransactionSigner;
 import com.fueledbychai.lighter.common.api.signer.LighterSignedTransaction;
-import com.fueledbychai.lighter.common.api.ws.LighterSendTxResponse;
+import com.fueledbychai.lighter.common.api.ws.model.LighterSendTxResponse;
 
 /**
  * Java counterpart of Lighter's Python SignerClient workflow:

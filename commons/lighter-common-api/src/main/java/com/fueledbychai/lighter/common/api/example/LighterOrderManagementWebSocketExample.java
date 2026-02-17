@@ -26,9 +26,9 @@ import com.fueledbychai.lighter.common.api.order.LighterModifyOrderRequest;
 import com.fueledbychai.lighter.common.api.order.LighterOrderType;
 import com.fueledbychai.lighter.common.api.order.LighterTimeInForce;
 import com.fueledbychai.lighter.common.api.signer.LighterNativeTransactionSigner;
-import com.fueledbychai.lighter.common.api.ws.LighterTrade;
-import com.fueledbychai.lighter.common.api.ws.LighterSendTxResponse;
-import com.fueledbychai.lighter.common.api.ws.LighterTradesUpdate;
+import com.fueledbychai.lighter.common.api.ws.model.LighterTrade;
+import com.fueledbychai.lighter.common.api.ws.model.LighterSendTxResponse;
+import com.fueledbychai.lighter.common.api.ws.model.LighterTradesUpdate;
 
 /**
  * Example for signing + submitting Lighter order management transactions over

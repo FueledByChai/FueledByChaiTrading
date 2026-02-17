@@ -14,10 +14,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.json.JSONObject;
 
-import com.fueledbychai.lighter.common.api.ws.ILighterMarketStatsListener;
-import com.fueledbychai.lighter.common.api.ws.ILighterOrderBookListener;
-import com.fueledbychai.lighter.common.api.ws.ILighterAccountAllTradesListener;
-import com.fueledbychai.lighter.common.api.ws.ILighterTradeListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterMarketStatsListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterOrderBookListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountAllTradesListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountOrdersListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountStatsListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterTradeListener;
 import com.fueledbychai.lighter.common.api.order.LighterCancelOrderRequest;
 import com.fueledbychai.lighter.common.api.order.LighterCreateOrderRequest;
 import com.fueledbychai.lighter.common.api.order.LighterModifyOrderRequest;
@@ -25,9 +27,9 @@ import com.fueledbychai.lighter.common.api.order.LighterOrderType;
 import com.fueledbychai.lighter.common.api.order.LighterTimeInForce;
 import com.fueledbychai.lighter.common.api.signer.ILighterTransactionSigner;
 import com.fueledbychai.lighter.common.api.signer.LighterSignedTransaction;
-import com.fueledbychai.lighter.common.api.ws.LighterSendTxResponse;
-import com.fueledbychai.lighter.common.api.ws.LighterWebSocketClient;
-import com.fueledbychai.lighter.common.api.ws.LighterSendTxWebSocketProcessor;
+import com.fueledbychai.lighter.common.api.ws.model.LighterSendTxResponse;
+import com.fueledbychai.lighter.common.api.ws.client.LighterWebSocketClient;
+import com.fueledbychai.lighter.common.api.ws.processor.LighterSendTxWebSocketProcessor;
 import com.fueledbychai.websocket.IWebSocketProcessor;
 
 public class LighterWebSocketApiTest {
@@ -111,6 +113,38 @@ public class LighterWebSocketApiTest {
     }
 
     @Test
+    void subscribeAccountOrdersReusesConnectionForSameMarketAndAccount() {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
+        ILighterAccountOrdersListener listener = update -> {
+        };
+
+        LighterWebSocketClient client1 = api.subscribeAccountOrders(1, 255L, "auth-token-1", listener);
+        LighterWebSocketClient client2 = api.subscribeAccountOrders(1, 255L, "auth-token-2", listener);
+
+        assertNotNull(client1);
+        assertNotNull(client2);
+        assertEquals(client1, client2);
+        assertEquals(1, api.createdClients.size());
+        assertEquals(1, api.connectCountByChannel.get("account_orders/1/255").intValue());
+    }
+
+    @Test
+    void subscribeAccountStatsReusesConnectionForSameAccount() {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
+        ILighterAccountStatsListener listener = update -> {
+        };
+
+        LighterWebSocketClient client1 = api.subscribeAccountStats(255L, listener);
+        LighterWebSocketClient client2 = api.subscribeAccountStats(255L, listener);
+
+        assertNotNull(client1);
+        assertNotNull(client2);
+        assertEquals(client1, client2);
+        assertEquals(1, api.createdClients.size());
+        assertEquals(1, api.connectCountByChannel.get("user_stats/255").intValue());
+    }
+
+    @Test
     void accountAllTradesReconnectRefreshesAuthTokenWhenGeneratorAvailable() throws Exception {
         TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream") {
             private final AtomicInteger tokenCounter = new AtomicInteger(1);
@@ -152,6 +186,47 @@ public class LighterWebSocketApiTest {
     }
 
     @Test
+    void accountOrdersReconnectRefreshesAuthTokenWhenGeneratorAvailable() throws Exception {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream") {
+            private final AtomicInteger tokenCounter = new AtomicInteger(1);
+
+            @Override
+            protected String createFreshAccountOrdersAuthToken(long accountIndex) {
+                return "generated-order-auth-" + tokenCounter.getAndIncrement();
+            }
+        };
+        ILighterAccountOrdersListener listener = update -> {
+        };
+
+        api.subscribeAccountOrders(1, 255L, "initial-auth", listener);
+        List<String> authHistory = api.subscribeAuthHistoryByChannel.get("account_orders/1/255");
+        assertNotNull(authHistory);
+        assertEquals("generated-order-auth-1", authHistory.get(0));
+
+        TestClient firstClient = api.createdClients.get("account_orders/1/255");
+        assertNotNull(firstClient);
+        firstClient.simulateRemoteClose();
+
+        long deadlineMillis = System.currentTimeMillis() + 1_000L;
+        int connectCount = 0;
+        while (System.currentTimeMillis() < deadlineMillis) {
+            Integer count = api.connectCountByChannel.get("account_orders/1/255");
+            connectCount = count == null ? 0 : count;
+            if (connectCount >= 2) {
+                break;
+            }
+            Thread.sleep(20L);
+        }
+
+        assertTrue(connectCount >= 2, "Expected reconnect to be attempted");
+        authHistory = api.subscribeAuthHistoryByChannel.get("account_orders/1/255");
+        assertNotNull(authHistory);
+        assertTrue(authHistory.size() >= 2, "Expected refreshed auth token to be used on reconnect");
+        assertEquals("generated-order-auth-2", authHistory.get(1));
+        api.disconnectAll();
+    }
+
+    @Test
     void disconnectAllClosesAllConnections() {
         TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
         ILighterMarketStatsListener listener = update -> {
@@ -162,12 +237,18 @@ public class LighterWebSocketApiTest {
         };
         ILighterAccountAllTradesListener accountTradesListener = update -> {
         };
+        ILighterAccountOrdersListener accountOrdersListener = update -> {
+        };
+        ILighterAccountStatsListener accountStatsListener = update -> {
+        };
 
         api.subscribeMarketStats(53, listener);
         api.subscribeAllMarketStats(listener);
         api.subscribeOrderBook(53, orderBookListener);
         api.subscribeTrades(53, tradeListener);
         api.subscribeAccountAllTrades(255L, "auth-token", accountTradesListener);
+        api.subscribeAccountOrders(1, 255L, "auth-token", accountOrdersListener);
+        api.subscribeAccountStats(255L, accountStatsListener);
         api.disconnectAll();
 
         assertEquals(1, api.closeCountByChannel.get("market_stats/53").intValue());
@@ -175,6 +256,8 @@ public class LighterWebSocketApiTest {
         assertEquals(1, api.closeCountByChannel.get("order_book/53").intValue());
         assertEquals(1, api.closeCountByChannel.get("trade/53").intValue());
         assertEquals(1, api.closeCountByChannel.get("account_all_trades/255").intValue());
+        assertEquals(1, api.closeCountByChannel.get("account_orders/1/255").intValue());
+        assertEquals(1, api.closeCountByChannel.get("user_stats/255").intValue());
     }
 
     @Test
@@ -215,6 +298,38 @@ public class LighterWebSocketApiTest {
         ILighterAccountAllTradesListener listener = update -> {
         };
         assertThrows(IllegalArgumentException.class, () -> api.subscribeAccountAllTrades(255, "  ", listener));
+    }
+
+    @Test
+    void rejectNegativeMarketIdForAccountOrders() {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
+        ILighterAccountOrdersListener listener = update -> {
+        };
+        assertThrows(IllegalArgumentException.class, () -> api.subscribeAccountOrders(-1, 255, "auth", listener));
+    }
+
+    @Test
+    void rejectNegativeAccountIndexForAccountOrders() {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
+        ILighterAccountOrdersListener listener = update -> {
+        };
+        assertThrows(IllegalArgumentException.class, () -> api.subscribeAccountOrders(1, -1, "auth", listener));
+    }
+
+    @Test
+    void rejectBlankAuthForAccountOrders() {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
+        ILighterAccountOrdersListener listener = update -> {
+        };
+        assertThrows(IllegalArgumentException.class, () -> api.subscribeAccountOrders(1, 255, "  ", listener));
+    }
+
+    @Test
+    void rejectNegativeAccountIndexForAccountStats() {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
+        ILighterAccountStatsListener listener = update -> {
+        };
+        assertThrows(IllegalArgumentException.class, () -> api.subscribeAccountStats(-1, listener));
     }
 
     @Test

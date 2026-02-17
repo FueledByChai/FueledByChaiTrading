@@ -6,8 +6,8 @@ import org.slf4j.LoggerFactory;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.lighter.common.api.ILighterWebSocketApi;
 import com.fueledbychai.lighter.common.api.LighterConfiguration;
-import com.fueledbychai.lighter.common.api.ws.LighterMarketStats;
-import com.fueledbychai.lighter.common.api.ws.LighterMarketStatsUpdate;
+import com.fueledbychai.lighter.common.api.ws.model.LighterMarketStats;
+import com.fueledbychai.lighter.common.api.ws.model.LighterMarketStatsUpdate;
 import com.fueledbychai.util.ExchangeWebSocketApiFactory;
 
 public class LighterMarketStatsWebSocketExample {

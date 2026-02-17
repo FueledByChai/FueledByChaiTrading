@@ -1,15 +1,17 @@
 package com.fueledbychai.lighter.common.api;
 
-import com.fueledbychai.lighter.common.api.ws.ILighterMarketStatsListener;
-import com.fueledbychai.lighter.common.api.ws.ILighterOrderBookListener;
-import com.fueledbychai.lighter.common.api.ws.ILighterAccountAllTradesListener;
-import com.fueledbychai.lighter.common.api.ws.ILighterTradeListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterMarketStatsListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterOrderBookListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountAllTradesListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountOrdersListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountStatsListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterTradeListener;
 import com.fueledbychai.lighter.common.api.order.LighterCancelOrderRequest;
 import com.fueledbychai.lighter.common.api.order.LighterCreateOrderRequest;
 import com.fueledbychai.lighter.common.api.order.LighterModifyOrderRequest;
 import com.fueledbychai.lighter.common.api.signer.LighterSignedTransaction;
-import com.fueledbychai.lighter.common.api.ws.LighterSendTxResponse;
-import com.fueledbychai.lighter.common.api.ws.LighterWebSocketClient;
+import com.fueledbychai.lighter.common.api.ws.model.LighterSendTxResponse;
+import com.fueledbychai.lighter.common.api.ws.client.LighterWebSocketClient;
 import org.json.JSONObject;
 
 public interface ILighterWebSocketApi {
@@ -24,6 +26,11 @@ public interface ILighterWebSocketApi {
 
     LighterWebSocketClient subscribeAccountAllTrades(long accountIndex, String authToken,
             ILighterAccountAllTradesListener listener);
+
+    LighterWebSocketClient subscribeAccountOrders(int marketIndex, long accountIndex, String authToken,
+            ILighterAccountOrdersListener listener);
+
+    LighterWebSocketClient subscribeAccountStats(long accountIndex, ILighterAccountStatsListener listener);
 
     LighterSignedTransaction signOrder(LighterCreateOrderRequest orderRequest);
 

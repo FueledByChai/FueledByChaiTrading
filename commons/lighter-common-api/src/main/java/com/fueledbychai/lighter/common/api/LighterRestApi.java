@@ -18,7 +18,6 @@ import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.fueledbychai.broker.Position;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.FueledByChaiException;
 import com.fueledbychai.data.InstrumentDescriptor;
@@ -26,13 +25,17 @@ import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.ResponseException;
 import com.fueledbychai.data.Side;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.lighter.common.api.account.LighterPosition;
 import com.fueledbychai.http.BaseRestApi;
 import com.fueledbychai.lighter.common.api.auth.LighterApiTokenResponse;
 import com.fueledbychai.lighter.common.api.auth.LighterChangeAccountTierRequest;
 import com.fueledbychai.lighter.common.api.auth.LighterChangeAccountTierResponse;
 import com.fueledbychai.lighter.common.api.auth.LighterCreateApiTokenRequest;
 import com.fueledbychai.lighter.common.api.signer.LighterNativeTransactionSigner;
+import com.fueledbychai.lighter.common.api.ws.model.LighterOrder;
 import com.fueledbychai.time.Span;
+import com.fueledbychai.util.ITickerRegistry;
+import com.fueledbychai.util.TickerRegistryFactory;
 import com.fueledbychai.websocket.ProxyConfig;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -346,6 +349,100 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
         }, 3, 500);
     }
 
+    @Override
+    public List<LighterOrder> getAccountActiveOrders(String authToken, long accountIndex, int marketId) {
+        if (authToken == null || authToken.isBlank()) {
+            throw new IllegalArgumentException("authToken is required");
+        }
+        if (accountIndex < 0) {
+            throw new IllegalArgumentException("accountIndex must be >= 0");
+        }
+        if (marketId < 0) {
+            throw new IllegalArgumentException("marketId must be >= 0");
+        }
+
+        return executeWithRetry(() -> {
+            String url = baseUrl + "/accountActiveOrders";
+            HttpUrl.Builder urlBuilder = HttpUrl.parse(url).newBuilder();
+            urlBuilder.addQueryParameter("account_index", Long.toString(accountIndex));
+            urlBuilder.addQueryParameter("market_id", Integer.toString(marketId));
+            urlBuilder.addQueryParameter("authorization", authToken);
+            String newUrl = urlBuilder.build().toString();
+
+            Request request = new Request.Builder().url(newUrl).get().addHeader("Authorization", authToken).build();
+            logger.info("Request: {}", request);
+
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    String error = response.body() == null ? "" : response.body().string();
+                    logger.error("Error response: {}", error);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
+                }
+
+                String responseBody = response.body() == null ? "" : response.body().string();
+                logger.info("Response output: {}", responseBody);
+                return parseAccountActiveOrdersResponse(responseBody);
+            } catch (IOException e) {
+                logger.error(e.getMessage(), e);
+                throw new ResponseException("Network error getting Lighter account active orders: " + e.getMessage(),
+                        e);
+            }
+        }, 3, 500);
+    }
+
+    @Override
+    public List<LighterOrder> getAccountActiveOrders(long accountIndex, int marketId) {
+        checkPrivateApi();
+        if (accountIndex < 0) {
+            throw new IllegalArgumentException("accountIndex must be >= 0");
+        }
+        if (marketId < 0) {
+            throw new IllegalArgumentException("marketId must be >= 0");
+        }
+
+        long timestamp = System.currentTimeMillis() / 1000L;
+        long expiry = timestamp + DEFAULT_AUTH_TOKEN_TTL_SECONDS;
+        int apiKeyIndex = LighterConfiguration.getInstance().getApiKeyIndex();
+        String authToken = getOrCreateAuthSigner().createAuthTokenWithExpiry(timestamp, expiry, apiKeyIndex,
+                accountIndex);
+        return getAccountActiveOrders(authToken, accountIndex, marketId);
+    }
+
+    @Override
+    public List<LighterPosition> getPositions(long accountIndex) {
+        if (accountIndex < 0) {
+            throw new IllegalArgumentException("accountIndex must be >= 0");
+        }
+
+        return executeWithRetry(() -> {
+            String url = baseUrl + "/account";
+            HttpUrl.Builder urlBuilder = HttpUrl.parse(url).newBuilder();
+            urlBuilder.addQueryParameter("by", "index");
+            urlBuilder.addQueryParameter("value", Long.toString(accountIndex));
+            String newUrl = urlBuilder.build().toString();
+
+            Request request = new Request.Builder().url(newUrl).get().build();
+            logger.info("Request: {}", request);
+
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    String error = response.body() == null ? "" : response.body().string();
+                    logger.error("Error response: {}", error);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
+                }
+
+                String responseBody = response.body() == null ? "" : response.body().string();
+                logger.info("Response output: {}", responseBody);
+                return parsePositionsResponse(responseBody, accountIndex);
+            } catch (IOException e) {
+                logger.error(e.getMessage(), e);
+                throw new ResponseException("Network error getting Lighter positions: " + e.getMessage(), e);
+            }
+        }, 3, 500);
+    }
+
     protected LighterCreateApiTokenRequest buildDefaultApiTokenRequest() {
         LighterConfiguration configuration = LighterConfiguration.getInstance();
         long timestamp = System.currentTimeMillis() / 1000L;
@@ -357,6 +454,228 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
         request.setSubAccountAccess(false);
         request.setScopes(LighterCreateApiTokenRequest.DEFAULT_SCOPES);
         return request;
+    }
+
+    protected List<LighterOrder> parseAccountActiveOrdersResponse(String responseBody) {
+        try {
+            JsonObject root = JsonParser.parseString(responseBody).getAsJsonObject();
+            int code = readInt(root, "code", 200);
+            if (code != 200) {
+                String message = getString(root, "message");
+                if (message == null || message.isBlank()) {
+                    message = responseBody;
+                }
+                throw new ResponseException("Unable to get Lighter account active orders: " + message, code);
+            }
+
+            JsonArray orders = root.has("orders") && !root.get("orders").isJsonNull() ? root.getAsJsonArray("orders")
+                    : null;
+            if (orders == null || orders.size() == 0) {
+                return new ArrayList<>();
+            }
+
+            List<LighterOrder> parsedOrders = new ArrayList<>();
+            for (int i = 0; i < orders.size(); i++) {
+                if (!orders.get(i).isJsonObject()) {
+                    continue;
+                }
+                LighterOrder order = parseOrder(orders.get(i).getAsJsonObject());
+                if (order != null) {
+                    parsedOrders.add(order);
+                }
+            }
+            return parsedOrders;
+        } catch (ResponseException e) {
+            throw e;
+        } catch (Exception e) {
+            logger.error("Error parsing Lighter account active orders response: {}", e.getMessage(), e);
+            throw new FueledByChaiException(e);
+        }
+    }
+
+    protected List<LighterPosition> parsePositionsResponse(String responseBody, long accountIndex) {
+        try {
+            JsonObject root = JsonParser.parseString(responseBody).getAsJsonObject();
+            int code = readInt(root, "code", 200);
+            if (code != 200) {
+                String message = getString(root, "message");
+                if (message == null || message.isBlank()) {
+                    message = responseBody;
+                }
+                throw new ResponseException("Unable to get Lighter positions: " + message, code);
+            }
+
+            JsonArray accounts = root.has("accounts") && !root.get("accounts").isJsonNull()
+                    ? root.getAsJsonArray("accounts")
+                    : null;
+            if (accounts == null || accounts.size() == 0) {
+                return new ArrayList<>();
+            }
+
+            JsonObject accountObject = findAccountObject(accounts, accountIndex);
+            if (accountObject == null) {
+                logger.warn("No account returned for account_index={} in positions response", accountIndex);
+                return new ArrayList<>();
+            }
+
+            JsonArray positions = accountObject.has("positions") && !accountObject.get("positions").isJsonNull()
+                    ? accountObject.getAsJsonArray("positions")
+                    : null;
+            if (positions == null || positions.size() == 0) {
+                return new ArrayList<>();
+            }
+
+            ITickerRegistry tickerRegistry = getTickerRegistry();
+            List<LighterPosition> result = new ArrayList<>();
+            for (int i = 0; i < positions.size(); i++) {
+                JsonObject positionObject = positions.get(i).getAsJsonObject();
+
+                BigDecimal rawPosition = readBigDecimal(positionObject, "position", BigDecimal.ZERO);
+                BigDecimal absolutePosition = rawPosition.abs();
+                Side side = resolvePositionSide(positionObject, rawPosition);
+                LighterPosition.Status status = absolutePosition.compareTo(BigDecimal.ZERO) > 0
+                        ? LighterPosition.Status.OPEN
+                        : LighterPosition.Status.CLOSED;
+
+                LighterPosition position = new LighterPosition(resolvePositionTicker(positionObject, tickerRegistry));
+                position.setSize(absolutePosition);
+                position.setAverageEntryPrice(readBigDecimal(positionObject, "avg_entry_price", BigDecimal.ZERO));
+                position.setLiquidationPrice(readBigDecimal(positionObject, "liquidation_price", BigDecimal.ZERO));
+                position.setSide(side);
+                position.setStatus(status);
+                result.add(position);
+            }
+            return result;
+        } catch (ResponseException e) {
+            throw e;
+        } catch (Exception e) {
+            logger.error("Error parsing Lighter positions response: {}", e.getMessage(), e);
+            throw new FueledByChaiException(e);
+        }
+    }
+
+    protected LighterOrder parseOrder(JsonObject orderObject) {
+        if (orderObject == null) {
+            return null;
+        }
+        LighterOrder order = new LighterOrder();
+        order.setOrderIndex(readNullableLong(orderObject, "order_index"));
+        order.setClientOrderIndex(readNullableLong(orderObject, "client_order_index"));
+        order.setOrderId(getString(orderObject, "order_id"));
+        order.setClientOrderId(getString(orderObject, "client_order_id"));
+        order.setMarketIndex(readNullableInteger(orderObject, "market_index"));
+        order.setOwnerAccountIndex(readNullableLong(orderObject, "owner_account_index"));
+        order.setInitialBaseAmount(readBigDecimal(orderObject, "initial_base_amount", null));
+        order.setPrice(readBigDecimal(orderObject, "price", null));
+        order.setNonce(readNullableLong(orderObject, "nonce"));
+        order.setRemainingBaseAmount(readBigDecimal(orderObject, "remaining_base_amount", null));
+        order.setAsk(readNullableBoolean(orderObject, "is_ask"));
+        order.setBaseSize(readNullableLong(orderObject, "base_size"));
+        order.setBasePrice(readNullableLong(orderObject, "base_price"));
+        order.setFilledBaseAmount(readBigDecimal(orderObject, "filled_base_amount", null));
+        order.setFilledQuoteAmount(readBigDecimal(orderObject, "filled_quote_amount", null));
+        order.setSide(getString(orderObject, "side"));
+        order.setType(getString(orderObject, "type"));
+        order.setTimeInForce(getString(orderObject, "time_in_force"));
+        order.setReduceOnly(readNullableBoolean(orderObject, "reduce_only"));
+        order.setTriggerPrice(readBigDecimal(orderObject, "trigger_price", null));
+        order.setOrderExpiry(readNullableLong(orderObject, "order_expiry"));
+        order.setStatus(getString(orderObject, "status"));
+        order.setTriggerStatus(getString(orderObject, "trigger_status"));
+        order.setTriggerTime(readNullableLong(orderObject, "trigger_time"));
+        order.setParentOrderIndex(readNullableLong(orderObject, "parent_order_index"));
+        order.setParentOrderId(getString(orderObject, "parent_order_id"));
+        order.setToTriggerOrderId0(getString(orderObject, "to_trigger_order_id_0"));
+        order.setToTriggerOrderId1(getString(orderObject, "to_trigger_order_id_1"));
+        order.setToCancelOrderId0(getString(orderObject, "to_cancel_order_id_0"));
+        order.setBlockHeight(readNullableLong(orderObject, "block_height"));
+        order.setTimestamp(readNullableLong(orderObject, "timestamp"));
+        order.setCreatedAt(readNullableLong(orderObject, "created_at"));
+        order.setUpdatedAt(readNullableLong(orderObject, "updated_at"));
+        order.setTransactionTime(readNullableLong(orderObject, "transaction_time"));
+        return order;
+    }
+
+    protected JsonObject findAccountObject(JsonArray accounts, long accountIndex) {
+        if (accounts == null || accounts.size() == 0) {
+            return null;
+        }
+        for (int i = 0; i < accounts.size(); i++) {
+            JsonObject accountObject = accounts.get(i).getAsJsonObject();
+            long responseIndex = readLong(accountObject, "account_index", Long.MIN_VALUE);
+            if (responseIndex == Long.MIN_VALUE) {
+                responseIndex = readLong(accountObject, "index", Long.MIN_VALUE);
+            }
+            if (responseIndex == accountIndex) {
+                return accountObject;
+            }
+        }
+        if (accounts.size() == 1) {
+            return accounts.get(0).getAsJsonObject();
+        }
+        return null;
+    }
+
+    protected Side resolvePositionSide(JsonObject positionObject, BigDecimal rawPosition) {
+        int sign = readInt(positionObject, "sign", 0);
+        if (sign < 0) {
+            return Side.SHORT;
+        }
+        if (sign > 0) {
+            return Side.LONG;
+        }
+        if (rawPosition.signum() < 0) {
+            return Side.SHORT;
+        }
+        return Side.LONG;
+    }
+
+    protected Ticker resolvePositionTicker(JsonObject positionObject, ITickerRegistry tickerRegistry) {
+        String instrumentId = getStringFromFields(positionObject, "market_id", "marketId", "instrument_id",
+                "instrumentId", "id");
+        String symbol = getString(positionObject, "symbol");
+
+        if (tickerRegistry != null) {
+            if (instrumentId != null && !instrumentId.isBlank()) {
+                Ticker ticker = tickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, instrumentId);
+                if (ticker != null) {
+                    return ticker;
+                }
+            }
+
+            if (symbol != null && !symbol.isBlank()) {
+                Ticker ticker = tickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, symbol);
+                if (ticker != null) {
+                    return ticker;
+                }
+            }
+        }
+
+        return buildFallbackPositionTicker(symbol, instrumentId);
+    }
+
+    protected ITickerRegistry getTickerRegistry() {
+        try {
+            return TickerRegistryFactory.getInstance(Exchange.LIGHTER);
+        } catch (Exception e) {
+            logger.debug("Unable to load Lighter ticker registry for position parsing: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    protected Ticker buildFallbackPositionTicker(String symbol, String instrumentId) {
+        String tickerSymbol = symbol;
+        if (tickerSymbol == null || tickerSymbol.isBlank()) {
+            tickerSymbol = instrumentId == null || instrumentId.isBlank() ? "UNKNOWN" : instrumentId;
+        }
+        Ticker ticker = new Ticker(tickerSymbol);
+        ticker.setSymbol(tickerSymbol);
+        ticker.setId(instrumentId);
+        ticker.setExchange(Exchange.LIGHTER);
+        ticker.setPrimaryExchange(Exchange.LIGHTER);
+        ticker.setInstrumentType(InstrumentType.PERPETUAL_FUTURES);
+        ticker.setCurrency("USDC");
+        return ticker;
     }
 
     protected LighterApiTokenResponse parseApiTokenResponse(String responseBody) {
@@ -714,6 +1033,65 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
             return obj.get(field).getAsBigDecimal();
         }
         return defaultValue;
+    }
+
+    protected BigDecimal readBigDecimal(JsonObject obj, String field, BigDecimal defaultValue) {
+        if (obj == null || !obj.has(field) || obj.get(field).isJsonNull()) {
+            return defaultValue;
+        }
+        try {
+            return obj.get(field).getAsBigDecimal();
+        } catch (Exception e) {
+            return defaultValue;
+        }
+    }
+
+    protected Long readNullableLong(JsonObject obj, String field) {
+        if (obj == null || !obj.has(field) || obj.get(field).isJsonNull()) {
+            return null;
+        }
+        try {
+            return obj.get(field).getAsLong();
+        } catch (Exception e) {
+            try {
+                return Long.valueOf(obj.get(field).getAsString());
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+    }
+
+    protected Integer readNullableInteger(JsonObject obj, String field) {
+        if (obj == null || !obj.has(field) || obj.get(field).isJsonNull()) {
+            return null;
+        }
+        try {
+            return obj.get(field).getAsInt();
+        } catch (Exception e) {
+            try {
+                return Integer.valueOf(obj.get(field).getAsString());
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+    }
+
+    protected Boolean readNullableBoolean(JsonObject obj, String field) {
+        if (obj == null || !obj.has(field) || obj.get(field).isJsonNull()) {
+            return null;
+        }
+        try {
+            return obj.get(field).getAsBoolean();
+        } catch (Exception e) {
+            String text = obj.get(field).getAsString();
+            if ("true".equalsIgnoreCase(text)) {
+                return Boolean.TRUE;
+            }
+            if ("false".equalsIgnoreCase(text)) {
+                return Boolean.FALSE;
+            }
+            return null;
+        }
     }
 
     protected String getString(JsonObject obj, String field) {

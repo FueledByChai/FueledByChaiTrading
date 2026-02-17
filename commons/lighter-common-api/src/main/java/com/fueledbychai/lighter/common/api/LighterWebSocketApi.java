@@ -19,24 +19,28 @@ import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.fueledbychai.lighter.common.api.ws.ILighterMarketStatsListener;
-import com.fueledbychai.lighter.common.api.ws.ILighterOrderBookListener;
-import com.fueledbychai.lighter.common.api.ws.ILighterAccountAllTradesListener;
-import com.fueledbychai.lighter.common.api.ws.LighterSendTxResponse;
-import com.fueledbychai.lighter.common.api.ws.LighterSendTxWebSocketProcessor;
-import com.fueledbychai.lighter.common.api.ws.ILighterTradeListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterMarketStatsListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterOrderBookListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountAllTradesListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountOrdersListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountStatsListener;
+import com.fueledbychai.lighter.common.api.ws.model.LighterSendTxResponse;
+import com.fueledbychai.lighter.common.api.ws.processor.LighterSendTxWebSocketProcessor;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterTradeListener;
 import com.fueledbychai.lighter.common.api.order.LighterCancelOrderRequest;
 import com.fueledbychai.lighter.common.api.order.LighterCreateOrderRequest;
 import com.fueledbychai.lighter.common.api.order.LighterModifyOrderRequest;
 import com.fueledbychai.lighter.common.api.signer.ILighterTransactionSigner;
 import com.fueledbychai.lighter.common.api.signer.LighterNativeTransactionSigner;
 import com.fueledbychai.lighter.common.api.signer.LighterSignedTransaction;
-import com.fueledbychai.lighter.common.api.ws.LighterAccountAllTradesWebSocketProcessor;
-import com.fueledbychai.lighter.common.api.ws.LighterMarketStatsWebSocketProcessor;
-import com.fueledbychai.lighter.common.api.ws.LighterOrderBookWebSocketProcessor;
-import com.fueledbychai.lighter.common.api.ws.LighterTradesWebSocketProcessor;
-import com.fueledbychai.lighter.common.api.ws.LighterWSClientBuilder;
-import com.fueledbychai.lighter.common.api.ws.LighterWebSocketClient;
+import com.fueledbychai.lighter.common.api.ws.processor.LighterAccountAllTradesWebSocketProcessor;
+import com.fueledbychai.lighter.common.api.ws.processor.LighterAccountOrdersWebSocketProcessor;
+import com.fueledbychai.lighter.common.api.ws.processor.LighterAccountStatsWebSocketProcessor;
+import com.fueledbychai.lighter.common.api.ws.processor.LighterMarketStatsWebSocketProcessor;
+import com.fueledbychai.lighter.common.api.ws.processor.LighterOrderBookWebSocketProcessor;
+import com.fueledbychai.lighter.common.api.ws.processor.LighterTradesWebSocketProcessor;
+import com.fueledbychai.lighter.common.api.ws.client.LighterWSClientBuilder;
+import com.fueledbychai.lighter.common.api.ws.client.LighterWebSocketClient;
 import com.fueledbychai.websocket.IWebSocketEventListener;
 import com.fueledbychai.websocket.IWebSocketProcessor;
 
@@ -52,7 +56,7 @@ public class LighterWebSocketApi
     private static final long DEFAULT_CONNECT_ATTEMPT_WINDOW_MILLIS = 60_000L;
 
     protected enum ChannelType {
-        MARKET_STATS, ORDER_BOOK, TRADE, ACCOUNT_ALL_TRADES
+        MARKET_STATS, ORDER_BOOK, TRADE, ACCOUNT_ALL_TRADES, ACCOUNT_ORDERS, ACCOUNT_STATS
     }
 
     private final String webSocketUrl;
@@ -61,8 +65,11 @@ public class LighterWebSocketApi
     private final Map<String, LighterOrderBookWebSocketProcessor> orderBookProcessors = new ConcurrentHashMap<>();
     private final Map<String, LighterTradesWebSocketProcessor> tradeProcessors = new ConcurrentHashMap<>();
     private final Map<String, LighterAccountAllTradesWebSocketProcessor> accountAllTradesProcessors = new ConcurrentHashMap<>();
+    private final Map<String, LighterAccountOrdersWebSocketProcessor> accountOrdersProcessors = new ConcurrentHashMap<>();
+    private final Map<String, LighterAccountStatsWebSocketProcessor> accountStatsProcessors = new ConcurrentHashMap<>();
     private final Map<String, String> channelSubscribeAuth = new ConcurrentHashMap<>();
     private final Map<String, Long> accountAllTradesChannelAccountIndex = new ConcurrentHashMap<>();
+    private final Map<String, Long> accountOrdersChannelAccountIndex = new ConcurrentHashMap<>();
     private final Map<String, ScheduledFuture<?>> reconnectTasks = new ConcurrentHashMap<>();
     private final Set<String> manualCloseChannels = ConcurrentHashMap.newKeySet();
     private final ConcurrentLinkedDeque<Long> recentConnectAttemptTimestamps = new ConcurrentLinkedDeque<>();
@@ -138,6 +145,31 @@ public class LighterWebSocketApi
         }
         String channel = LighterWSClientBuilder.getAccountAllTradesChannel(accountIndex);
         return subscribeAccountAllTrades(channel, accountIndex, authToken, listener);
+    }
+
+    @Override
+    public LighterWebSocketClient subscribeAccountOrders(int marketIndex, long accountIndex, String authToken,
+            ILighterAccountOrdersListener listener) {
+        if (marketIndex < 0) {
+            throw new IllegalArgumentException("marketIndex must be >= 0");
+        }
+        if (accountIndex < 0) {
+            throw new IllegalArgumentException("accountIndex must be >= 0");
+        }
+        if (authToken == null || authToken.isBlank()) {
+            throw new IllegalArgumentException("authToken is required");
+        }
+        String channel = LighterWSClientBuilder.getAccountOrdersChannel(marketIndex, accountIndex);
+        return subscribeAccountOrders(channel, accountIndex, authToken, listener);
+    }
+
+    @Override
+    public LighterWebSocketClient subscribeAccountStats(long accountIndex, ILighterAccountStatsListener listener) {
+        if (accountIndex < 0) {
+            throw new IllegalArgumentException("accountIndex must be >= 0");
+        }
+        String channel = LighterWSClientBuilder.getAccountStatsChannel(accountIndex);
+        return subscribeAccountStats(channel, accountIndex, listener);
     }
 
     @Override
@@ -328,6 +360,72 @@ public class LighterWebSocketApi
         return channelClients.get(channel);
     }
 
+    protected synchronized LighterWebSocketClient subscribeAccountOrders(String channel, long accountIndex,
+            String authToken,
+            ILighterAccountOrdersListener listener) {
+        if (channel == null || channel.isBlank()) {
+            throw new IllegalArgumentException("channel is required");
+        }
+        if (accountIndex < 0) {
+            throw new IllegalArgumentException("accountIndex must be >= 0");
+        }
+        if (authToken == null || authToken.isBlank()) {
+            throw new IllegalArgumentException("authToken is required");
+        }
+        if (listener == null) {
+            throw new IllegalArgumentException("listener is required");
+        }
+        manualCloseChannels.remove(channel);
+        accountOrdersChannelAccountIndex.put(channel, accountIndex);
+        String subscribeAuth = resolveSubscribeAuth(channel, authToken);
+        channelSubscribeAuth.put(channel, subscribeAuth);
+        cancelReconnectTask(channel);
+
+        LighterAccountOrdersWebSocketProcessor processor = accountOrdersProcessors.get(channel);
+        if (processor == null) {
+            processor = createAccountOrdersProcessor(channel);
+            LighterWebSocketClient client = createClient(channel, processor, subscribeAuth);
+            accountOrdersProcessors.put(channel, processor);
+            channelClients.put(channel, client);
+            logger.info("Connecting to Lighter websocket channel: {} using {}", channel, webSocketUrl);
+            acquireConnectAttemptSlot("account orders/" + channel);
+            client.connect();
+        }
+
+        processor.addEventListener(listener);
+        return channelClients.get(channel);
+    }
+
+    protected synchronized LighterWebSocketClient subscribeAccountStats(String channel, long accountIndex,
+            ILighterAccountStatsListener listener) {
+        if (channel == null || channel.isBlank()) {
+            throw new IllegalArgumentException("channel is required");
+        }
+        if (accountIndex < 0) {
+            throw new IllegalArgumentException("accountIndex must be >= 0");
+        }
+        if (listener == null) {
+            throw new IllegalArgumentException("listener is required");
+        }
+        manualCloseChannels.remove(channel);
+        channelSubscribeAuth.remove(channel);
+        cancelReconnectTask(channel);
+
+        LighterAccountStatsWebSocketProcessor processor = accountStatsProcessors.get(channel);
+        if (processor == null) {
+            processor = createAccountStatsProcessor(channel);
+            LighterWebSocketClient client = createClient(channel, processor);
+            accountStatsProcessors.put(channel, processor);
+            channelClients.put(channel, client);
+            logger.info("Connecting to Lighter websocket channel: {} using {}", channel, webSocketUrl);
+            acquireConnectAttemptSlot("account stats/" + channel);
+            client.connect();
+        }
+
+        processor.addEventListener(listener);
+        return channelClients.get(channel);
+    }
+
     @Override
     public synchronized void disconnectAll() {
         manualCloseChannels.addAll(channelClients.keySet());
@@ -388,13 +486,30 @@ public class LighterWebSocketApi
                 logger.warn("Error shutting down websocket processor", e);
             }
         }
+        for (LighterAccountOrdersWebSocketProcessor processor : accountOrdersProcessors.values()) {
+            try {
+                processor.shutdown();
+            } catch (Exception e) {
+                logger.warn("Error shutting down websocket processor", e);
+            }
+        }
+        for (LighterAccountStatsWebSocketProcessor processor : accountStatsProcessors.values()) {
+            try {
+                processor.shutdown();
+            } catch (Exception e) {
+                logger.warn("Error shutting down websocket processor", e);
+            }
+        }
         channelClients.clear();
         marketStatsProcessors.clear();
         orderBookProcessors.clear();
         tradeProcessors.clear();
         accountAllTradesProcessors.clear();
+        accountOrdersProcessors.clear();
+        accountStatsProcessors.clear();
         channelSubscribeAuth.clear();
         accountAllTradesChannelAccountIndex.clear();
+        accountOrdersChannelAccountIndex.clear();
         wsAuthSigner = null;
         manualCloseChannels.clear();
         recentConnectAttemptTimestamps.clear();
@@ -421,6 +536,18 @@ public class LighterWebSocketApi
     protected LighterAccountAllTradesWebSocketProcessor createAccountAllTradesProcessor(String channel) {
         return new LighterAccountAllTradesWebSocketProcessor(() -> {
             handleChannelClosed(channel, ChannelType.ACCOUNT_ALL_TRADES);
+        });
+    }
+
+    protected LighterAccountOrdersWebSocketProcessor createAccountOrdersProcessor(String channel) {
+        return new LighterAccountOrdersWebSocketProcessor(() -> {
+            handleChannelClosed(channel, ChannelType.ACCOUNT_ORDERS);
+        });
+    }
+
+    protected LighterAccountStatsWebSocketProcessor createAccountStatsProcessor(String channel) {
+        return new LighterAccountStatsWebSocketProcessor(() -> {
+            handleChannelClosed(channel, ChannelType.ACCOUNT_STATS);
         });
     }
 
@@ -497,18 +624,29 @@ public class LighterWebSocketApi
     }
 
     protected String resolveSubscribeAuth(String channel, String fallbackAuthToken) {
-        if (!isAccountAllTradesChannel(channel)) {
+        if (isAccountAllTradesChannel(channel)) {
+            Long accountIndex = accountAllTradesChannelAccountIndex.get(channel);
+            if (accountIndex == null) {
+                return fallbackAuthToken;
+            }
+            String refreshedAuth = createFreshAccountAllTradesAuthToken(accountIndex.longValue());
+            if (refreshedAuth != null && !refreshedAuth.isBlank()) {
+                return refreshedAuth;
+            }
             return fallbackAuthToken;
         }
 
-        Long accountIndex = accountAllTradesChannelAccountIndex.get(channel);
-        if (accountIndex == null) {
-            return fallbackAuthToken;
+        if (isAccountOrdersChannel(channel)) {
+            Long accountIndex = accountOrdersChannelAccountIndex.get(channel);
+            if (accountIndex == null) {
+                return fallbackAuthToken;
+            }
+            String refreshedAuth = createFreshAccountOrdersAuthToken(accountIndex.longValue());
+            if (refreshedAuth != null && !refreshedAuth.isBlank()) {
+                return refreshedAuth;
+            }
         }
-        String refreshedAuth = createFreshAccountAllTradesAuthToken(accountIndex.longValue());
-        if (refreshedAuth != null && !refreshedAuth.isBlank()) {
-            return refreshedAuth;
-        }
+
         return fallbackAuthToken;
     }
 
@@ -517,6 +655,14 @@ public class LighterWebSocketApi
             return false;
         }
         String prefix = LighterWSClientBuilder.WS_TYPE_ACCOUNT_ALL_TRADES;
+        return channel.startsWith(prefix + "/") || channel.startsWith(prefix + ":");
+    }
+
+    protected boolean isAccountOrdersChannel(String channel) {
+        if (channel == null || channel.isBlank()) {
+            return false;
+        }
+        String prefix = LighterWSClientBuilder.WS_TYPE_ACCOUNT_ORDERS;
         return channel.startsWith(prefix + "/") || channel.startsWith(prefix + ":");
     }
 
@@ -532,6 +678,22 @@ public class LighterWebSocketApi
             return signer.createAuthTokenWithExpiry(timestamp, expiry, getWsAuthApiKeyIndex(), accountIndex);
         } catch (Exception e) {
             logger.warn("Unable to create fresh account_all_trades auth token for account {}", accountIndex, e);
+            return null;
+        }
+    }
+
+    protected String createFreshAccountOrdersAuthToken(long accountIndex) {
+        LighterNativeTransactionSigner signer = getOrCreateWsAuthSigner();
+        if (signer == null) {
+            return null;
+        }
+
+        long timestamp = System.currentTimeMillis() / 1000L;
+        long expiry = timestamp + getWsAuthTokenTtlSeconds();
+        try {
+            return signer.createAuthTokenWithExpiry(timestamp, expiry, getWsAuthApiKeyIndex(), accountIndex);
+        } catch (Exception e) {
+            logger.warn("Unable to create fresh account_orders auth token for account {}", accountIndex, e);
             return null;
         }
     }
@@ -621,6 +783,8 @@ public class LighterWebSocketApi
             case ORDER_BOOK -> orderBookProcessors.get(channel);
             case TRADE -> tradeProcessors.get(channel);
             case ACCOUNT_ALL_TRADES -> accountAllTradesProcessors.get(channel);
+            case ACCOUNT_ORDERS -> accountOrdersProcessors.get(channel);
+            case ACCOUNT_STATS -> accountStatsProcessors.get(channel);
         };
     }
 

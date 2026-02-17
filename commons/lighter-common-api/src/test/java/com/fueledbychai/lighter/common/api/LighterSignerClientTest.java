@@ -20,7 +20,7 @@ import com.fueledbychai.lighter.common.api.order.LighterOrderType;
 import com.fueledbychai.lighter.common.api.order.LighterTimeInForce;
 import com.fueledbychai.lighter.common.api.signer.ILighterTransactionSigner;
 import com.fueledbychai.lighter.common.api.signer.LighterSignedTransaction;
-import com.fueledbychai.lighter.common.api.ws.LighterSendTxResponse;
+import com.fueledbychai.lighter.common.api.ws.model.LighterSendTxResponse;
 
 public class LighterSignerClientTest {
 
