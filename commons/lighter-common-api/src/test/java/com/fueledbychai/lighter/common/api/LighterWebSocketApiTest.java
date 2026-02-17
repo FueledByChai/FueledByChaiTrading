@@ -9,12 +9,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 import org.json.JSONObject;
 
 import com.fueledbychai.lighter.common.api.ws.ILighterMarketStatsListener;
 import com.fueledbychai.lighter.common.api.ws.ILighterOrderBookListener;
+import com.fueledbychai.lighter.common.api.ws.ILighterAccountAllTradesListener;
 import com.fueledbychai.lighter.common.api.ws.ILighterTradeListener;
 import com.fueledbychai.lighter.common.api.order.LighterCancelOrderRequest;
 import com.fueledbychai.lighter.common.api.order.LighterCreateOrderRequest;
@@ -93,6 +95,63 @@ public class LighterWebSocketApiTest {
     }
 
     @Test
+    void subscribeAccountAllTradesReusesConnectionForSameAccount() {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
+        ILighterAccountAllTradesListener listener = update -> {
+        };
+
+        LighterWebSocketClient client1 = api.subscribeAccountAllTrades(255L, "auth-token-1", listener);
+        LighterWebSocketClient client2 = api.subscribeAccountAllTrades(255L, "auth-token-2", listener);
+
+        assertNotNull(client1);
+        assertNotNull(client2);
+        assertEquals(client1, client2);
+        assertEquals(1, api.createdClients.size());
+        assertEquals(1, api.connectCountByChannel.get("account_all_trades/255").intValue());
+    }
+
+    @Test
+    void accountAllTradesReconnectRefreshesAuthTokenWhenGeneratorAvailable() throws Exception {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream") {
+            private final AtomicInteger tokenCounter = new AtomicInteger(1);
+
+            @Override
+            protected String createFreshAccountAllTradesAuthToken(long accountIndex) {
+                return "generated-auth-" + tokenCounter.getAndIncrement();
+            }
+        };
+        ILighterAccountAllTradesListener listener = update -> {
+        };
+
+        api.subscribeAccountAllTrades(255L, "initial-auth", listener);
+        List<String> authHistory = api.subscribeAuthHistoryByChannel.get("account_all_trades/255");
+        assertNotNull(authHistory);
+        assertEquals("generated-auth-1", authHistory.get(0));
+
+        TestClient firstClient = api.createdClients.get("account_all_trades/255");
+        assertNotNull(firstClient);
+        firstClient.simulateRemoteClose();
+
+        long deadlineMillis = System.currentTimeMillis() + 1_000L;
+        int connectCount = 0;
+        while (System.currentTimeMillis() < deadlineMillis) {
+            Integer count = api.connectCountByChannel.get("account_all_trades/255");
+            connectCount = count == null ? 0 : count;
+            if (connectCount >= 2) {
+                break;
+            }
+            Thread.sleep(20L);
+        }
+
+        assertTrue(connectCount >= 2, "Expected reconnect to be attempted");
+        authHistory = api.subscribeAuthHistoryByChannel.get("account_all_trades/255");
+        assertNotNull(authHistory);
+        assertTrue(authHistory.size() >= 2, "Expected refreshed auth token to be used on reconnect");
+        assertEquals("generated-auth-2", authHistory.get(1));
+        api.disconnectAll();
+    }
+
+    @Test
     void disconnectAllClosesAllConnections() {
         TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
         ILighterMarketStatsListener listener = update -> {
@@ -101,17 +160,21 @@ public class LighterWebSocketApiTest {
         };
         ILighterTradeListener tradeListener = update -> {
         };
+        ILighterAccountAllTradesListener accountTradesListener = update -> {
+        };
 
         api.subscribeMarketStats(53, listener);
         api.subscribeAllMarketStats(listener);
         api.subscribeOrderBook(53, orderBookListener);
         api.subscribeTrades(53, tradeListener);
+        api.subscribeAccountAllTrades(255L, "auth-token", accountTradesListener);
         api.disconnectAll();
 
         assertEquals(1, api.closeCountByChannel.get("market_stats/53").intValue());
         assertEquals(1, api.closeCountByChannel.get("market_stats/all").intValue());
         assertEquals(1, api.closeCountByChannel.get("order_book/53").intValue());
         assertEquals(1, api.closeCountByChannel.get("trade/53").intValue());
+        assertEquals(1, api.closeCountByChannel.get("account_all_trades/255").intValue());
     }
 
     @Test
@@ -136,6 +199,22 @@ public class LighterWebSocketApiTest {
         ILighterTradeListener listener = update -> {
         };
         assertThrows(IllegalArgumentException.class, () -> api.subscribeTrades(-1, listener));
+    }
+
+    @Test
+    void rejectNegativeAccountIndexForAccountAllTrades() {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
+        ILighterAccountAllTradesListener listener = update -> {
+        };
+        assertThrows(IllegalArgumentException.class, () -> api.subscribeAccountAllTrades(-1, "auth", listener));
+    }
+
+    @Test
+    void rejectBlankAuthForAccountAllTrades() {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
+        ILighterAccountAllTradesListener listener = update -> {
+        };
+        assertThrows(IllegalArgumentException.class, () -> api.subscribeAccountAllTrades(255, "  ", listener));
     }
 
     @Test
@@ -218,6 +297,18 @@ public class LighterWebSocketApiTest {
         TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
         assertThrows(IllegalArgumentException.class, () -> api.sendSignedTransaction(0, new JSONObject()));
         assertThrows(IllegalArgumentException.class, () -> api.sendSignedTransaction(10, null));
+    }
+
+    @Test
+    void acquireConnectAttemptSlotThrottlesWhenWindowExceeded() {
+        RateLimitedLighterWebSocketApi api = new RateLimitedLighterWebSocketApi("wss://example.test/stream", 1, 80L);
+
+        long start = System.currentTimeMillis();
+        api.acquireConnectAttemptSlotForTest("first");
+        api.acquireConnectAttemptSlotForTest("second");
+        long elapsedMillis = System.currentTimeMillis() - start;
+
+        assertTrue(elapsedMillis >= 60L, "Expected second connect attempt to be throttled by rate limit window");
     }
 
     @Test
@@ -397,6 +488,7 @@ public class LighterWebSocketApiTest {
         private final Map<String, Integer> connectCountByChannel = new ConcurrentHashMap<>();
         private final Map<String, Integer> closeCountByChannel = new ConcurrentHashMap<>();
         private final List<String> postedTxMessages = new CopyOnWriteArrayList<>();
+        private final Map<String, List<String>> subscribeAuthHistoryByChannel = new ConcurrentHashMap<>();
         private final ILighterTransactionSigner providedSigner;
 
         TestableLighterWebSocketApi(String url) {
@@ -423,6 +515,12 @@ public class LighterWebSocketApiTest {
             } catch (Exception e) {
                 throw new IllegalStateException(e);
             }
+        }
+
+        @Override
+        protected LighterWebSocketClient createClient(String channel, IWebSocketProcessor processor, String subscribeAuth) {
+            subscribeAuthHistoryByChannel.computeIfAbsent(channel, key -> new CopyOnWriteArrayList<>()).add(subscribeAuth);
+            return createClient(channel, processor);
         }
 
         @Override
@@ -514,6 +612,31 @@ public class LighterWebSocketApiTest {
             JSONObject request = new JSONObject(message);
             String id = request.opt("id").toString();
             processor.messageReceived("{\"code\":200,\"msg\":\"ok\",\"id\":\"" + id + "\"}");
+        }
+    }
+
+    private static class RateLimitedLighterWebSocketApi extends LighterWebSocketApi {
+        private final int maxConnectAttempts;
+        private final long connectWindowMillis;
+
+        RateLimitedLighterWebSocketApi(String webSocketUrl, int maxConnectAttempts, long connectWindowMillis) {
+            super(webSocketUrl);
+            this.maxConnectAttempts = maxConnectAttempts;
+            this.connectWindowMillis = connectWindowMillis;
+        }
+
+        @Override
+        protected int getMaxConnectAttemptsPerWindow() {
+            return maxConnectAttempts;
+        }
+
+        @Override
+        protected long getConnectAttemptWindowMillis() {
+            return connectWindowMillis;
+        }
+
+        void acquireConnectAttemptSlotForTest(String connectionType) {
+            acquireConnectAttemptSlot(connectionType);
         }
     }
 }

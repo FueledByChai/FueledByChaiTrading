@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import com.fueledbychai.lighter.common.api.auth.LighterAccountTier;
 import com.fueledbychai.lighter.common.api.auth.LighterChangeAccountTierRequest;
 import com.fueledbychai.lighter.common.api.auth.LighterChangeAccountTierResponse;
 
@@ -28,11 +29,11 @@ class LighterRestApiAccountTierTest {
     void changeAccountTierRequestValidationRequiresFields() {
         LighterChangeAccountTierRequest request = new LighterChangeAccountTierRequest();
         request.setAccountIndex(-1L);
-        request.setNewTier("premium");
+        request.setNewTier(LighterAccountTier.PREMIUM);
         assertThrows(IllegalArgumentException.class, request::validate);
 
         request.setAccountIndex(1L);
-        request.setNewTier("  ");
+        request.setNewTier(null);
         assertThrows(IllegalArgumentException.class, request::validate);
     }
 

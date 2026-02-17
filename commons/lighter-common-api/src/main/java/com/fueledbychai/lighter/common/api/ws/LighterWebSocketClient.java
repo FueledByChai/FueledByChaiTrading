@@ -7,8 +7,16 @@ import com.fueledbychai.websocket.IWebSocketProcessor;
 
 public class LighterWebSocketClient extends BaseCryptoWebSocketClient {
 
+    private final String subscribeAuth;
+
     public LighterWebSocketClient(String serverUri, String channel, IWebSocketProcessor processor) throws Exception {
+        this(serverUri, channel, null, processor);
+    }
+
+    public LighterWebSocketClient(String serverUri, String channel, String subscribeAuth, IWebSocketProcessor processor)
+            throws Exception {
         super(serverUri, channel, processor);
+        this.subscribeAuth = subscribeAuth;
     }
 
     @Override
@@ -24,6 +32,9 @@ public class LighterWebSocketClient extends BaseCryptoWebSocketClient {
         JSONObject subscribeJson = new JSONObject();
         subscribeJson.put("type", "subscribe");
         subscribeJson.put("channel", channel);
+        if (subscribeAuth != null && !subscribeAuth.isBlank()) {
+            subscribeJson.put("auth", subscribeAuth);
+        }
         return subscribeJson.toString();
     }
 

@@ -3,7 +3,7 @@ package com.fueledbychai.lighter.common.api.auth;
 public class LighterChangeAccountTierRequest {
 
     private long accountIndex;
-    private String newTier;
+    private LighterAccountTier newTier;
     private String auth;
 
     public long getAccountIndex() {
@@ -14,11 +14,11 @@ public class LighterChangeAccountTierRequest {
         this.accountIndex = accountIndex;
     }
 
-    public String getNewTier() {
+    public LighterAccountTier getNewTier() {
         return newTier;
     }
 
-    public void setNewTier(String newTier) {
+    public void setNewTier(LighterAccountTier newTier) {
         this.newTier = newTier;
     }
 
@@ -34,7 +34,7 @@ public class LighterChangeAccountTierRequest {
         if (accountIndex < 0) {
             throw new IllegalArgumentException("accountIndex must be >= 0");
         }
-        if (newTier == null || newTier.isBlank()) {
+        if (newTier == null) {
             throw new IllegalArgumentException("newTier is required");
         }
     }
