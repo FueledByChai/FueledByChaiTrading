@@ -8,8 +8,8 @@ import com.fueledbychai.lighter.common.api.LighterConfiguration;
 import com.fueledbychai.lighter.common.api.LighterSignerClient;
 import com.fueledbychai.lighter.common.api.LighterWebSocketApi;
 import com.fueledbychai.lighter.common.api.signer.LighterNativeTransactionSigner;
-import com.fueledbychai.lighter.common.api.ws.LighterTrade;
-import com.fueledbychai.lighter.common.api.ws.LighterTradesUpdate;
+import com.fueledbychai.lighter.common.api.ws.model.LighterTrade;
+import com.fueledbychai.lighter.common.api.ws.model.LighterTradesUpdate;
 
 public class LighterAccountAllTradesWebSocketExample {
 
