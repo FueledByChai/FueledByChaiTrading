@@ -1,11 +1,19 @@
 package com.fueledbychai.paradex.common;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+import java.math.BigDecimal;
+import java.lang.reflect.Proxy;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.fueledbychai.data.Exchange;
+import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
+import com.fueledbychai.paradex.common.api.IParadexRestApi;
 
 /**
  * Unit tests for ParadexTickerRegistry.
@@ -87,6 +95,44 @@ public class ParadexTickerRegistryTest {
         assertEquals("BTCUSD-PERP", result2, "BTCUSD should convert to BTCUSD-PERP (no slash)");
     }
 
+    @Test
+    public void testCommonSymbolToExchangeSymbol_SpotPairs() {
+        String result1 = tickerRegistry.commonSymbolToExchangeSymbol(InstrumentType.CRYPTO_SPOT, "ETH/USD");
+        assertEquals("ETH-USD", result1, "ETH/USD should convert to ETH-USD for spot");
+
+        String result2 = tickerRegistry.commonSymbolToExchangeSymbol(InstrumentType.CRYPTO_SPOT, "ETH/USDT");
+        assertEquals("ETH-USD", result2, "ETH/USDT should normalize and convert to ETH-USD for spot");
+    }
+
+    @Test
+    public void testInitializeRegistersPerpAndSpotDescriptors() {
+        InstrumentDescriptor perpDescriptor = new InstrumentDescriptor(InstrumentType.PERPETUAL_FUTURES,
+                Exchange.PARADEX, "BTC", "BTC-USD-PERP", "BTC", "USD", new BigDecimal("0.001"), new BigDecimal("0.1"),
+                10, BigDecimal.ONE, 8, BigDecimal.ONE, 50, "");
+        InstrumentDescriptor spotDescriptor = new InstrumentDescriptor(InstrumentType.CRYPTO_SPOT, Exchange.PARADEX,
+                "ETH", "ETH-USD", "ETH", "USD", new BigDecimal("0.0001"), new BigDecimal("0.01"), 10, BigDecimal.ONE,
+                0, BigDecimal.ONE, 1, "");
+        AtomicInteger callCount = new AtomicInteger();
+        IParadexRestApi api = (IParadexRestApi) Proxy.newProxyInstance(
+                IParadexRestApi.class.getClassLoader(),
+                new Class[] { IParadexRestApi.class },
+                (proxy, method, args) -> {
+                    if ("getAllInstrumentsForTypes".equals(method.getName())) {
+                        callCount.incrementAndGet();
+                        return new InstrumentDescriptor[] { perpDescriptor, spotDescriptor };
+                    }
+                    throw new UnsupportedOperationException("Unexpected call in test: " + method.getName());
+                });
+
+        TestableParadexTickerRegistry registry = new TestableParadexTickerRegistry();
+        registry.initializeWithApi(api);
+
+        assertNotNull(registry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC-USD-PERP"));
+        assertNotNull(registry.lookupByBrokerSymbol(InstrumentType.CRYPTO_SPOT, "ETH-USD"));
+        assertNotNull(registry.lookupByCommonSymbol(InstrumentType.CRYPTO_SPOT, "ETH/USDT"));
+        assertEquals(1, callCount.get(), "Expected getAllInstrumentsForTypes() to be called once");
+    }
+
     /**
      * Testable subclass that doesn't initialize from the REST API. This allows us
      * to test the commonSymbolToExchangeSymbol method in isolation without needing
@@ -96,6 +142,11 @@ public class ParadexTickerRegistryTest {
 
         public TestableParadexTickerRegistry() {
             super();
+        }
+
+        void initializeWithApi(IParadexRestApi api) {
+            this.restApi = api;
+            super.initialize();
         }
 
         @Override

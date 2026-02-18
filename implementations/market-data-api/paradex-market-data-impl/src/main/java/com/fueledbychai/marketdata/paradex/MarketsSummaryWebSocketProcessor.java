@@ -91,7 +91,7 @@ public class MarketsSummaryWebSocketProcessor implements IWebSocketProcessor {
                 String ask = data.getString("ask");
                 String bid = data.getString("bid");
                 long createdAt = data.getLong("created_at");
-                String fundingRate = data.getString("funding_rate");
+                String fundingRate = data.optString("funding_rate", "");
                 String lastPrice = data.getString("last_traded_price");
                 String markPrice = data.getString("mark_price");
                 String symbol = data.getString("symbol");

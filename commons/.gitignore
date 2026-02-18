@@ -15,3 +15,5 @@ nb-configuration.xml
 *.jar
 *.war
 *.ear
+
+lighter-common-api/local-resources/

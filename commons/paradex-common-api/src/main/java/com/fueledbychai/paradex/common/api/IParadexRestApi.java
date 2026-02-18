@@ -53,6 +53,8 @@ public interface IParadexRestApi {
 
     InstrumentDescriptor getInstrumentDescriptor(String symbol);
 
+    InstrumentDescriptor[] getAllInstrumentsForTypes(InstrumentType[] instrumentTypes);
+
     InstrumentDescriptor[] getAllInstrumentsForType(InstrumentType instrumentType);
 
     boolean onboardAccount(String ethereumAddress, String starketAddress, boolean isTestnet) throws Exception;

@@ -102,8 +102,8 @@ public class ParadexInstrumentLookup implements IInstrumentLookup {
 
     @Override
     public InstrumentDescriptor[] getAllInstrumentsForType(InstrumentType instrumentType) {
-        if (instrumentType != InstrumentType.PERPETUAL_FUTURES) {
-            throw new IllegalArgumentException("Only perpetual futures are supported at this time.");
+        if (instrumentType != InstrumentType.PERPETUAL_FUTURES && instrumentType != InstrumentType.CRYPTO_SPOT) {
+            throw new IllegalArgumentException("Only perpetual futures and spot are supported at this time.");
         }
 
         try {
