@@ -9,6 +9,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -438,31 +439,62 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
 
     @Override
     public InstrumentDescriptor[] getAllInstrumentsForType(InstrumentType instrumentType) {
+        return getAllInstrumentsForTypes(new InstrumentType[] { instrumentType });
+    }
+
+    @Override
+    public InstrumentDescriptor[] getAllInstrumentsForTypes(InstrumentType[] instrumentTypes) {
+        if (instrumentTypes == null || instrumentTypes.length == 0) {
+            return new InstrumentDescriptor[0];
+        }
+
         return executeWithRetry(() -> {
-            String path = "/markets";
-            String url = baseUrl + path;
-            HttpUrl.Builder urlBuilder = HttpUrl.parse(url).newBuilder();
-            String newUrl = urlBuilder.build().toString();
+            String responseBody = getMarketsResponseBody();
+            Map<String, InstrumentDescriptor> descriptorsByTypeAndSymbol = new LinkedHashMap<>();
 
-            Request request = new Request.Builder().url(newUrl).get().build();
-            logger.info("Request: " + request);
-
-            try (Response response = client.newCall(request).execute()) {
-                if (!response.isSuccessful()) {
-                    logger.error("Error response: " + response.body().string());
-                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
-                            response.code());
+            for (InstrumentType instrumentType : instrumentTypes) {
+                if (instrumentType == null) {
+                    continue;
                 }
 
-                String responseBody = response.body().string();
-                logger.info("Response output: " + responseBody);
-                return parseInstrumentDescriptors(instrumentType, responseBody);
-
-            } catch (IOException e) {
-                logger.error(e.getMessage(), e);
-                throw new ResponseException("Network error getting all instruments for type: " + e.getMessage(), e);
+                InstrumentDescriptor[] descriptors = parseInstrumentDescriptors(instrumentType, responseBody);
+                for (InstrumentDescriptor descriptor : descriptors) {
+                    if (descriptor == null) {
+                        continue;
+                    }
+                    String key = descriptor.getInstrumentType() + ":" + descriptor.getExchangeSymbol();
+                    descriptorsByTypeAndSymbol.putIfAbsent(key, descriptor);
+                }
             }
+
+            return descriptorsByTypeAndSymbol.values().toArray(new InstrumentDescriptor[0]);
         }, 3, 500);
+    }
+
+    protected String getMarketsResponseBody() {
+        String path = "/markets";
+        String url = baseUrl + path;
+        HttpUrl.Builder urlBuilder = HttpUrl.parse(url).newBuilder();
+        String newUrl = urlBuilder.build().toString();
+
+        Request request = new Request.Builder().url(newUrl).get().build();
+        logger.info("Request: " + request);
+
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                logger.error("Error response: " + response.body().string());
+                throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                        response.code());
+            }
+
+            String responseBody = response.body().string();
+            logger.info("Response output: " + responseBody);
+            return responseBody;
+
+        } catch (IOException e) {
+            logger.error(e.getMessage(), e);
+            throw new ResponseException("Network error getting markets: " + e.getMessage(), e);
+        }
     }
 
     protected void cancelAllOrders(String jwtToken, String market) {

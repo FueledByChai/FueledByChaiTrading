@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
@@ -118,5 +119,31 @@ class ResilientParadexInstrumentLookupTest {
         assertNotNull(result);
         assertEquals(expectedInstruments, result);
         verify(mockApi, times(2)).getAllInstrumentsForType(InstrumentType.PERPETUAL_FUTURES);
+    }
+
+    @Test
+    void testGetAllSpotInstrumentsWithRetry() {
+        InstrumentDescriptor[] expectedInstruments = new InstrumentDescriptor[1];
+        expectedInstruments[0] = mock(InstrumentDescriptor.class);
+
+        when(mockApi.getAllInstrumentsForType(InstrumentType.CRYPTO_SPOT))
+                .thenThrow(new ResponseException("Connection timeout", new IOException()))
+                .thenReturn(expectedInstruments);
+
+        ParadexInstrumentLookup lookup = new ParadexInstrumentLookup(mockApi);
+
+        InstrumentDescriptor[] result = lookup.getAllInstrumentsForType(InstrumentType.CRYPTO_SPOT);
+
+        assertNotNull(result);
+        assertEquals(expectedInstruments, result);
+        verify(mockApi, times(2)).getAllInstrumentsForType(InstrumentType.CRYPTO_SPOT);
+    }
+
+    @Test
+    void testGetAllInstrumentsRejectsUnsupportedType() {
+        ParadexInstrumentLookup lookup = new ParadexInstrumentLookup(mockApi);
+
+        assertThrows(IllegalArgumentException.class, () -> lookup.getAllInstrumentsForType(InstrumentType.STOCK));
+        verifyNoInteractions(mockApi);
     }
 }
