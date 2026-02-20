@@ -27,6 +27,14 @@ public interface ILighterRestApi {
 
     public String getApiToken();
 
+    public default String getApiToken(long accountIndex) {
+        return getApiToken();
+    }
+
+    public default long resolveAccountIndex(String accountAddress) {
+        throw new UnsupportedOperationException("resolveAccountIndex is not implemented");
+    }
+
     public long getNextNonce(long accountIndex, int apiKeyIndex);
 
     public List<LighterPosition> getPositions(long accountIndex);

@@ -159,8 +159,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     protected void startAccountUpdateTask() {
         logger.warn("PaperBroker @PostConstruct startAccountUpdateTask called: {}", System.identityHashCode(this));
         // Read starting balance from file
-        String balanceFilePath = ticker.getSymbol() + "-" + ticker.getExchange().getExchangeName()
-                + "-paperbroker-startingbalance.txt";
+        String balanceFilePath = generateBalanceFilename(ticker.getSymbol(), ticker.getExchange().getExchangeName());
         File balanceFile = new File(balanceFilePath);
         if (balanceFile.exists()) {
             try {
@@ -917,7 +916,20 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         String timestamp = now.format(formatter);
 
         // Construct the filename
-        return String.format("%s-%s-%s-Trades.csv", timestamp, symbol, exchange);
+        return String.format("%s-%s-%s-Trades.csv", timestamp, sanitizeFilenameComponent(symbol),
+                sanitizeFilenameComponent(exchange));
+    }
+
+    protected String generateBalanceFilename(String symbol, String exchange) {
+        return String.format("%s-%s-paperbroker-startingbalance.txt", sanitizeFilenameComponent(symbol),
+                sanitizeFilenameComponent(exchange));
+    }
+
+    protected String sanitizeFilenameComponent(String value) {
+        if (value == null || value.isBlank()) {
+            return "UNKNOWN";
+        }
+        return value.trim().replaceAll("[^A-Za-z0-9._-]", "_");
     }
 
     protected void delayRestCall() {

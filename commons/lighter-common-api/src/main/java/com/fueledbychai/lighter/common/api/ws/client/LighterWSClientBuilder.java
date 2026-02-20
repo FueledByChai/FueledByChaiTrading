@@ -95,6 +95,13 @@ public class LighterWSClientBuilder {
         return WS_TYPE_ACCOUNT_ORDERS + "/" + marketIndex + "/" + accountIndex;
     }
 
+    public static String getAccountOrdersAllChannel(long accountIndex) {
+        if (accountIndex < 0) {
+            throw new IllegalArgumentException("accountIndex must be >= 0");
+        }
+        return WS_TYPE_ACCOUNT_ORDERS + "/all/" + accountIndex;
+    }
+
     public static String getAccountStatsChannel(long accountIndex) {
         if (accountIndex < 0) {
             throw new IllegalArgumentException("accountIndex must be >= 0");

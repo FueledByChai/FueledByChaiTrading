@@ -83,6 +83,59 @@ class LighterTranslatorTest {
     }
 
     @Test
+    void translateCreateOrder_AcceptsZeroMarketIndexFromTicker() {
+        Ticker ticker = new Ticker("ETH");
+        ticker.setId("0");
+        ticker.setMinimumTickSize(new BigDecimal("0.1"));
+        ticker.setOrderSizeIncrement(new BigDecimal("0.001"));
+
+        OrderTicket order = new OrderTicket();
+        order.setTicker(ticker);
+        order.setClientOrderId("12346");
+        order.setType(OrderTicket.Type.LIMIT);
+        order.setDirection(TradeDirection.BUY);
+        order.setSize(new BigDecimal("0.005"));
+        order.setLimitPrice(new BigDecimal("2500.1"));
+        order.setDuration(OrderTicket.Duration.GOOD_UNTIL_CANCELED);
+
+        LighterCreateOrderRequest request = translator.translateCreateOrder(order, 255L, 3, 1002L);
+
+        assertEquals(0, request.getMarketIndex());
+        assertEquals(5L, request.getBaseAmount());
+        assertEquals(25001, request.getPrice());
+    }
+
+    @Test
+    void translateCreateOrder_ResolvesZeroMarketIndexFromRegistry() {
+        Ticker inputTicker = new Ticker("ETH");
+        inputTicker.setMinimumTickSize(new BigDecimal("0.01"));
+        inputTicker.setOrderSizeIncrement(new BigDecimal("0.001"));
+
+        Ticker canonicalTicker = new Ticker("ETH");
+        canonicalTicker.setId("0");
+        canonicalTicker.setMinimumTickSize(new BigDecimal("0.1"));
+        canonicalTicker.setOrderSizeIncrement(new BigDecimal("0.001"));
+
+        when(mockTickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, "ETH")).thenReturn(canonicalTicker);
+
+        OrderTicket order = new OrderTicket();
+        order.setTicker(inputTicker);
+        order.setClientOrderId("12347");
+        order.setType(OrderTicket.Type.LIMIT);
+        order.setDirection(TradeDirection.BUY);
+        order.setSize(new BigDecimal("0.006"));
+        order.setLimitPrice(new BigDecimal("2500.2"));
+        order.setDuration(OrderTicket.Duration.GOOD_UNTIL_CANCELED);
+
+        LighterCreateOrderRequest request = translator.translateCreateOrder(order, 255L, 3, 1003L);
+
+        assertEquals(0, request.getMarketIndex());
+        assertEquals("0", inputTicker.getId());
+        assertEquals(6L, request.getBaseAmount());
+        assertEquals(25002, request.getPrice());
+    }
+
+    @Test
     void translateCreateOrder_MarketOrderWithoutPriceUsesAggressiveFallbackPrice() {
         Ticker buyTicker = new Ticker("BTC");
         buyTicker.setId("7");

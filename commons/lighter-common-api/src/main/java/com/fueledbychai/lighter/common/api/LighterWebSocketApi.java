@@ -159,7 +159,7 @@ public class LighterWebSocketApi
         if (authToken == null || authToken.isBlank()) {
             throw new IllegalArgumentException("authToken is required");
         }
-        String channel = LighterWSClientBuilder.getAccountOrdersChannel(marketIndex, accountIndex);
+        String channel = LighterWSClientBuilder.getAccountOrdersAllChannel(accountIndex);
         return subscribeAccountOrders(channel, accountIndex, authToken, listener);
     }
 

@@ -11,10 +11,10 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,10 +50,8 @@ import com.google.gson.stream.JsonWriter;
 import okhttp3.Headers;
 import okhttp3.FormBody;
 import okhttp3.HttpUrl;
-import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
-import okhttp3.RequestBody;
 import okhttp3.Response;
 
 public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
@@ -61,6 +59,7 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
     protected static Logger latencyLogger = LoggerFactory.getLogger(Span.LATENCY_LOGGER_NAME);
     protected static final long DEFAULT_AUTH_TOKEN_TTL_SECONDS = 60L * 60L;
     protected static final long DEFAULT_API_TOKEN_TTL_SECONDS = 7L * 24L * 60L * 60L;
+    protected static final String[] ACCOUNT_LOOKUP_BY_FIELDS = new String[] { "l1_address", "address", "account_address" };
     private final Gson gson;
 
     protected static ILighterRestApi publicOnlyApi;
@@ -72,6 +71,8 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
     protected String privateKeyString;
     protected boolean publicApiOnly = true;
     protected volatile LighterNativeTransactionSigner authSigner;
+    protected volatile int authSignerApiKeyIndex = Integer.MIN_VALUE;
+    protected volatile long authSignerAccountIndex = Long.MIN_VALUE;
 
     public LighterRestApi(String baseUrl, boolean isTestnet) {
         this(baseUrl, null, null, isTestnet, null);
@@ -180,26 +181,27 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
 
         return executeWithRetry(() -> {
             String url = baseUrl + "/tokens/create";
-            JSONObject requestBody = new JSONObject();
-            requestBody.put("name", request.getName());
-            requestBody.put("account_index", request.getAccountIndex());
-            requestBody.put("expiry", request.getExpiry());
-            requestBody.put("sub_account_access", request.isSubAccountAccess());
+            FormBody.Builder formBodyBuilder = new FormBody.Builder()
+                    .add("name", request.getName())
+                    .add("account_index", Long.toString(request.getAccountIndex()))
+                    .add("expiry", Long.toString(request.getExpiry()))
+                    .add("sub_account_access", Boolean.toString(request.isSubAccountAccess()));
             if (request.getScopes() != null && !request.getScopes().isBlank()) {
-                requestBody.put("scopes", request.getScopes());
+                formBodyBuilder.add("scopes", request.getScopes());
             }
 
             Request requestBuilder = new Request.Builder().url(url)
                     .addHeader("Authorization", authToken)
-                    .post(RequestBody.create(requestBody.toString(), MediaType.get("application/json; charset=utf-8")))
+                    .post(formBodyBuilder.build())
                     .build();
             logger.info("Request: {}", requestBuilder);
 
             try (Response response = client.newCall(requestBuilder).execute()) {
                 if (!response.isSuccessful()) {
-                    logger.error("Error response: {}", response.body().string());
-                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
-                            response.code());
+                    String errorBody = response.body() == null ? "" : response.body().string();
+                    logger.error("Error response: {}", errorBody);
+                    throw buildApiErrorResponseException("Unable to create Lighter API token", response.code(),
+                            response.message(), errorBody);
                 }
 
                 String responseBody = response.body().string();
@@ -227,8 +229,8 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
         }
 
         int apiKeyIndex = LighterConfiguration.getInstance().getApiKeyIndex();
-        String authToken = getOrCreateAuthSigner().createAuthTokenWithExpiry(timestamp, expiry, apiKeyIndex,
-                request.getAccountIndex());
+        String authToken = getOrCreateAuthSigner(apiKeyIndex, request.getAccountIndex())
+                .createAuthTokenWithExpiry(timestamp, expiry, apiKeyIndex, request.getAccountIndex());
         return createApiToken(authToken, request);
     }
 
@@ -285,15 +287,63 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
         long timestamp = System.currentTimeMillis() / 1000L;
         long expiry = timestamp + DEFAULT_AUTH_TOKEN_TTL_SECONDS;
         int apiKeyIndex = LighterConfiguration.getInstance().getApiKeyIndex();
-        String authToken = getOrCreateAuthSigner().createAuthTokenWithExpiry(timestamp, expiry, apiKeyIndex,
-                request.getAccountIndex());
+        String authToken = getOrCreateAuthSigner(apiKeyIndex, request.getAccountIndex())
+                .createAuthTokenWithExpiry(timestamp, expiry, apiKeyIndex, request.getAccountIndex());
         return changeAccountTier(authToken, request);
     }
 
     @Override
     public String getApiToken() {
-        LighterCreateApiTokenRequest request = buildDefaultApiTokenRequest();
+        return getApiToken(LighterConfiguration.getInstance().getAccountIndex());
+    }
+
+    @Override
+    public String getApiToken(long accountIndex) {
+        if (accountIndex < 0) {
+            throw new IllegalArgumentException("accountIndex must be >= 0");
+        }
+        LighterCreateApiTokenRequest request = buildDefaultApiTokenRequest(accountIndex);
         return createApiToken(request).getApiToken();
+    }
+
+    @Override
+    public long resolveAccountIndex(String accountAddress) {
+        if (accountAddress == null || accountAddress.isBlank()) {
+            throw new IllegalArgumentException("accountAddress is required");
+        }
+
+        String normalizedAddress = accountAddress.trim();
+        ResponseException lastResponseException = null;
+        RuntimeException lastRuntimeException = null;
+
+        for (String byField : ACCOUNT_LOOKUP_BY_FIELDS) {
+            try {
+                JsonObject root = requestAccountLookup(byField, normalizedAddress);
+                Long resolved = parseAccountIndexFromAccountLookup(root, normalizedAddress);
+                if (resolved != null && resolved.longValue() >= 0) {
+                    return resolved.longValue();
+                }
+                logger.debug("Lighter account lookup returned no account index for by={} address={}", byField,
+                        normalizedAddress);
+            } catch (ResponseException ex) {
+                lastResponseException = ex;
+                logger.debug("Lighter account lookup by={} failed for address={}: {}", byField, normalizedAddress,
+                        ex.getMessage());
+            } catch (RuntimeException ex) {
+                lastRuntimeException = ex;
+                logger.debug("Unexpected error resolving Lighter account index by={} address={}", byField,
+                        normalizedAddress, ex);
+            }
+        }
+
+        String detail = "";
+        if (lastResponseException != null && lastResponseException.getMessage() != null) {
+            detail = ": " + lastResponseException.getMessage();
+        } else if (lastRuntimeException != null && lastRuntimeException.getMessage() != null) {
+            detail = ": " + lastRuntimeException.getMessage();
+        }
+        throw new ResponseException("Unable to resolve Lighter account index for address " + normalizedAddress + detail,
+                lastResponseException == null ? 404 : lastResponseException.getStatusCode());
     }
 
     @Override
@@ -404,9 +454,43 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
         long timestamp = System.currentTimeMillis() / 1000L;
         long expiry = timestamp + DEFAULT_AUTH_TOKEN_TTL_SECONDS;
         int apiKeyIndex = LighterConfiguration.getInstance().getApiKeyIndex();
-        String authToken = getOrCreateAuthSigner().createAuthTokenWithExpiry(timestamp, expiry, apiKeyIndex,
-                accountIndex);
+        String authToken = getOrCreateAuthSigner(apiKeyIndex, accountIndex).createAuthTokenWithExpiry(timestamp, expiry,
+                apiKeyIndex, accountIndex);
         return getAccountActiveOrders(authToken, accountIndex, marketId);
+    }
+
+    protected ResponseException buildApiErrorResponseException(String operation, int httpStatusCode, String httpMessage,
+            String responseBody) {
+        int apiCode = Integer.MIN_VALUE;
+        String apiMessage = null;
+
+        if (responseBody != null && !responseBody.isBlank()) {
+            try {
+                JsonObject root = JsonParser.parseString(responseBody).getAsJsonObject();
+                apiCode = readInt(root, "code", Integer.MIN_VALUE);
+                apiMessage = getString(root, "message");
+                if (apiMessage == null || apiMessage.isBlank()) {
+                    apiMessage = getString(root, "msg");
+                }
+            } catch (Exception ignored) {
+                // Non-JSON response body, keep raw text fallback below.
+            }
+        }
+
+        StringBuilder message = new StringBuilder(operation == null || operation.isBlank() ? "Lighter API request failed"
+                : operation);
+        if (apiMessage != null && !apiMessage.isBlank()) {
+            message.append(": ").append(apiMessage);
+        } else if (responseBody != null && !responseBody.isBlank()) {
+            message.append(": ").append(responseBody);
+        } else {
+            message.append(": Unexpected code ").append(httpStatusCode).append(": ").append(httpMessage);
+        }
+
+        if (apiCode != Integer.MIN_VALUE && apiCode != httpStatusCode) {
+            message.append(" (api code ").append(apiCode).append(")");
+        }
+        return new ResponseException(message.toString(), httpStatusCode);
     }
 
     @Override
@@ -444,16 +528,178 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
     }
 
     protected LighterCreateApiTokenRequest buildDefaultApiTokenRequest() {
-        LighterConfiguration configuration = LighterConfiguration.getInstance();
+        return buildDefaultApiTokenRequest(LighterConfiguration.getInstance().getAccountIndex());
+    }
+
+    protected LighterCreateApiTokenRequest buildDefaultApiTokenRequest(long accountIndex) {
         long timestamp = System.currentTimeMillis() / 1000L;
 
         LighterCreateApiTokenRequest request = new LighterCreateApiTokenRequest();
         request.setName("fueledbychai-readonly-" + timestamp);
-        request.setAccountIndex(configuration.getAccountIndex());
+        request.setAccountIndex(accountIndex);
         request.setExpiry(timestamp + DEFAULT_API_TOKEN_TTL_SECONDS);
         request.setSubAccountAccess(false);
         request.setScopes(LighterCreateApiTokenRequest.DEFAULT_SCOPES);
         return request;
+    }
+
+    protected JsonObject requestAccountLookup(String byField, String value) {
+        if (byField == null || byField.isBlank()) {
+            throw new IllegalArgumentException("byField is required");
+        }
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("value is required");
+        }
+
+        return executeWithRetry(() -> {
+            String url = baseUrl + "/account";
+            HttpUrl.Builder urlBuilder = HttpUrl.parse(url).newBuilder();
+            urlBuilder.addQueryParameter("by", byField);
+            urlBuilder.addQueryParameter("value", value);
+            String newUrl = urlBuilder.build().toString();
+
+            Request request = new Request.Builder().url(newUrl).get().build();
+            logger.info("Request: {}", request);
+
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    String error = response.body() == null ? "" : response.body().string();
+                    logger.error("Error response: {}", error);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
+                }
+
+                String responseBody = response.body() == null ? "" : response.body().string();
+                logger.info("Response output: {}", responseBody);
+
+                JsonObject root = JsonParser.parseString(responseBody).getAsJsonObject();
+                int code = readInt(root, "code", response.code());
+                if (code != 200) {
+                    String message = getString(root, "message");
+                    if (message == null || message.isBlank()) {
+                        message = getString(root, "msg");
+                    }
+                    if (message == null || message.isBlank()) {
+                        message = responseBody;
+                    }
+                    throw new ResponseException("Unable to lookup Lighter account by " + byField + ": " + message,
+                            code);
+                }
+                return root;
+            } catch (IOException e) {
+                logger.error(e.getMessage(), e);
+                throw new ResponseException("Network error looking up Lighter account: " + e.getMessage(), e);
+            }
+        }, 3, 500);
+    }
+
+    protected Long parseAccountIndexFromAccountLookup(JsonObject root, String accountAddress) {
+        if (root == null) {
+            return null;
+        }
+
+        Long rootIndex = readNonNegativeIndex(root);
+        if (rootIndex != null) {
+            return rootIndex;
+        }
+
+        if (root.has("account") && !root.get("account").isJsonNull() && root.get("account").isJsonObject()) {
+            Long accountIndex = extractAccountIndexFromAccountObject(root.getAsJsonObject("account"), accountAddress);
+            if (accountIndex != null) {
+                return accountIndex;
+            }
+        }
+
+        JsonArray accounts = root.has("accounts") && !root.get("accounts").isJsonNull() ? root.getAsJsonArray("accounts")
+                : null;
+        JsonObject accountObject = findAccountObjectByAddress(accounts, accountAddress);
+        if (accountObject == null) {
+            return null;
+        }
+        return extractAccountIndexFromAccountObject(accountObject, accountAddress);
+    }
+
+    protected JsonObject findAccountObjectByAddress(JsonArray accounts, String accountAddress) {
+        if (accounts == null || accounts.size() == 0) {
+            return null;
+        }
+
+        String normalizedAddress = normalizeAccountAddress(accountAddress);
+        JsonObject first = null;
+        for (int i = 0; i < accounts.size(); i++) {
+            if (!accounts.get(i).isJsonObject()) {
+                continue;
+            }
+
+            JsonObject accountObject = accounts.get(i).getAsJsonObject();
+            if (first == null) {
+                first = accountObject;
+            }
+
+            String responseAddress = getStringFromFields(accountObject, "l1_address", "account_address", "address",
+                    "accountAddress", "owner");
+            if (isSameAccountAddress(normalizedAddress, responseAddress)) {
+                return accountObject;
+            }
+        }
+
+        if (accounts.size() == 1) {
+            return first;
+        }
+        return null;
+    }
+
+    protected Long extractAccountIndexFromAccountObject(JsonObject accountObject, String accountAddress) {
+        if (accountObject == null) {
+            return null;
+        }
+
+        Long accountIndex = readNonNegativeIndex(accountObject);
+        if (accountIndex == null) {
+            return null;
+        }
+
+        if (accountAddress == null || accountAddress.isBlank()) {
+            return accountIndex;
+        }
+
+        String responseAddress = getStringFromFields(accountObject, "l1_address", "account_address", "address",
+                "accountAddress", "owner");
+        if (responseAddress == null || responseAddress.isBlank()) {
+            return accountIndex;
+        }
+        return isSameAccountAddress(accountAddress, responseAddress) ? accountIndex : null;
+    }
+
+    protected Long readNonNegativeIndex(JsonObject accountObject) {
+        long accountIndex = readLong(accountObject, "account_index", Long.MIN_VALUE);
+        if (accountIndex == Long.MIN_VALUE) {
+            accountIndex = readLong(accountObject, "index", Long.MIN_VALUE);
+        }
+        if (accountIndex < 0 || accountIndex == Long.MIN_VALUE) {
+            return null;
+        }
+        return Long.valueOf(accountIndex);
+    }
+
+    protected boolean isSameAccountAddress(String left, String right) {
+        if (left == null || left.isBlank() || right == null || right.isBlank()) {
+            return false;
+        }
+        return normalizeAccountAddress(left).equals(normalizeAccountAddress(right));
+    }
+
+    protected String normalizeAccountAddress(String accountAddress) {
+        if (accountAddress == null) {
+            return "";
+        }
+
+        String normalized = accountAddress.trim().toLowerCase(Locale.ROOT);
+        if (normalized.startsWith("0x")) {
+            normalized = normalized.substring(2);
+        }
+        normalized = normalized.replaceFirst("^0+(?!$)", "");
+        return normalized;
     }
 
     protected List<LighterOrder> parseAccountActiveOrdersResponse(String responseBody) {
@@ -726,21 +972,31 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
     }
 
     protected LighterNativeTransactionSigner getOrCreateAuthSigner() {
+        LighterConfiguration configuration = LighterConfiguration.getInstance();
+        return getOrCreateAuthSigner(configuration.getApiKeyIndex(), configuration.getAccountIndex());
+    }
+
+    protected LighterNativeTransactionSigner getOrCreateAuthSigner(int apiKeyIndex, long accountIndex) {
         LighterNativeTransactionSigner signer = authSigner;
-        if (signer != null) {
+        if (signer != null && authSignerApiKeyIndex == apiKeyIndex && authSignerAccountIndex == accountIndex) {
             return signer;
         }
         synchronized (this) {
-            if (authSigner == null) {
+            if (authSigner == null || authSignerApiKeyIndex != apiKeyIndex || authSignerAccountIndex != accountIndex) {
                 LighterConfiguration configuration = LighterConfiguration.getInstance();
                 String privateKey = (privateKeyString == null || privateKeyString.isBlank())
                         ? configuration.getPrivateKey()
                         : privateKeyString;
-                authSigner = new LighterNativeTransactionSigner(baseUrl, privateKey, configuration.getApiKeyIndex(),
-                        configuration.getAccountIndex());
+                authSigner = createAuthSigner(privateKey, apiKeyIndex, accountIndex);
+                authSignerApiKeyIndex = apiKeyIndex;
+                authSignerAccountIndex = accountIndex;
             }
             return authSigner;
         }
+    }
+
+    protected LighterNativeTransactionSigner createAuthSigner(String privateKey, int apiKeyIndex, long accountIndex) {
+        return new LighterNativeTransactionSigner(baseUrl, privateKey, apiKeyIndex, accountIndex);
     }
 
     protected InstrumentDescriptor parseInstrumentDescriptor(String responseBody) {

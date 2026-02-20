@@ -27,9 +27,11 @@ public class LighterMarketOrderExample {
     private static final String ORDER_SYMBOL = "BTC";
     private static final InstrumentType ORDER_INSTRUMENT_TYPE = InstrumentType.PERPETUAL_FUTURES;
     private static final TradeDirection ORDER_SIDE = TradeDirection.BUY;
-    private static final BigDecimal ORDER_SIZE = new BigDecimal("0.001");
+    private static final BigDecimal ORDER_SIZE = new BigDecimal("0.00020");
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
+
+        // Thread.sleep(5_000);
         ITickerRegistry tickerRegistry = TickerRegistryFactory.getInstance(Exchange.LIGHTER);
         IBroker broker = BrokerFactory.getInstance(Exchange.LIGHTER);
 
@@ -43,6 +45,14 @@ public class LighterMarketOrderExample {
 
         try {
             broker.connect();
+
+            broker.addOrderEventListener((listener) -> {
+                logger.info("OrderEvent: " + listener.getOrderStatus());
+            });
+
+            broker.addFillEventListener((listener) -> {
+                logger.info("Fill Event: " + listener);
+            });
 
             OrderTicket order = new OrderTicket();
             order.setTicker(ticker);
@@ -68,11 +78,14 @@ public class LighterMarketOrderExample {
             } else {
                 logger.info("No immediate status available for clientOrderId={}", order.getClientOrderId());
             }
+
+            Thread.sleep(10_000);
         } catch (Exception ex) {
             logger.error("Error while placing Lighter market order", ex);
         } finally {
-            broker.disconnect();
+
         }
+
     }
 
     private static Ticker resolveTicker(ITickerRegistry tickerRegistry, InstrumentType instrumentType, String symbol) {

@@ -5,6 +5,8 @@ import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -37,6 +39,7 @@ import com.fueledbychai.lighter.common.api.ws.model.LighterOrdersUpdate;
 import com.fueledbychai.lighter.common.api.ws.model.LighterSendTxResponse;
 import com.fueledbychai.lighter.common.api.ws.model.LighterTrade;
 import com.fueledbychai.lighter.common.api.ws.model.LighterTradesUpdate;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountOrdersListener;
 import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.ExchangeWebSocketApiFactory;
 import com.fueledbychai.util.FillDeduper;
@@ -44,20 +47,25 @@ import com.fueledbychai.util.FillDeduper;
 public class LighterBroker extends AbstractBasicBroker {
 
     protected static final Logger logger = LoggerFactory.getLogger(LighterBroker.class);
+    protected static final long UNINITIALIZED_NONCE = Long.MIN_VALUE;
 
     protected final ILighterRestApi restApi;
     protected final ILighterWebSocketApi websocketApi;
     protected final ILighterTranslator translator;
-    protected final long accountIndex;
+    protected volatile long accountIndex;
     protected final int apiKeyIndex;
 
     protected final Set<Integer> knownMarketIndexes = ConcurrentHashMap.newKeySet();
-    protected final Set<Integer> subscribedMarketIndexes = ConcurrentHashMap.newKeySet();
     protected final FillDeduper fillDeduper = new FillDeduper();
     protected final AtomicLong nextClientOrderId = new AtomicLong(System.currentTimeMillis());
+    protected final AtomicLong lastSubmittedNonce = new AtomicLong(UNINITIALIZED_NONCE);
+    protected final Object nonceLock = new Object();
+    protected final ILighterAccountOrdersListener accountOrdersListener = this::onLighterAccountOrdersEvent;
+    protected final Map<String, String> clientOrderIdByOrderId = new ConcurrentHashMap<>();
 
     protected volatile String authToken;
     protected volatile boolean connected;
+    protected volatile boolean accountOrdersSubscribed;
 
     public LighterBroker() {
         this(ExchangeRestApiFactory.getPrivateApi(Exchange.LIGHTER, ILighterRestApi.class),
@@ -156,10 +164,13 @@ public class LighterBroker extends AbstractBasicBroker {
         }
 
         try {
-            long nonce = restApi.getNextNonce(accountIndex, apiKeyIndex);
+            long nonce = getNextManagedNonce();
             LighterCancelOrderRequest cancelRequest = translator.translateCancelOrder(resolvedOrder, accountIndex,
                     apiKeyIndex, nonce);
-            LighterSendTxResponse response = websocketApi.cancelOrder(cancelRequest);
+            LighterSendTxResponse response = sendWithNonceRetry("cancel order", nonce, cancelRequest,
+                    refreshedNonce -> translator.translateCancelOrder(resolvedOrder, accountIndex, apiKeyIndex,
+                            refreshedNonce),
+                    websocketApi::cancelOrder);
             if (response == null || !response.isSuccess()) {
                 return buildFailedTxResult("Failed to cancel order", response);
             }
@@ -188,7 +199,7 @@ public class LighterBroker extends AbstractBasicBroker {
             ensureClientOrderId(order);
             order.setOrderEntryTime(getCurrentTime());
 
-            long nonce = restApi.getNextNonce(accountIndex, apiKeyIndex);
+            long nonce = getNextManagedNonce();
             LighterCreateOrderRequest createOrderRequest = translator.translateCreateOrder(order, accountIndex,
                     apiKeyIndex, nonce);
 
@@ -199,7 +210,13 @@ public class LighterBroker extends AbstractBasicBroker {
             }
             orderRegistry.addOpenOrder(order);
 
-            LighterSendTxResponse response = websocketApi.submitOrder(createOrderRequest);
+            LighterSendTxResponse response = sendWithNonceRetry("submit order", nonce, createOrderRequest,
+                    refreshedNonce -> {
+                        LighterCreateOrderRequest retryRequest = translator.translateCreateOrder(order, accountIndex,
+                                apiKeyIndex, refreshedNonce);
+                        ensureAccountOrdersSubscription(retryRequest.getMarketIndex());
+                        return retryRequest;
+                    }, websocketApi::submitOrder);
             if (response == null || !response.isSuccess()) {
                 order.setCurrentStatus(OrderStatus.Status.REJECTED);
                 orderRegistry.addCompletedOrder(order);
@@ -222,13 +239,19 @@ public class LighterBroker extends AbstractBasicBroker {
 
         try {
             order.setOrderEntryTime(getCurrentTime());
-            long nonce = restApi.getNextNonce(accountIndex, apiKeyIndex);
+            long nonce = getNextManagedNonce();
             LighterModifyOrderRequest modifyOrderRequest = translator.translateModifyOrder(order, accountIndex,
                     apiKeyIndex, nonce);
 
             ensureAccountOrdersSubscription(modifyOrderRequest.getMarketIndex());
 
-            LighterSendTxResponse response = websocketApi.modifyOrder(modifyOrderRequest);
+            LighterSendTxResponse response = sendWithNonceRetry("modify order", nonce, modifyOrderRequest,
+                    refreshedNonce -> {
+                        LighterModifyOrderRequest retryRequest = translator.translateModifyOrder(order, accountIndex,
+                                apiKeyIndex, refreshedNonce);
+                        ensureAccountOrdersSubscription(retryRequest.getMarketIndex());
+                        return retryRequest;
+                    }, websocketApi::modifyOrder);
             if (response == null || !response.isSuccess()) {
                 return buildFailedTxResult("Failed to modify order", response);
             }
@@ -252,7 +275,12 @@ public class LighterBroker extends AbstractBasicBroker {
         }
 
         try {
-            authToken = refreshAuthToken();
+            authToken = refreshAuthTokenWithAccountResolution();
+            try {
+                refreshManagedNonce("connect");
+            } catch (Exception ex) {
+                logger.warn("Unable to prefetch Lighter nonce on connect; will refresh lazily on first tx", ex);
+            }
 
             websocketApi.subscribeAccountStats(accountIndex, this::onLighterAccountStatsEvent);
             websocketApi.subscribeAccountAllTrades(accountIndex, authToken, this::onLighterAccountAllTradesEvent);
@@ -270,7 +298,9 @@ public class LighterBroker extends AbstractBasicBroker {
     @Override
     protected void onDisconnect() {
         connected = false;
-        subscribedMarketIndexes.clear();
+        accountOrdersSubscribed = false;
+        lastSubmittedNonce.set(UNINITIALIZED_NONCE);
+        clientOrderIdByOrderId.clear();
         try {
             websocketApi.disconnectAll();
         } catch (Exception ex) {
@@ -419,6 +449,7 @@ public class LighterBroker extends AbstractBasicBroker {
             OrderStatus orderStatus = translator.translateOrderStatus(lighterOrder);
             OrderTicket trackedOrder = resolveTrackedOrder(translatedOrder);
             mergeOrder(trackedOrder, translatedOrder);
+            indexClientOrderId(trackedOrder);
 
             trackedOrder.setCurrentStatus(orderStatus.getStatus());
             trackedOrder.setFilledSize(orderStatus.getFilled());
@@ -462,11 +493,20 @@ public class LighterBroker extends AbstractBasicBroker {
             }
 
             OrderTicket trackedOrder = fill.getOrderId() == null ? null : orderRegistry.getOrderById(fill.getOrderId());
-            if (trackedOrder != null) {
-                if (fill.getClientOrderId() == null || fill.getClientOrderId().isBlank()) {
-                    fill.setClientOrderId(trackedOrder.getClientOrderId());
+            if (fill.getClientOrderId() == null || fill.getClientOrderId().isBlank()) {
+                String resolvedClientOrderId = trackedOrder == null ? lookupClientOrderId(fill.getOrderId())
+                        : trackedOrder.getClientOrderId();
+                if (resolvedClientOrderId != null && !resolvedClientOrderId.isBlank()) {
+                    fill.setClientOrderId(resolvedClientOrderId);
                 }
+            }
 
+            if (trackedOrder == null && fill.getClientOrderId() != null && !fill.getClientOrderId().isBlank()) {
+                trackedOrder = orderRegistry.getOrderByClientId(fill.getClientOrderId());
+            }
+
+            if (trackedOrder != null) {
+                indexClientOrderId(trackedOrder);
                 trackedOrder.setFilledSize(trackedOrder.getFilledSize().add(fill.getSize()));
                 BigDecimal commission = fill.getCommission() == null ? BigDecimal.ZERO : fill.getCommission();
                 trackedOrder.setCommission(trackedOrder.getCommission().add(commission));
@@ -479,6 +519,7 @@ public class LighterBroker extends AbstractBasicBroker {
                 }
             }
 
+            indexClientOrderId(fill.getOrderId(), fill.getClientOrderId());
             super.fireFillEvent(fill);
         }
     }
@@ -542,6 +583,27 @@ public class LighterBroker extends AbstractBasicBroker {
         }
     }
 
+    protected void indexClientOrderId(OrderTicket order) {
+        if (order == null) {
+            return;
+        }
+        indexClientOrderId(order.getOrderId(), order.getClientOrderId());
+    }
+
+    protected void indexClientOrderId(String orderId, String clientOrderId) {
+        if (orderId == null || orderId.isBlank() || clientOrderId == null || clientOrderId.isBlank()) {
+            return;
+        }
+        clientOrderIdByOrderId.put(orderId, clientOrderId);
+    }
+
+    protected String lookupClientOrderId(String orderId) {
+        if (orderId == null || orderId.isBlank()) {
+            return null;
+        }
+        return clientOrderIdByOrderId.get(orderId);
+    }
+
     protected boolean isKnownOpenOrder(OrderTicket order) {
         if (order == null) {
             return false;
@@ -562,14 +624,86 @@ public class LighterBroker extends AbstractBasicBroker {
 
     protected String ensureAuthToken() {
         if (authToken == null || authToken.isBlank()) {
-            return refreshAuthToken();
+            return refreshAuthTokenWithAccountResolution();
         }
         return authToken;
     }
 
     protected synchronized String refreshAuthToken() {
-        authToken = restApi.getApiToken();
+        authToken = restApi.getApiToken(accountIndex);
         return authToken;
+    }
+
+    protected synchronized String refreshAuthTokenWithAccountResolution() {
+        try {
+            return refreshAuthToken();
+        } catch (Exception ex) {
+            if (!isInvalidAccountException(ex)) {
+                throw ex;
+            }
+
+            Long resolvedAccountIndex = resolveAccountIndexFromConfiguredAddress();
+            if (resolvedAccountIndex == null || resolvedAccountIndex.longValue() == accountIndex) {
+                throw ex;
+            }
+
+            long previousAccountIndex = accountIndex;
+            accountIndex = resolvedAccountIndex.longValue();
+            publishResolvedAccountIndexToConfiguration(accountIndex);
+            logger.warn(
+                    "Configured Lighter accountIndex={} failed auth; resolved accountIndex={} from address and retrying",
+                    previousAccountIndex, accountIndex);
+            return refreshAuthToken();
+        }
+    }
+
+    protected Long resolveAccountIndexFromConfiguredAddress() {
+        String accountAddress = resolveConfiguredAccountAddress();
+        if (accountAddress == null || accountAddress.isBlank()) {
+            logger.warn("Unable to auto-resolve Lighter account index because no account address is configured");
+            return null;
+        }
+
+        try {
+            long resolved = restApi.resolveAccountIndex(accountAddress);
+            return resolved >= 0 ? Long.valueOf(resolved) : null;
+        } catch (Exception ex) {
+            logger.warn("Unable to resolve Lighter account index from configured address {}", accountAddress, ex);
+            return null;
+        }
+    }
+
+    protected String resolveConfiguredAccountAddress() {
+        return LighterConfiguration.getInstance().getAccountAddress();
+    }
+
+    protected void publishResolvedAccountIndexToConfiguration(long resolvedAccountIndex) {
+        System.setProperty(LighterConfiguration.LIGHTER_ACCOUNT_INDEX, Long.toString(resolvedAccountIndex));
+        LighterConfiguration.reset();
+    }
+
+    protected boolean isInvalidAccountException(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (isInvalidAccountMessage(current.getMessage())) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    protected boolean isInvalidAccountMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+
+        String normalized = message.toLowerCase(Locale.ROOT);
+        if (normalized.contains("couldnt find account") || normalized.contains("couldn't find account")
+                || normalized.contains("account not found")) {
+            return true;
+        }
+        return normalized.contains("invalid auth") && normalized.contains("account");
     }
 
     protected void ensureClientOrderId(OrderTicket order) {
@@ -609,14 +743,11 @@ public class LighterBroker extends AbstractBasicBroker {
             }
 
             try {
-                LighterCancelOrderRequest cancelRequest = new LighterCancelOrderRequest();
-                cancelRequest.setMarketIndex(marketIndex.intValue());
-                cancelRequest.setOrderIndex(orderIndex);
-                cancelRequest.setNonce(restApi.getNextNonce(accountIndex, apiKeyIndex));
-                cancelRequest.setApiKeyIndex(apiKeyIndex);
-                cancelRequest.setAccountIndex(accountIndex);
-
-                LighterSendTxResponse response = websocketApi.cancelOrder(cancelRequest);
+                long nonce = getNextManagedNonce();
+                LighterCancelOrderRequest cancelRequest = buildCancelOrderRequest(marketIndex.intValue(), orderIndex, nonce);
+                LighterSendTxResponse response = sendWithNonceRetry("cancel order by index", nonce, cancelRequest,
+                        refreshedNonce -> buildCancelOrderRequest(marketIndex.intValue(), orderIndex, refreshedNonce),
+                        websocketApi::cancelOrder);
                 if (response != null && response.isSuccess()) {
                     return new BrokerRequestResult();
                 }
@@ -643,25 +774,125 @@ public class LighterBroker extends AbstractBasicBroker {
         return new BrokerRequestResult(false, true, message, BrokerRequestResult.FailureType.UNKNOWN);
     }
 
-    protected void subscribeAccountOrdersForKnownMarkets(String token) {
-        for (Integer marketIndex : getKnownMarketIndexes()) {
-            if (marketIndex == null) {
-                continue;
-            }
-            websocketApi.subscribeAccountOrders(marketIndex.intValue(), accountIndex, token,
-                    this::onLighterAccountOrdersEvent);
-            subscribedMarketIndexes.add(marketIndex);
-        }
+    protected long getNextManagedNonce() {
+        initializeManagedNonceIfNeeded();
+        return lastSubmittedNonce.incrementAndGet();
     }
 
-    protected void ensureAccountOrdersSubscription(int marketIndex) {
-        if (!connected || marketIndex < 0) {
+    protected void initializeManagedNonceIfNeeded() {
+        if (lastSubmittedNonce.get() != UNINITIALIZED_NONCE) {
             return;
         }
 
-        if (subscribedMarketIndexes.add(Integer.valueOf(marketIndex))) {
-            websocketApi.subscribeAccountOrders(marketIndex, accountIndex, ensureAuthToken(),
-                    this::onLighterAccountOrdersEvent);
+        synchronized (nonceLock) {
+            if (lastSubmittedNonce.get() == UNINITIALIZED_NONCE) {
+                refreshManagedNonceLocked("lazy initialize");
+            }
+        }
+    }
+
+    protected long refreshManagedNonce(String reason) {
+        synchronized (nonceLock) {
+            return refreshManagedNonceLocked(reason);
+        }
+    }
+
+    protected long refreshManagedNonceLocked(String reason) {
+        long nextNonce = restApi.getNextNonce(accountIndex, apiKeyIndex);
+        lastSubmittedNonce.set(nextNonce - 1L);
+        logger.info("Synced Lighter nonce for accountIndex={}, apiKeyIndex={}, nextNonce={}, reason={}", accountIndex,
+                apiKeyIndex, nextNonce, reason);
+        return nextNonce;
+    }
+
+    protected boolean isInvalidNonceResponse(LighterSendTxResponse response) {
+        if (response == null) {
+            return false;
+        }
+        return isInvalidNonceMessage(response.getMessage()) || isInvalidNonceMessage(response.getRawMessage());
+    }
+
+    protected boolean isInvalidNonceException(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (isInvalidNonceMessage(current.getMessage())) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    protected boolean isInvalidNonceMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("invalid nonce") || normalized.contains("nonce too low")
+                || normalized.contains("nonce is too low") || normalized.contains("stale nonce");
+    }
+
+    protected LighterCancelOrderRequest buildCancelOrderRequest(int marketIndex, long orderIndex, long nonce) {
+        LighterCancelOrderRequest cancelRequest = new LighterCancelOrderRequest();
+        cancelRequest.setMarketIndex(marketIndex);
+        cancelRequest.setOrderIndex(orderIndex);
+        cancelRequest.setNonce(nonce);
+        cancelRequest.setApiKeyIndex(apiKeyIndex);
+        cancelRequest.setAccountIndex(accountIndex);
+        return cancelRequest;
+    }
+
+    protected <T> LighterSendTxResponse sendWithNonceRetry(String operationName, long nonce, T request,
+            INonceRequestBuilder<T> retryRequestBuilder, ITxRequestSender<T> requestSender) throws Exception {
+        try {
+            LighterSendTxResponse response = requestSender.send(request);
+            if (!isInvalidNonceResponse(response)) {
+                return response;
+            }
+            logger.warn("Lighter {} rejected for nonce={}, refreshing nonce and retrying once (message={})",
+                    operationName, nonce, response.getMessage());
+        } catch (Exception ex) {
+            if (!isInvalidNonceException(ex)) {
+                throw ex;
+            }
+            logger.warn("Lighter {} failed for nonce={}, refreshing nonce and retrying once: {}", operationName, nonce,
+                    ex.getMessage());
+        }
+
+        long refreshedNonce = refreshManagedNonce(operationName + " invalid nonce");
+        T retryRequest = retryRequestBuilder.build(refreshedNonce);
+        return requestSender.send(retryRequest);
+    }
+
+    @FunctionalInterface
+    protected interface INonceRequestBuilder<T> {
+        T build(long nonce) throws Exception;
+    }
+
+    @FunctionalInterface
+    protected interface ITxRequestSender<T> {
+        LighterSendTxResponse send(T request) throws Exception;
+    }
+
+    protected synchronized void subscribeAccountOrdersForKnownMarkets(String token) {
+        if (accountOrdersSubscribed) {
+            return;
+        }
+        websocketApi.subscribeAccountOrders(0, accountIndex, token, accountOrdersListener);
+        accountOrdersSubscribed = true;
+    }
+
+    protected void ensureAccountOrdersSubscription(int marketIndex) {
+        if (!connected || marketIndex < 0 || accountOrdersSubscribed) {
+            return;
+        }
+        synchronized (this) {
+            if (accountOrdersSubscribed) {
+                return;
+            }
+            websocketApi.subscribeAccountOrders(marketIndex, accountIndex, ensureAuthToken(), accountOrdersListener);
+            accountOrdersSubscribed = true;
         }
     }
 
