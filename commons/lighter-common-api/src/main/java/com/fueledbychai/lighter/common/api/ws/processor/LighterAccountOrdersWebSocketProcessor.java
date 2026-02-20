@@ -60,12 +60,19 @@ public class LighterAccountOrdersWebSocketProcessor extends AbstractWebSocketPro
         }
         String prefix = LighterWSClientBuilder.WS_TYPE_ACCOUNT_ORDERS;
         if (channel.startsWith(prefix + ":")) {
-            return parseInteger(channel.substring((prefix + ":").length()));
+            String marketText = channel.substring((prefix + ":").length());
+            if ("all".equalsIgnoreCase(marketText)) {
+                return null;
+            }
+            return parseInteger(marketText);
         }
         if (channel.startsWith(prefix + "/")) {
             String remainder = channel.substring((prefix + "/").length());
             int separator = remainder.indexOf('/');
             String marketText = separator >= 0 ? remainder.substring(0, separator) : remainder;
+            if ("all".equalsIgnoreCase(marketText)) {
+                return null;
+            }
             return parseInteger(marketText);
         }
         return null;

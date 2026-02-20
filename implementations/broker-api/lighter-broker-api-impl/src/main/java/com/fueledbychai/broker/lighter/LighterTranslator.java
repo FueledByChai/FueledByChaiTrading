@@ -351,8 +351,8 @@ public class LighterTranslator implements ILighterTranslator {
             return null;
         }
 
-        int id = ticker.getIdAsInt();
-        if (id > 0) {
+        Integer id = parseNonNegativeTickerId(ticker);
+        if (id != null) {
             return ticker;
         }
 
@@ -364,16 +364,33 @@ public class LighterTranslator implements ILighterTranslator {
     }
 
     protected int resolveMarketIndex(OrderTicket order, Ticker resolvedTicker) {
-        if (resolvedTicker != null && resolvedTicker.getIdAsInt() > 0) {
-            return resolvedTicker.getIdAsInt();
+        Integer resolvedTickerId = parseNonNegativeTickerId(resolvedTicker);
+        if (resolvedTickerId != null) {
+            return resolvedTickerId;
         }
 
-        if (order != null && order.getTicker() != null && order.getTicker().getIdAsInt() > 0) {
-            return order.getTicker().getIdAsInt();
+        Integer orderTickerId = parseNonNegativeTickerId(order == null ? null : order.getTicker());
+        if (orderTickerId != null) {
+            return orderTickerId;
         }
 
         throw new IllegalArgumentException("Unable to resolve Lighter market index for order ticker "
                 + (order != null && order.getTicker() != null ? order.getTicker().getSymbol() : "UNKNOWN"));
+    }
+
+    protected Integer parseNonNegativeTickerId(Ticker ticker) {
+        if (ticker == null || ticker.getId() == null || ticker.getId().isBlank()) {
+            return null;
+        }
+        try {
+            int parsed = Integer.parseInt(ticker.getId().trim());
+            if (parsed < 0) {
+                return null;
+            }
+            return parsed;
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     protected long resolveClientOrderIndex(OrderTicket order) {
