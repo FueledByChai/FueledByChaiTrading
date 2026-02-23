@@ -218,6 +218,8 @@ class LighterTranslatorTest {
         trade.setBidAccountId(500L);
         trade.setAskId(12L);
         trade.setBidId(13L);
+        trade.setAskClientId(12001L);
+        trade.setBidClientId(13001L);
         trade.setTakerFee(new BigDecimal("0.25"));
         trade.setTimestamp(1_700_000_002_000L);
 
@@ -227,10 +229,18 @@ class LighterTranslatorTest {
         assertEquals("777", fill.getFillId());
         assertEquals(TradeDirection.BUY, fill.getSide());
         assertEquals("13", fill.getOrderId());
+        assertEquals("13001", fill.getClientOrderId());
         assertTrue(fill.isTaker());
         assertEquals(new BigDecimal("0.25"), fill.getCommission());
         assertEquals(new BigDecimal("69000.0"), fill.getPrice());
         assertEquals(new BigDecimal("0.5"), fill.getSize());
+
+        Fill askFill = translator.translateFill(trade, 255L);
+        assertNotNull(askFill);
+        assertEquals(TradeDirection.SELL, askFill.getSide());
+        assertEquals("12", askFill.getOrderId());
+        assertEquals("12001", askFill.getClientOrderId());
+        assertFalse(askFill.isTaker());
 
         assertNull(translator.translateFill(trade, 999L));
     }

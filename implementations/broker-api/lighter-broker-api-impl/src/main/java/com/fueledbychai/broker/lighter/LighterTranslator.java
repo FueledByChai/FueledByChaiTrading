@@ -276,16 +276,19 @@ public class LighterTranslator implements ILighterTranslator {
         TradeDirection side;
         boolean isTaker = false;
         Long orderId;
+        Long clientOrderId;
 
         if (accountIsAsk) {
             side = TradeDirection.SELL;
             orderId = trade.getAskId();
+            clientOrderId = trade.getAskClientId();
             if (makerAsk != null) {
                 isTaker = !makerAsk.booleanValue();
             }
         } else {
             side = TradeDirection.BUY;
             orderId = trade.getBidId();
+            clientOrderId = trade.getBidClientId();
             if (makerAsk != null) {
                 isTaker = makerAsk.booleanValue();
             }
@@ -297,6 +300,7 @@ public class LighterTranslator implements ILighterTranslator {
         fill.setSize(trade.getSize().abs());
         fill.setSide(side);
         fill.setOrderId(orderId == null ? null : String.valueOf(orderId));
+        fill.setClientOrderId(clientOrderId == null ? null : String.valueOf(clientOrderId));
         fill.setTaker(isTaker);
         fill.setCommission(resolveCommission(trade, isTaker));
         fill.setFillId(resolveFillId(trade, orderId));
