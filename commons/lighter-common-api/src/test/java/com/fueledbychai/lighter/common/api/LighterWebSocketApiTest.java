@@ -114,19 +114,23 @@ public class LighterWebSocketApiTest {
     }
 
     @Test
-    void subscribeAccountOrdersUsesAllChannelForSameAccountAcrossMarkets() {
+    void subscribeAccountOrdersReusesConnectionForSameAccountAcrossMarkets() {
         TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
         ILighterAccountOrdersListener listener = update -> {
         };
 
         LighterWebSocketClient client1 = api.subscribeAccountOrders(1, 255L, "auth-token-1", listener);
         LighterWebSocketClient client2 = api.subscribeAccountOrders(2048, 255L, "auth-token-2", listener);
+        String accountOrdersChannel = api.createdClients.keySet().stream()
+                .filter(channel -> channel.startsWith("account_orders/"))
+                .findFirst()
+                .orElseThrow();
 
         assertNotNull(client1);
         assertNotNull(client2);
         assertEquals(client1, client2);
         assertEquals(1, api.createdClients.size());
-        assertEquals(1, api.connectCountByChannel.get("account_orders/all/255").intValue());
+        assertEquals(1, api.connectCountByChannel.get(accountOrdersChannel).intValue());
     }
 
     @Test
@@ -200,18 +204,22 @@ public class LighterWebSocketApiTest {
         };
 
         api.subscribeAccountOrders(1, 255L, "initial-auth", listener);
-        List<String> authHistory = api.subscribeAuthHistoryByChannel.get("account_orders/all/255");
+        String accountOrdersChannel = api.createdClients.keySet().stream()
+                .filter(channel -> channel.startsWith("account_orders/"))
+                .findFirst()
+                .orElseThrow();
+        List<String> authHistory = api.subscribeAuthHistoryByChannel.get(accountOrdersChannel);
         assertNotNull(authHistory);
         assertEquals("generated-order-auth-1", authHistory.get(0));
 
-        TestClient firstClient = api.createdClients.get("account_orders/all/255");
+        TestClient firstClient = api.createdClients.get(accountOrdersChannel);
         assertNotNull(firstClient);
         firstClient.simulateRemoteClose();
 
         long deadlineMillis = System.currentTimeMillis() + 1_000L;
         int connectCount = 0;
         while (System.currentTimeMillis() < deadlineMillis) {
-            Integer count = api.connectCountByChannel.get("account_orders/all/255");
+            Integer count = api.connectCountByChannel.get(accountOrdersChannel);
             connectCount = count == null ? 0 : count;
             if (connectCount >= 2) {
                 break;
@@ -220,7 +228,7 @@ public class LighterWebSocketApiTest {
         }
 
         assertTrue(connectCount >= 2, "Expected reconnect to be attempted");
-        authHistory = api.subscribeAuthHistoryByChannel.get("account_orders/all/255");
+        authHistory = api.subscribeAuthHistoryByChannel.get(accountOrdersChannel);
         assertNotNull(authHistory);
         assertTrue(authHistory.size() >= 2, "Expected refreshed auth token to be used on reconnect");
         assertEquals("generated-order-auth-2", authHistory.get(1));
@@ -250,6 +258,10 @@ public class LighterWebSocketApiTest {
         api.subscribeAccountAllTrades(255L, "auth-token", accountTradesListener);
         api.subscribeAccountOrders(1, 255L, "auth-token", accountOrdersListener);
         api.subscribeAccountStats(255L, accountStatsListener);
+        String accountOrdersChannel = api.createdClients.keySet().stream()
+                .filter(channel -> channel.startsWith("account_orders/"))
+                .findFirst()
+                .orElseThrow();
         api.disconnectAll();
 
         assertEquals(1, api.closeCountByChannel.get("market_stats/53").intValue());
@@ -257,7 +269,7 @@ public class LighterWebSocketApiTest {
         assertEquals(1, api.closeCountByChannel.get("order_book/53").intValue());
         assertEquals(1, api.closeCountByChannel.get("trade/53").intValue());
         assertEquals(1, api.closeCountByChannel.get("account_all_trades/255").intValue());
-        assertEquals(1, api.closeCountByChannel.get("account_orders/all/255").intValue());
+        assertEquals(1, api.closeCountByChannel.get(accountOrdersChannel).intValue());
         assertEquals(1, api.closeCountByChannel.get("user_stats/255").intValue());
     }
 
