@@ -29,6 +29,8 @@ public class LighterTradesWebSocketProcessorTest {
                 + "\"usd_amount\":\"1000.000\","
                 + "\"ask_id\":\"10\","
                 + "\"bid_id\":\"11\","
+                + "\"ask_client_id\":\"1001\","
+                + "\"bid_client_id\":\"1002\","
                 + "\"ask_account_id\":\"501\","
                 + "\"bid_account_id\":\"502\","
                 + "\"is_maker_ask\":false,"
@@ -54,6 +56,8 @@ public class LighterTradesWebSocketProcessorTest {
         assertEquals(new BigDecimal("1000.000"), trade.getUsdAmount());
         assertEquals(10L, trade.getAskId());
         assertEquals(11L, trade.getBidId());
+        assertEquals(1001L, trade.getAskClientId());
+        assertEquals(1002L, trade.getBidClientId());
         assertEquals(501L, trade.getAskAccountId());
         assertEquals(502L, trade.getBidAccountId());
         assertEquals(false, trade.getMakerAsk());

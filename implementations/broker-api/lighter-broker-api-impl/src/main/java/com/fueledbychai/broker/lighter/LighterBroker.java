@@ -222,8 +222,6 @@ public class LighterBroker extends AbstractBasicBroker {
             LighterCreateOrderRequest createOrderRequest = translator.translateCreateOrder(order, accountIndex,
                     apiKeyIndex, nonce);
 
-            // ensureAccountOrdersSubscription(createOrderRequest.getMarketIndex());
-
             if (order.getOrderId() == null || order.getOrderId().isBlank()) {
                 order.setOrderId(order.getClientOrderId());
             }
