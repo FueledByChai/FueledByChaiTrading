@@ -163,8 +163,7 @@ public class LighterWebSocketApi
         if (authToken == null || authToken.isBlank()) {
             throw new IllegalArgumentException("authToken is required");
         }
-        // Temporary diagnostic: force BTC perp account_orders stream (market_id=1) instead of account_orders/all.
-        String channel = LighterWSClientBuilder.getAccountOrdersChannel(1, accountIndex);
+        String channel = LighterWSClientBuilder.getAccountOrdersAllChannel(accountIndex);
         return subscribeAccountOrders(channel, accountIndex, authToken, listener);
     }
 
