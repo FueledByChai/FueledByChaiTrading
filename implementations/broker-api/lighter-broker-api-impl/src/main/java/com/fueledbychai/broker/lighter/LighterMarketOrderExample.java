@@ -26,7 +26,7 @@ public class LighterMarketOrderExample {
     private static final Logger logger = LoggerFactory.getLogger(LighterMarketOrderExample.class);
     private static final String ORDER_SYMBOL = "BTC";
     private static final InstrumentType ORDER_INSTRUMENT_TYPE = InstrumentType.PERPETUAL_FUTURES;
-    private static final TradeDirection ORDER_SIDE = TradeDirection.BUY;
+    private static final TradeDirection ORDER_SIDE = TradeDirection.SELL;
     private static final BigDecimal ORDER_SIZE = new BigDecimal("0.00020");
 
     public static void main(String[] args) throws Exception {

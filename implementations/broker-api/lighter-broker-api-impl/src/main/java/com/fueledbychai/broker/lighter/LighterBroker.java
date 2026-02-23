@@ -9,6 +9,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
@@ -32,6 +36,7 @@ import com.fueledbychai.lighter.common.api.LighterConfiguration;
 import com.fueledbychai.lighter.common.api.order.LighterCancelOrderRequest;
 import com.fueledbychai.lighter.common.api.order.LighterCreateOrderRequest;
 import com.fueledbychai.lighter.common.api.order.LighterModifyOrderRequest;
+import com.fueledbychai.lighter.common.api.signer.LighterNativeTransactionSigner;
 import com.fueledbychai.lighter.common.api.ws.model.LighterAccountStats;
 import com.fueledbychai.lighter.common.api.ws.model.LighterAccountStatsUpdate;
 import com.fueledbychai.lighter.common.api.ws.model.LighterOrder;
@@ -48,6 +53,11 @@ public class LighterBroker extends AbstractBasicBroker {
 
     protected static final Logger logger = LoggerFactory.getLogger(LighterBroker.class);
     protected static final long UNINITIALIZED_NONCE = Long.MIN_VALUE;
+    protected static final long UNINITIALIZED_AUTH_TOKEN_EXPIRY = Long.MIN_VALUE;
+    protected static final long DEFAULT_AUTH_TOKEN_TTL_SECONDS = 10L * 60L;
+    protected static final long AUTH_TOKEN_REFRESH_SKEW_SECONDS = 30L;
+    protected static final long AUTH_TOKEN_BACKGROUND_REFRESH_LEAD_SECONDS = 5L * 60L;
+    protected static final long AUTH_TOKEN_BACKGROUND_REFRESH_PERIOD_SECONDS = 5L * 60L;
 
     protected final ILighterRestApi restApi;
     protected final ILighterWebSocketApi websocketApi;
@@ -60,10 +70,14 @@ public class LighterBroker extends AbstractBasicBroker {
     protected final AtomicLong nextClientOrderId = new AtomicLong(System.currentTimeMillis());
     protected final AtomicLong lastSubmittedNonce = new AtomicLong(UNINITIALIZED_NONCE);
     protected final Object nonceLock = new Object();
+    protected final Object authRefreshSchedulerLock = new Object();
     protected final ILighterAccountOrdersListener accountOrdersListener = this::onLighterAccountOrdersEvent;
     protected final Map<String, String> clientOrderIdByOrderId = new ConcurrentHashMap<>();
 
     protected volatile String authToken;
+    protected volatile long authTokenExpiryEpochSeconds = UNINITIALIZED_AUTH_TOKEN_EXPIRY;
+    protected volatile ScheduledExecutorService authTokenRefreshScheduler;
+    protected volatile ScheduledFuture<?> authTokenRefreshTask;
     protected volatile boolean connected;
     protected volatile boolean accountOrdersSubscribed;
 
@@ -74,13 +88,15 @@ public class LighterBroker extends AbstractBasicBroker {
                 LighterConfiguration.getInstance().getApiKeyIndex());
 
         LighterConfiguration configuration = LighterConfiguration.getInstance();
-        logger.info("LighterBroker initialized with configuration: environment={}, restUrl={}, webSocketUrl={}, accountIndex={}",
+        logger.info(
+                "LighterBroker initialized with configuration: environment={}, restUrl={}, webSocketUrl={}, accountIndex={}",
                 configuration.getEnvironment(), configuration.getRestUrl(), configuration.getWebSocketUrl(),
                 accountIndex);
     }
 
     public LighterBroker(ILighterRestApi restApi, ILighterWebSocketApi websocketApi) {
-        this(restApi, websocketApi, LighterTranslator.getInstance(), LighterConfiguration.getInstance().getAccountIndex(),
+        this(restApi, websocketApi, LighterTranslator.getInstance(),
+                LighterConfiguration.getInstance().getAccountIndex(),
                 LighterConfiguration.getInstance().getApiKeyIndex());
     }
 
@@ -112,7 +128,8 @@ public class LighterBroker extends AbstractBasicBroker {
     public BrokerRequestResult cancelOrder(String id) {
         checkConnected();
         if (id == null || id.isBlank()) {
-            return new BrokerRequestResult(false, true, "order id is required", BrokerRequestResult.FailureType.VALIDATION_FAILED);
+            return new BrokerRequestResult(false, true, "order id is required",
+                    BrokerRequestResult.FailureType.VALIDATION_FAILED);
         }
 
         OrderTicket openOrder = orderRegistry.getOrderById(id);
@@ -154,7 +171,8 @@ public class LighterBroker extends AbstractBasicBroker {
     public BrokerRequestResult cancelOrder(OrderTicket order) {
         checkConnected();
         if (order == null) {
-            return new BrokerRequestResult(false, true, "order is required", BrokerRequestResult.FailureType.VALIDATION_FAILED);
+            return new BrokerRequestResult(false, true, "order is required",
+                    BrokerRequestResult.FailureType.VALIDATION_FAILED);
         }
 
         OrderTicket resolvedOrder = resolveOrderForCancel(order);
@@ -167,9 +185,9 @@ public class LighterBroker extends AbstractBasicBroker {
             long nonce = getNextManagedNonce();
             LighterCancelOrderRequest cancelRequest = translator.translateCancelOrder(resolvedOrder, accountIndex,
                     apiKeyIndex, nonce);
-            LighterSendTxResponse response = sendWithNonceRetry("cancel order", nonce, cancelRequest,
-                    refreshedNonce -> translator.translateCancelOrder(resolvedOrder, accountIndex, apiKeyIndex,
-                            refreshedNonce),
+            LighterSendTxResponse response = sendWithNonceRetry(
+                    "cancel order", nonce, cancelRequest, refreshedNonce -> translator
+                            .translateCancelOrder(resolvedOrder, accountIndex, apiKeyIndex, refreshedNonce),
                     websocketApi::cancelOrder);
             if (response == null || !response.isSuccess()) {
                 return buildFailedTxResult("Failed to cancel order", response);
@@ -192,7 +210,8 @@ public class LighterBroker extends AbstractBasicBroker {
     public BrokerRequestResult placeOrder(OrderTicket order) {
         checkConnected();
         if (order == null) {
-            return new BrokerRequestResult(false, true, "order is required", BrokerRequestResult.FailureType.VALIDATION_FAILED);
+            return new BrokerRequestResult(false, true, "order is required",
+                    BrokerRequestResult.FailureType.VALIDATION_FAILED);
         }
 
         try {
@@ -203,7 +222,7 @@ public class LighterBroker extends AbstractBasicBroker {
             LighterCreateOrderRequest createOrderRequest = translator.translateCreateOrder(order, accountIndex,
                     apiKeyIndex, nonce);
 
-            ensureAccountOrdersSubscription(createOrderRequest.getMarketIndex());
+            // ensureAccountOrdersSubscription(createOrderRequest.getMarketIndex());
 
             if (order.getOrderId() == null || order.getOrderId().isBlank()) {
                 order.setOrderId(order.getClientOrderId());
@@ -234,7 +253,8 @@ public class LighterBroker extends AbstractBasicBroker {
     public BrokerRequestResult modifyOrder(OrderTicket order) {
         checkConnected();
         if (order == null) {
-            return new BrokerRequestResult(false, true, "order is required", BrokerRequestResult.FailureType.VALIDATION_FAILED);
+            return new BrokerRequestResult(false, true, "order is required",
+                    BrokerRequestResult.FailureType.VALIDATION_FAILED);
         }
 
         try {
@@ -275,6 +295,7 @@ public class LighterBroker extends AbstractBasicBroker {
         }
 
         try {
+            proactivelyResolveConfiguredAccountIndex();
             authToken = refreshAuthTokenWithAccountResolution();
             try {
                 refreshManagedNonce("connect");
@@ -285,11 +306,14 @@ public class LighterBroker extends AbstractBasicBroker {
             websocketApi.subscribeAccountStats(accountIndex, this::onLighterAccountStatsEvent);
             websocketApi.subscribeAccountAllTrades(accountIndex, authToken, this::onLighterAccountAllTradesEvent);
             subscribeAccountOrdersForKnownMarkets(authToken);
+            websocketApi.connectTxWebSocket();
+            startAuthTokenRefreshScheduler();
 
             connected = true;
             logger.info("Connected Lighter broker websocket streams for accountIndex={}", accountIndex);
         } catch (Exception ex) {
             connected = false;
+            stopAuthTokenRefreshScheduler();
             logger.error("Failed to connect Lighter broker", ex);
             throw ex;
         }
@@ -299,6 +323,9 @@ public class LighterBroker extends AbstractBasicBroker {
     protected void onDisconnect() {
         connected = false;
         accountOrdersSubscribed = false;
+        authToken = null;
+        authTokenExpiryEpochSeconds = UNINITIALIZED_AUTH_TOKEN_EXPIRY;
+        stopAuthTokenRefreshScheduler();
         lastSubmittedNonce.set(UNINITIALIZED_NONCE);
         clientOrderIdByOrderId.clear();
         try {
@@ -459,7 +486,8 @@ public class LighterBroker extends AbstractBasicBroker {
                 trackedOrder.setOrderFilledTime(orderStatus.getTimestamp());
             }
 
-            if (orderStatus.getStatus() == OrderStatus.Status.FILLED || orderStatus.getStatus() == OrderStatus.Status.CANCELED
+            if (orderStatus.getStatus() == OrderStatus.Status.FILLED
+                    || orderStatus.getStatus() == OrderStatus.Status.CANCELED
                     || orderStatus.getStatus() == OrderStatus.Status.REJECTED) {
                 if (!isKnownOpenOrder(trackedOrder)) {
                     // BrokerOrderRegistry expects the ticker open-order map to exist before a
@@ -512,7 +540,8 @@ public class LighterBroker extends AbstractBasicBroker {
                 trackedOrder.setCommission(trackedOrder.getCommission().add(commission));
                 trackedOrder.addFill(fill);
 
-                if (trackedOrder.getSize() != null && trackedOrder.getFilledSize().compareTo(trackedOrder.getSize()) >= 0) {
+                if (trackedOrder.getSize() != null
+                        && trackedOrder.getFilledSize().compareTo(trackedOrder.getSize()) >= 0) {
                     trackedOrder.setCurrentStatus(OrderStatus.Status.FILLED);
                 } else {
                     trackedOrder.setCurrentStatus(OrderStatus.Status.PARTIAL_FILL);
@@ -623,14 +652,22 @@ public class LighterBroker extends AbstractBasicBroker {
     }
 
     protected String ensureAuthToken() {
-        if (authToken == null || authToken.isBlank()) {
+        if (authToken == null || authToken.isBlank() || isAuthTokenRefreshRequired()) {
             return refreshAuthTokenWithAccountResolution();
         }
         return authToken;
     }
 
     protected synchronized String refreshAuthToken() {
+        String signedAuthToken = createLocalAuthToken(accountIndex);
+        if (signedAuthToken != null && !signedAuthToken.isBlank()) {
+            authToken = signedAuthToken;
+            return authToken;
+        }
+
         authToken = restApi.getApiToken(accountIndex);
+        authTokenExpiryEpochSeconds = Long.MAX_VALUE;
+        logger.debug("Using server-issued Lighter API token for broker auth because local signing is unavailable");
         return authToken;
     }
 
@@ -673,6 +710,35 @@ public class LighterBroker extends AbstractBasicBroker {
         }
     }
 
+    protected void proactivelyResolveConfiguredAccountIndex() {
+        String accountAddress = resolveConfiguredAccountAddress();
+        if (accountAddress == null || accountAddress.isBlank()) {
+            logger.info(
+                    "Skipping proactive Lighter account index verification because no account address is configured");
+            return;
+        }
+
+        Long resolvedAccountIndex = resolveAccountIndexFromConfiguredAddress();
+        if (resolvedAccountIndex == null) {
+            throw new IllegalStateException(String.format(
+                    "Unable to resolve Lighter account index from configured address %s during connect; refusing to continue with configured accountIndex=%d",
+                    accountAddress, accountIndex));
+        }
+
+        long resolved = resolvedAccountIndex.longValue();
+        if (resolved == accountIndex) {
+            logger.info("Verified configured Lighter accountIndex={} from address {}", accountIndex, accountAddress);
+            return;
+        }
+
+        long previousAccountIndex = accountIndex;
+        accountIndex = resolved;
+        publishResolvedAccountIndexToConfiguration(accountIndex);
+        logger.warn(
+                "Configured Lighter accountIndex={} did not match address {}; resolved accountIndex={} and will use resolved value",
+                previousAccountIndex, accountAddress, accountIndex);
+    }
+
     protected String resolveConfiguredAccountAddress() {
         return LighterConfiguration.getInstance().getAccountAddress();
     }
@@ -680,6 +746,130 @@ public class LighterBroker extends AbstractBasicBroker {
     protected void publishResolvedAccountIndexToConfiguration(long resolvedAccountIndex) {
         System.setProperty(LighterConfiguration.LIGHTER_ACCOUNT_INDEX, Long.toString(resolvedAccountIndex));
         LighterConfiguration.reset();
+        authToken = null;
+        authTokenExpiryEpochSeconds = UNINITIALIZED_AUTH_TOKEN_EXPIRY;
+    }
+
+    protected void startAuthTokenRefreshScheduler() {
+        synchronized (authRefreshSchedulerLock) {
+            if (authTokenRefreshTask != null && !authTokenRefreshTask.isCancelled() && !authTokenRefreshTask.isDone()) {
+                return;
+            }
+            if (authTokenRefreshScheduler == null || authTokenRefreshScheduler.isShutdown()) {
+                authTokenRefreshScheduler = createAuthTokenRefreshScheduler();
+            }
+            authTokenRefreshTask = authTokenRefreshScheduler.scheduleWithFixedDelay(this::runAuthTokenRefreshTask,
+                    getAuthTokenRefreshTaskInitialDelaySeconds(), getAuthTokenRefreshTaskPeriodSeconds(),
+                    TimeUnit.SECONDS);
+        }
+    }
+
+    protected void stopAuthTokenRefreshScheduler() {
+        synchronized (authRefreshSchedulerLock) {
+            if (authTokenRefreshTask != null) {
+                authTokenRefreshTask.cancel(true);
+                authTokenRefreshTask = null;
+            }
+            if (authTokenRefreshScheduler != null) {
+                authTokenRefreshScheduler.shutdownNow();
+                authTokenRefreshScheduler = null;
+            }
+        }
+    }
+
+    protected ScheduledExecutorService createAuthTokenRefreshScheduler() {
+        return Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "lighter-auth-token-refresh");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    protected void runAuthTokenRefreshTask() {
+        if (!connected) {
+            return;
+        }
+        if (!isBackgroundAuthTokenRefreshRequired()) {
+            return;
+        }
+
+        try {
+            refreshAuthTokenWithAccountResolution();
+            logger.debug("Proactively refreshed Lighter broker auth token for accountIndex={}", accountIndex);
+        } catch (Exception ex) {
+            logger.warn("Unable to proactively refresh Lighter broker auth token for accountIndex={}", accountIndex,
+                    ex);
+        }
+    }
+
+    protected boolean isAuthTokenRefreshRequired() {
+        long expiry = authTokenExpiryEpochSeconds;
+        if (expiry == Long.MAX_VALUE) {
+            return false;
+        }
+        if (expiry <= 0L) {
+            return true;
+        }
+        return nowEpochSeconds() >= Math.max(0L, expiry - getAuthTokenRefreshSkewSeconds());
+    }
+
+    protected boolean isBackgroundAuthTokenRefreshRequired() {
+        long expiry = authTokenExpiryEpochSeconds;
+        if (authToken == null || authToken.isBlank()) {
+            return true;
+        }
+        if (expiry == Long.MAX_VALUE) {
+            return false;
+        }
+        if (expiry <= 0L) {
+            return true;
+        }
+        return nowEpochSeconds() >= Math.max(0L, expiry - getAuthTokenBackgroundRefreshLeadSeconds());
+    }
+
+    protected String createLocalAuthToken(long accountIndex) {
+        LighterConfiguration configuration = LighterConfiguration.getInstance();
+        String privateKey = configuration.getPrivateKey();
+        if (privateKey == null || privateKey.isBlank()) {
+            return null;
+        }
+
+        long now = nowEpochSeconds();
+        long expiry = now + getAuthTokenTtlSeconds();
+        String signedAuthToken = createLocalAuthSigner(configuration, accountIndex).createAuthTokenWithExpiry(now,
+                expiry, apiKeyIndex, accountIndex);
+        authTokenExpiryEpochSeconds = expiry;
+        return signedAuthToken;
+    }
+
+    protected LighterNativeTransactionSigner createLocalAuthSigner(LighterConfiguration configuration,
+            long accountIndex) {
+        return new LighterNativeTransactionSigner(configuration.getRestUrl(), configuration.getPrivateKey(),
+                apiKeyIndex, accountIndex);
+    }
+
+    protected long getAuthTokenTtlSeconds() {
+        return DEFAULT_AUTH_TOKEN_TTL_SECONDS;
+    }
+
+    protected long getAuthTokenRefreshSkewSeconds() {
+        return AUTH_TOKEN_REFRESH_SKEW_SECONDS;
+    }
+
+    protected long getAuthTokenBackgroundRefreshLeadSeconds() {
+        return AUTH_TOKEN_BACKGROUND_REFRESH_LEAD_SECONDS;
+    }
+
+    protected long getAuthTokenRefreshTaskInitialDelaySeconds() {
+        return getAuthTokenRefreshTaskPeriodSeconds();
+    }
+
+    protected long getAuthTokenRefreshTaskPeriodSeconds() {
+        return AUTH_TOKEN_BACKGROUND_REFRESH_PERIOD_SECONDS;
+    }
+
+    protected long nowEpochSeconds() {
+        return System.currentTimeMillis() / 1000L;
     }
 
     protected boolean isInvalidAccountException(Throwable throwable) {
@@ -744,7 +934,8 @@ public class LighterBroker extends AbstractBasicBroker {
 
             try {
                 long nonce = getNextManagedNonce();
-                LighterCancelOrderRequest cancelRequest = buildCancelOrderRequest(marketIndex.intValue(), orderIndex, nonce);
+                LighterCancelOrderRequest cancelRequest = buildCancelOrderRequest(marketIndex.intValue(), orderIndex,
+                        nonce);
                 LighterSendTxResponse response = sendWithNonceRetry("cancel order by index", nonce, cancelRequest,
                         refreshedNonce -> buildCancelOrderRequest(marketIndex.intValue(), orderIndex, refreshedNonce),
                         websocketApi::cancelOrder);

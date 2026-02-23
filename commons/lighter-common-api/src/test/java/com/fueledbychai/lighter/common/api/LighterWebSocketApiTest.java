@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -408,6 +409,32 @@ public class LighterWebSocketApiTest {
     }
 
     @Test
+    void connectTxWebSocketPreconnectsAndAutoReconnectsAfterClose() throws Exception {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
+
+        api.connectTxWebSocket();
+        assertEquals(1, api.connectCountByChannel.get("tx").intValue());
+        assertNotNull(api.lastTxClient);
+
+        TestTxClient firstTxClient = api.lastTxClient;
+        firstTxClient.simulateRemoteClose();
+
+        long deadlineMillis = System.currentTimeMillis() + 1_000L;
+        int connectCount = 0;
+        while (System.currentTimeMillis() < deadlineMillis) {
+            Integer count = api.connectCountByChannel.get("tx");
+            connectCount = count == null ? 0 : count.intValue();
+            if (connectCount >= 2) {
+                break;
+            }
+            Thread.sleep(20L);
+        }
+
+        assertTrue(connectCount >= 2, "Expected tx websocket reconnect to be attempted");
+        api.disconnectAll();
+    }
+
+    @Test
     void sendSignedTransactionRejectsInvalidInput() {
         TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
         assertThrows(IllegalArgumentException.class, () -> api.sendSignedTransaction(0, new JSONObject()));
@@ -605,6 +632,7 @@ public class LighterWebSocketApiTest {
         private final List<String> postedTxMessages = new CopyOnWriteArrayList<>();
         private final Map<String, List<String>> subscribeAuthHistoryByChannel = new ConcurrentHashMap<>();
         private final ILighterTransactionSigner providedSigner;
+        private volatile TestTxClient lastTxClient;
 
         TestableLighterWebSocketApi(String url) {
             this(url, null);
@@ -641,8 +669,9 @@ public class LighterWebSocketApiTest {
         @Override
         protected LighterWebSocketClient createSendTxClient(IWebSocketProcessor processor) {
             try {
-                return new TestTxClient("wss://example.test/stream", processor, postedTxMessages, connectCountByChannel,
-                        closeCountByChannel);
+                lastTxClient = new TestTxClient("wss://example.test/stream", processor, postedTxMessages,
+                        connectCountByChannel, closeCountByChannel);
+                return lastTxClient;
             } catch (Exception e) {
                 throw new IllegalStateException(e);
             }
@@ -661,6 +690,11 @@ public class LighterWebSocketApiTest {
         @Override
         protected synchronized ILighterTransactionSigner getOrCreateOrderSigner() {
             return providedSigner;
+        }
+
+        @Override
+        protected void waitForAccountOrdersSubscriptionResult(String channel, CompletableFuture<Void> subscribeResult) {
+            // no-op for test doubles
         }
     }
 
@@ -701,6 +735,7 @@ public class LighterWebSocketApiTest {
         private final List<String> postedTxMessages;
         private final Map<String, Integer> connectCountByChannel;
         private final Map<String, Integer> closeCountByChannel;
+        private volatile boolean open;
 
         TestTxClient(String serverUri, IWebSocketProcessor processor, List<String> postedTxMessages,
                 Map<String, Integer> connectCountByChannel, Map<String, Integer> closeCountByChannel) throws Exception {
@@ -712,13 +747,25 @@ public class LighterWebSocketApiTest {
 
         @Override
         public void connect() {
+            open = true;
             connectCountByChannel.merge("tx", 1, Integer::sum);
         }
 
         @Override
         public void close() {
+            open = false;
             closeCountByChannel.merge("tx", 1, Integer::sum);
             processor.connectionClosed(1000, "manual close", false);
+        }
+
+        @Override
+        public boolean isOpen() {
+            return open;
+        }
+
+        void simulateRemoteClose() {
+            open = false;
+            processor.connectionClosed(1006, "remote close", true);
         }
 
         @Override

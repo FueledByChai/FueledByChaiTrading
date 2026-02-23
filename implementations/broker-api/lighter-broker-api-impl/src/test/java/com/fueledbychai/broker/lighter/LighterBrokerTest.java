@@ -6,7 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -153,52 +156,51 @@ class LighterBrokerTest {
 
     @Test
     void connect_PrefetchesNonceOnStartup() {
-        broker.connected = false;
-
-        when(mockRestApi.getApiToken(255L)).thenReturn("token");
+        LighterBroker connectingBroker = spy(new LighterBroker(mockRestApi, mockWebSocketApi, mockTranslator, 255L, 3));
+        connectingBroker.connected = false;
+        doNothing().when(connectingBroker).proactivelyResolveConfiguredAccountIndex();
+        doReturn("token").when(connectingBroker).refreshAuthTokenWithAccountResolution();
         when(mockRestApi.getNextNonce(255L, 3)).thenReturn(501L);
 
-        broker.connect();
+        connectingBroker.connect();
 
-        assertTrue(broker.isConnected());
-        verify(mockRestApi).getApiToken(255L);
+        assertTrue(connectingBroker.isConnected());
+        verify(connectingBroker).refreshAuthTokenWithAccountResolution();
         verify(mockRestApi).getNextNonce(255L, 3);
+        verify(mockWebSocketApi).connectTxWebSocket();
     }
 
     @Test
     void connect_SubscribesAccountOrdersOnceUsingSingleStream() {
-        broker.connected = false;
-
-        when(mockRestApi.getApiToken(255L)).thenReturn("token");
+        LighterBroker connectingBroker = spy(new LighterBroker(mockRestApi, mockWebSocketApi, mockTranslator, 255L, 3));
+        connectingBroker.connected = false;
+        doNothing().when(connectingBroker).proactivelyResolveConfiguredAccountIndex();
+        doReturn("token").when(connectingBroker).refreshAuthTokenWithAccountResolution();
         when(mockRestApi.getNextNonce(255L, 3)).thenReturn(501L);
 
-        broker.connect();
+        connectingBroker.connect();
 
         verify(mockWebSocketApi, times(1)).subscribeAccountOrders(eq(0), eq(255L), eq("token"), any());
     }
 
     @Test
-    void connect_ResolvesAccountIndexFromAddressWhenConfiguredIndexInvalid() {
+    void connect_ResolvesAccountIndexFromAddressBeforeAuth() {
         LighterBroker reconnectingBroker = spy(new LighterBroker(mockRestApi, mockWebSocketApi, mockTranslator, 999L, 3));
         reconnectingBroker.connected = false;
         doReturn("0xabc123").when(reconnectingBroker).resolveConfiguredAccountAddress();
+        doReturn("token").when(reconnectingBroker).createLocalAuthToken(255L);
 
-        when(mockRestApi.getApiToken(999L))
-                .thenThrow(new RuntimeException("Unexpected code 401: Unauthorized",
-                        new ResponseException("Unable to create Lighter API token: invalid auth: couldnt find account",
-                                401)));
         when(mockRestApi.resolveAccountIndex("0xabc123")).thenReturn(255L);
-        when(mockRestApi.getApiToken(255L)).thenReturn("token");
         when(mockRestApi.getNextNonce(255L, 3)).thenReturn(501L);
 
         reconnectingBroker.connect();
 
         assertTrue(reconnectingBroker.isConnected());
         assertEquals(255L, reconnectingBroker.accountIndex);
-        verify(mockRestApi).getApiToken(999L);
+        verify(reconnectingBroker, never()).createLocalAuthToken(999L);
         verify(mockRestApi).resolveAccountIndex("0xabc123");
         verify(reconnectingBroker).publishResolvedAccountIndexToConfiguration(255L);
-        verify(mockRestApi).getApiToken(255L);
+        verify(reconnectingBroker).createLocalAuthToken(255L);
         verify(mockRestApi).getNextNonce(255L, 3);
     }
 

@@ -51,6 +51,7 @@ public class LighterWebSocketApi
     private static final long DEFAULT_RECONNECT_DELAY_MILLIS = 2_000L;
     private static final long DEFAULT_SEND_TX_TIMEOUT_MILLIS = 5_000L;
     private static final long DEFAULT_TX_CONNECT_TIMEOUT_MILLIS = 5_000L;
+    private static final long DEFAULT_SUBSCRIBE_TIMEOUT_MILLIS = 5_000L;
     private static final long DEFAULT_WS_AUTH_TOKEN_TTL_SECONDS = 600L;
     private static final int DEFAULT_MAX_CONNECT_ATTEMPTS_PER_MINUTE = 50;
     private static final long DEFAULT_CONNECT_ATTEMPT_WINDOW_MILLIS = 60_000L;
@@ -75,6 +76,7 @@ public class LighterWebSocketApi
     private final ConcurrentLinkedDeque<Long> recentConnectAttemptTimestamps = new ConcurrentLinkedDeque<>();
     private final ConcurrentHashMap<String, CompletableFuture<LighterSendTxResponse>> pendingTxResponses = new ConcurrentHashMap<>();
     private final ConcurrentLinkedQueue<String> pendingTxRequestOrder = new ConcurrentLinkedQueue<>();
+    private final ConcurrentHashMap<String, CompletableFuture<Void>> pendingChannelSubscribeResults = new ConcurrentHashMap<>();
     private final AtomicInteger txRequestIdCounter = new AtomicInteger(1);
     private final ScheduledExecutorService reconnectScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread thread = new Thread(r, "lighter-ws-reconnect");
@@ -85,6 +87,8 @@ public class LighterWebSocketApi
     private volatile LighterNativeTransactionSigner wsAuthSigner;
     private volatile LighterWebSocketClient txClient;
     private volatile LighterSendTxWebSocketProcessor txProcessor;
+    private volatile ScheduledFuture<?> txReconnectTask;
+    private volatile boolean maintainTxConnection;
 
     public LighterWebSocketApi() {
         this(LighterConfiguration.getInstance().getWebSocketUrl(), null);
@@ -159,7 +163,8 @@ public class LighterWebSocketApi
         if (authToken == null || authToken.isBlank()) {
             throw new IllegalArgumentException("authToken is required");
         }
-        String channel = LighterWSClientBuilder.getAccountOrdersAllChannel(accountIndex);
+        // Temporary diagnostic: force BTC perp account_orders stream (market_id=1) instead of account_orders/all.
+        String channel = LighterWSClientBuilder.getAccountOrdersChannel(1, accountIndex);
         return subscribeAccountOrders(channel, accountIndex, authToken, listener);
     }
 
@@ -243,6 +248,13 @@ public class LighterWebSocketApi
             pendingTxResponses.remove(requestId);
             pendingTxRequestOrder.remove(requestId);
         }
+    }
+
+    @Override
+    public synchronized void connectTxWebSocket() {
+        maintainTxConnection = true;
+        cancelTxReconnectTask();
+        getOrCreateTxClient();
     }
 
     protected synchronized LighterWebSocketClient subscribeMarketStats(String channel,
@@ -385,11 +397,21 @@ public class LighterWebSocketApi
         if (processor == null) {
             processor = createAccountOrdersProcessor(channel);
             LighterWebSocketClient client = createClient(channel, processor, subscribeAuth);
+            CompletableFuture<Void> subscribeResult = new CompletableFuture<>();
+            pendingChannelSubscribeResults.put(channel, subscribeResult);
             accountOrdersProcessors.put(channel, processor);
             channelClients.put(channel, client);
             logger.info("Connecting to Lighter websocket channel: {} using {}", channel, webSocketUrl);
             acquireConnectAttemptSlot("account orders/" + channel);
-            client.connect();
+            try {
+                client.connect();
+                waitForAccountOrdersSubscriptionResult(channel, subscribeResult);
+            } catch (Exception e) {
+                pendingChannelSubscribeResults.remove(channel);
+                cleanupFailedAccountOrdersSubscription(channel);
+                throw e instanceof RuntimeException runtime ? runtime
+                        : new IllegalStateException("Failed to subscribe to Lighter account_orders channel " + channel, e);
+            }
         }
 
         processor.addEventListener(listener);
@@ -430,7 +452,10 @@ public class LighterWebSocketApi
     public synchronized void disconnectAll() {
         manualCloseChannels.addAll(channelClients.keySet());
         cancelAllReconnectTasks();
+        maintainTxConnection = false;
+        cancelTxReconnectTask();
         failPendingTxResponses(new IllegalStateException("Lighter websocket disconnected"));
+        failPendingSubscriptionResults(new IllegalStateException("Lighter websocket disconnected"));
 
         if (txClient != null) {
             try {
@@ -510,6 +535,7 @@ public class LighterWebSocketApi
         channelSubscribeAuth.clear();
         accountAllTradesChannelAccountIndex.clear();
         accountOrdersChannelAccountIndex.clear();
+        pendingChannelSubscribeResults.clear();
         wsAuthSigner = null;
         manualCloseChannels.clear();
         recentConnectAttemptTimestamps.clear();
@@ -542,7 +568,8 @@ public class LighterWebSocketApi
     protected LighterAccountOrdersWebSocketProcessor createAccountOrdersProcessor(String channel) {
         return new LighterAccountOrdersWebSocketProcessor(() -> {
             handleChannelClosed(channel, ChannelType.ACCOUNT_ORDERS);
-        });
+        }, () -> handleAccountOrdersSubscriptionSuccess(channel),
+                errorMessage -> handleAccountOrdersSubscriptionFailure(channel, errorMessage));
     }
 
     protected LighterAccountStatsWebSocketProcessor createAccountStatsProcessor(String channel) {
@@ -572,6 +599,10 @@ public class LighterWebSocketApi
 
     protected long getReconnectDelayMillis() {
         return DEFAULT_RECONNECT_DELAY_MILLIS;
+    }
+
+    protected long getSubscribeTimeoutMillis() {
+        return DEFAULT_SUBSCRIBE_TIMEOUT_MILLIS;
     }
 
     protected int getMaxConnectAttemptsPerWindow() {
@@ -808,6 +839,94 @@ public class LighterWebSocketApi
         reconnectTasks.clear();
     }
 
+    protected void handleAccountOrdersSubscriptionSuccess(String channel) {
+        CompletableFuture<Void> future = pendingChannelSubscribeResults.remove(channel);
+        if (future != null) {
+            future.complete(null);
+        }
+    }
+
+    protected void handleAccountOrdersSubscriptionFailure(String channel, String errorMessage) {
+        String message = "Lighter account_orders subscription failed for channel " + channel;
+        if (errorMessage != null && !errorMessage.isBlank()) {
+            message += ": " + errorMessage;
+        }
+        IllegalStateException failure = new IllegalStateException(message);
+        CompletableFuture<Void> future = pendingChannelSubscribeResults.remove(channel);
+        if (future != null) {
+            future.completeExceptionally(failure);
+            return;
+        }
+
+        logger.error(message);
+        manualCloseChannels.add(channel);
+        cancelReconnectTask(channel);
+        LighterWebSocketClient client = channelClients.get(channel);
+        if (client != null) {
+            try {
+                client.close();
+            } catch (Exception e) {
+                logger.warn("Error closing failed account_orders websocket channel {}", channel, e);
+            }
+        }
+    }
+
+    protected void waitForAccountOrdersSubscriptionResult(String channel, CompletableFuture<Void> subscribeResult) {
+        if (subscribeResult == null) {
+            return;
+        }
+        try {
+            subscribeResult.get(getSubscribeTimeoutMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            throw new IllegalStateException("Timeout waiting for Lighter account_orders subscription ack for channel "
+                    + channel, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(
+                    "Interrupted while waiting for Lighter account_orders subscription ack for channel " + channel, e);
+        } catch (Exception e) {
+            throw new IllegalStateException("Lighter account_orders subscription failed for channel " + channel, e);
+        }
+    }
+
+    protected void cleanupFailedAccountOrdersSubscription(String channel) {
+        manualCloseChannels.add(channel);
+        cancelReconnectTask(channel);
+        channelSubscribeAuth.remove(channel);
+        accountOrdersChannelAccountIndex.remove(channel);
+
+        LighterWebSocketClient client = channelClients.remove(channel);
+        if (client != null) {
+            try {
+                client.close();
+            } catch (Exception e) {
+                logger.warn("Error closing failed account_orders websocket channel {}", channel, e);
+            }
+        }
+
+        LighterAccountOrdersWebSocketProcessor processor = accountOrdersProcessors.remove(channel);
+        if (processor != null) {
+            try {
+                processor.shutdown();
+            } catch (Exception e) {
+                logger.warn("Error shutting down failed account_orders websocket processor for channel {}", channel, e);
+            }
+        }
+    }
+
+    protected void failPendingSubscriptionResults(Exception cause) {
+        if (cause == null) {
+            cause = new IllegalStateException("Lighter websocket subscription failed");
+        }
+        for (CompletableFuture<Void> future : pendingChannelSubscribeResults.values()) {
+            if (future == null || future.isDone()) {
+                continue;
+            }
+            future.completeExceptionally(cause);
+        }
+        pendingChannelSubscribeResults.clear();
+    }
+
     @Override
     public void onWebSocketEvent(LighterSendTxResponse event) {
         if (event == null) {
@@ -834,6 +953,7 @@ public class LighterWebSocketApi
     }
 
     protected synchronized LighterWebSocketClient getOrCreateTxClient() {
+        cancelTxReconnectTask();
         if (txProcessor == null) {
             txProcessor = createSendTxProcessor();
             txProcessor.addEventListener(this);
@@ -866,6 +986,49 @@ public class LighterWebSocketApi
     protected void handleTxClientClosed() {
         txClient = null;
         failPendingTxResponses(new IllegalStateException("Lighter tx websocket connection closed"));
+        if (maintainTxConnection) {
+            scheduleTxReconnect();
+        }
+    }
+
+    protected void scheduleTxReconnect() {
+        if (!maintainTxConnection) {
+            return;
+        }
+        ScheduledFuture<?> existingTask = txReconnectTask;
+        if (existingTask != null && !existingTask.isDone()) {
+            return;
+        }
+
+        long delay = getReconnectDelayMillis();
+        txReconnectTask = reconnectScheduler.schedule(this::reconnectTxClient, delay, TimeUnit.MILLISECONDS);
+        logger.info("Scheduled reconnect for tx websocket in {} ms", delay);
+    }
+
+    protected synchronized void reconnectTxClient() {
+        txReconnectTask = null;
+        if (!maintainTxConnection) {
+            return;
+        }
+        if (txClient != null && txClient.isOpen()) {
+            return;
+        }
+
+        try {
+            getOrCreateTxClient();
+            logger.info("Reconnected Lighter tx websocket endpoint: {}", getSendTxWebSocketUrl());
+        } catch (Exception e) {
+            logger.warn("Reconnect attempt failed for Lighter tx websocket", e);
+            scheduleTxReconnect();
+        }
+    }
+
+    protected void cancelTxReconnectTask() {
+        ScheduledFuture<?> task = txReconnectTask;
+        if (task != null) {
+            task.cancel(false);
+            txReconnectTask = null;
+        }
     }
 
     protected void failPendingTxResponses(Exception cause) {

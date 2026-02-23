@@ -169,7 +169,7 @@ class LighterTranslatorTest {
         sellOrder.setDuration(OrderTicket.Duration.IMMEDIATE_OR_CANCEL);
 
         LighterCreateOrderRequest sellRequest = translator.translateCreateOrder(sellOrder, 255L, 3, 1003L);
-        assertEquals(0, sellRequest.getPrice());
+        assertEquals(1, sellRequest.getPrice());
         assertEquals(LighterOrderType.MARKET, sellRequest.getOrderType());
         assertEquals(LighterTimeInForce.IOC, sellRequest.getTimeInForce());
     }

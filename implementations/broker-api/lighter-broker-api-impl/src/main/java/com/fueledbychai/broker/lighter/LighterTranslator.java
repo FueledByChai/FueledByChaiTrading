@@ -459,7 +459,9 @@ public class LighterTranslator implements ILighterTranslator {
     protected int resolveDefaultMarketPrice(OrderTicket order) {
         // Lighter encodes market orders with a price field. If caller does not provide
         // one, use side-aware aggressive defaults to preserve market semantics.
-        return order != null && order.isBuyOrder() ? Integer.MAX_VALUE : 0;
+        // Sell-side zero is rejected by Lighter ("invalid price"), so use the
+        // smallest positive native tick price instead.
+        return order != null && order.isBuyOrder() ? Integer.MAX_VALUE : 1;
     }
 
     protected int scalePrice(BigDecimal price, Ticker ticker, int fallback) {

@@ -46,5 +46,9 @@ public interface ILighterWebSocketApi {
 
     LighterSendTxResponse sendSignedTransaction(int txType, JSONObject txInfo);
 
+    default void connectTxWebSocket() {
+        // Optional capability. Implementations may no-op.
+    }
+
     void disconnectAll();
 }
