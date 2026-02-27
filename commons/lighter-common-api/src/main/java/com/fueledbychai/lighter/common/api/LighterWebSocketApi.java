@@ -72,6 +72,7 @@ public class LighterWebSocketApi
     private final Map<String, Long> accountAllTradesChannelAccountIndex = new ConcurrentHashMap<>();
     private final Map<String, Long> accountOrdersChannelAccountIndex = new ConcurrentHashMap<>();
     private final Map<String, ScheduledFuture<?>> reconnectTasks = new ConcurrentHashMap<>();
+    private final Map<String, AtomicInteger> reconnectAttemptsByChannel = new ConcurrentHashMap<>();
     private final Set<String> manualCloseChannels = ConcurrentHashMap.newKeySet();
     private final ConcurrentLinkedDeque<Long> recentConnectAttemptTimestamps = new ConcurrentLinkedDeque<>();
     private final ConcurrentHashMap<String, CompletableFuture<LighterSendTxResponse>> pendingTxResponses = new ConcurrentHashMap<>();
@@ -88,6 +89,7 @@ public class LighterWebSocketApi
     private volatile LighterWebSocketClient txClient;
     private volatile LighterSendTxWebSocketProcessor txProcessor;
     private volatile ScheduledFuture<?> txReconnectTask;
+    private final AtomicInteger txReconnectAttempts = new AtomicInteger(0);
     private volatile boolean maintainTxConnection;
 
     public LighterWebSocketApi() {
@@ -453,6 +455,7 @@ public class LighterWebSocketApi
         cancelAllReconnectTasks();
         maintainTxConnection = false;
         cancelTxReconnectTask();
+        resetTxReconnectAttempts();
         failPendingTxResponses(new IllegalStateException("Lighter websocket disconnected"));
         failPendingSubscriptionResults(new IllegalStateException("Lighter websocket disconnected"));
 
@@ -460,7 +463,7 @@ public class LighterWebSocketApi
             try {
                 txClient.close();
             } catch (Exception e) {
-                logger.warn("Error closing Lighter tx websocket client", e);
+                logger.error("Error closing Lighter tx websocket client", e);
             } finally {
                 txClient = null;
             }
@@ -469,7 +472,7 @@ public class LighterWebSocketApi
             try {
                 txProcessor.shutdown();
             } catch (Exception e) {
-                logger.warn("Error shutting down Lighter tx websocket processor", e);
+                logger.error("Error shutting down Lighter tx websocket processor", e);
             } finally {
                 txProcessor = null;
             }
@@ -479,49 +482,49 @@ public class LighterWebSocketApi
             try {
                 client.close();
             } catch (Exception e) {
-                logger.warn("Error closing websocket client", e);
+                logger.error("Error closing websocket client", e);
             }
         }
         for (LighterMarketStatsWebSocketProcessor processor : marketStatsProcessors.values()) {
             try {
                 processor.shutdown();
             } catch (Exception e) {
-                logger.warn("Error shutting down websocket processor", e);
+                logger.error("Error shutting down websocket processor", e);
             }
         }
         for (LighterOrderBookWebSocketProcessor processor : orderBookProcessors.values()) {
             try {
                 processor.shutdown();
             } catch (Exception e) {
-                logger.warn("Error shutting down websocket processor", e);
+                logger.error("Error shutting down websocket processor", e);
             }
         }
         for (LighterTradesWebSocketProcessor processor : tradeProcessors.values()) {
             try {
                 processor.shutdown();
             } catch (Exception e) {
-                logger.warn("Error shutting down websocket processor", e);
+                logger.error("Error shutting down websocket processor", e);
             }
         }
         for (LighterAccountAllTradesWebSocketProcessor processor : accountAllTradesProcessors.values()) {
             try {
                 processor.shutdown();
             } catch (Exception e) {
-                logger.warn("Error shutting down websocket processor", e);
+                logger.error("Error shutting down websocket processor", e);
             }
         }
         for (LighterAccountOrdersWebSocketProcessor processor : accountOrdersProcessors.values()) {
             try {
                 processor.shutdown();
             } catch (Exception e) {
-                logger.warn("Error shutting down websocket processor", e);
+                logger.error("Error shutting down websocket processor", e);
             }
         }
         for (LighterAccountStatsWebSocketProcessor processor : accountStatsProcessors.values()) {
             try {
                 processor.shutdown();
             } catch (Exception e) {
-                logger.warn("Error shutting down websocket processor", e);
+                logger.error("Error shutting down websocket processor", e);
             }
         }
         channelClients.clear();
@@ -579,7 +582,8 @@ public class LighterWebSocketApi
 
     protected LighterWebSocketClient createClient(String channel, IWebSocketProcessor processor) {
         try {
-            return LighterWSClientBuilder.buildClient(webSocketUrl, channel, processor);
+            return new LighterWebSocketClient(webSocketUrl, channel, null, processor, true,
+                    () -> resetChannelReconnectAttempts(channel));
         } catch (Exception e) {
             throw new IllegalStateException("Unable to create Lighter websocket client for channel " + channel, e);
         }
@@ -590,7 +594,8 @@ public class LighterWebSocketApi
             return createClient(channel, processor);
         }
         try {
-            return LighterWSClientBuilder.buildClient(webSocketUrl, channel, subscribeAuth, processor);
+            return new LighterWebSocketClient(webSocketUrl, channel, subscribeAuth, processor, true,
+                    () -> resetChannelReconnectAttempts(channel));
         } catch (Exception e) {
             throw new IllegalStateException("Unable to create Lighter websocket client for channel " + channel, e);
         }
@@ -598,6 +603,38 @@ public class LighterWebSocketApi
 
     protected long getReconnectDelayMillis() {
         return DEFAULT_RECONNECT_DELAY_MILLIS;
+    }
+
+    protected long getMaxReconnectDelayMillis() {
+        long baseDelay = Math.max(1L, getReconnectDelayMillis());
+        return Math.max(baseDelay, baseDelay * 32L);
+    }
+
+    protected long getInitialReconnectBackoffStepMillis() {
+        long baseDelay = Math.max(1L, getReconnectDelayMillis());
+        return Math.max(100L, baseDelay / 8L);
+    }
+
+    protected long calculateReconnectDelayMillis(int attemptNumber) {
+        if (attemptNumber <= 1) {
+            return 0L;
+        }
+
+        long stepMillis = getInitialReconnectBackoffStepMillis();
+        long maxDelayMillis = Math.max(stepMillis, getMaxReconnectDelayMillis());
+        long delay = stepMillis;
+        int extraDoublings = attemptNumber - 2;
+        for (int i = 0; i < extraDoublings; i++) {
+            if (delay >= maxDelayMillis) {
+                return maxDelayMillis;
+            }
+            long doubled = delay << 1;
+            if (doubled <= 0L || doubled > maxDelayMillis) {
+                return maxDelayMillis;
+            }
+            delay = doubled;
+        }
+        return Math.min(delay, maxDelayMillis);
     }
 
     protected long getSubscribeTimeoutMillis() {
@@ -753,9 +790,10 @@ public class LighterWebSocketApi
     }
 
     protected void handleChannelClosed(String channel, ChannelType type) {
-        logger.info("Lighter websocket closed for channel: {}", channel);
+        logger.warn("Lighter websocket closed for channel: {}", channel);
         channelClients.remove(channel);
         if (manualCloseChannels.remove(channel)) {
+            clearChannelReconnectAttempts(channel);
             return;
         }
         scheduleReconnect(channel, type);
@@ -763,6 +801,7 @@ public class LighterWebSocketApi
 
     protected void scheduleReconnect(String channel, ChannelType type) {
         if (!hasProcessor(channel, type)) {
+            clearChannelReconnectAttempts(channel);
             return;
         }
         ScheduledFuture<?> existingTask = reconnectTasks.get(channel);
@@ -770,11 +809,13 @@ public class LighterWebSocketApi
             return;
         }
 
-        long delay = getReconnectDelayMillis();
+        int attemptNumber = reconnectAttemptsByChannel.computeIfAbsent(channel, key -> new AtomicInteger())
+                .incrementAndGet();
+        long delay = calculateReconnectDelayMillis(attemptNumber);
         ScheduledFuture<?> task = reconnectScheduler.schedule(() -> reconnectChannel(channel, type), delay,
                 TimeUnit.MILLISECONDS);
         reconnectTasks.put(channel, task);
-        logger.info("Scheduled reconnect for channel {} in {} ms", channel, delay);
+        logger.warn("Scheduled reconnect for channel {} (attempt {}) in {} ms", channel, attemptNumber, delay);
     }
 
     protected synchronized void reconnectChannel(String channel, ChannelType type) {
@@ -788,6 +829,7 @@ public class LighterWebSocketApi
 
         IWebSocketProcessor processor = getProcessor(channel, type);
         if (processor == null) {
+            clearChannelReconnectAttempts(channel);
             return;
         }
 
@@ -798,11 +840,11 @@ public class LighterWebSocketApi
             }
             LighterWebSocketClient client = createClient(channel, processor, subscribeAuth);
             channelClients.put(channel, client);
-            logger.info("Reconnecting to Lighter websocket channel: {} using {}", channel, webSocketUrl);
+            logger.warn("Reconnecting to Lighter websocket channel: {} using {}", channel, webSocketUrl);
             acquireConnectAttemptSlot("reconnect/" + channel);
             client.connect();
         } catch (Exception e) {
-            logger.warn("Reconnect attempt failed for channel {}", channel, e);
+            logger.error("Reconnect attempt failed for channel {}", channel, e);
             scheduleReconnect(channel, type);
         }
     }
@@ -836,6 +878,7 @@ public class LighterWebSocketApi
             }
         }
         reconnectTasks.clear();
+        reconnectAttemptsByChannel.clear();
     }
 
     protected void handleAccountOrdersSubscriptionSuccess(String channel) {
@@ -865,7 +908,7 @@ public class LighterWebSocketApi
             try {
                 client.close();
             } catch (Exception e) {
-                logger.warn("Error closing failed account_orders websocket channel {}", channel, e);
+                logger.error("Error closing failed account_orders websocket channel {}", channel, e);
             }
         }
     }
@@ -891,6 +934,7 @@ public class LighterWebSocketApi
     protected void cleanupFailedAccountOrdersSubscription(String channel) {
         manualCloseChannels.add(channel);
         cancelReconnectTask(channel);
+        clearChannelReconnectAttempts(channel);
         channelSubscribeAuth.remove(channel);
         accountOrdersChannelAccountIndex.remove(channel);
 
@@ -899,7 +943,7 @@ public class LighterWebSocketApi
             try {
                 client.close();
             } catch (Exception e) {
-                logger.warn("Error closing failed account_orders websocket channel {}", channel, e);
+                logger.error("Error closing failed account_orders websocket channel {}", channel, e);
             }
         }
 
@@ -908,7 +952,7 @@ public class LighterWebSocketApi
             try {
                 processor.shutdown();
             } catch (Exception e) {
-                logger.warn("Error shutting down failed account_orders websocket processor for channel {}", channel, e);
+                logger.error("Error shutting down failed account_orders websocket processor for channel {}", channel, e);
             }
         }
     }
@@ -976,7 +1020,8 @@ public class LighterWebSocketApi
 
     protected LighterWebSocketClient createSendTxClient(IWebSocketProcessor processor) {
         try {
-            return LighterWSClientBuilder.buildClient(getSendTxWebSocketUrl(), null, processor);
+            return new LighterWebSocketClient(getSendTxWebSocketUrl(), null, null, processor, true,
+                    this::resetTxReconnectAttempts);
         } catch (Exception e) {
             throw new IllegalStateException("Unable to create Lighter websocket tx client", e);
         }
@@ -999,9 +1044,10 @@ public class LighterWebSocketApi
             return;
         }
 
-        long delay = getReconnectDelayMillis();
+        int attemptNumber = txReconnectAttempts.incrementAndGet();
+        long delay = calculateReconnectDelayMillis(attemptNumber);
         txReconnectTask = reconnectScheduler.schedule(this::reconnectTxClient, delay, TimeUnit.MILLISECONDS);
-        logger.info("Scheduled reconnect for tx websocket in {} ms", delay);
+        logger.warn("Scheduled reconnect for tx websocket (attempt {}) in {} ms", attemptNumber, delay);
     }
 
     protected synchronized void reconnectTxClient() {
@@ -1015,9 +1061,9 @@ public class LighterWebSocketApi
 
         try {
             getOrCreateTxClient();
-            logger.info("Reconnected Lighter tx websocket endpoint: {}", getSendTxWebSocketUrl());
+            logger.warn("Reconnected Lighter tx websocket endpoint: {}", getSendTxWebSocketUrl());
         } catch (Exception e) {
-            logger.warn("Reconnect attempt failed for Lighter tx websocket", e);
+            logger.error("Reconnect attempt failed for Lighter tx websocket", e);
             scheduleTxReconnect();
         }
     }
@@ -1046,6 +1092,21 @@ public class LighterWebSocketApi
 
     protected long getTxConnectTimeoutMillis() {
         return DEFAULT_TX_CONNECT_TIMEOUT_MILLIS;
+    }
+
+    protected void resetChannelReconnectAttempts(String channel) {
+        clearChannelReconnectAttempts(channel);
+    }
+
+    protected void clearChannelReconnectAttempts(String channel) {
+        if (channel == null || channel.isBlank()) {
+            return;
+        }
+        reconnectAttemptsByChannel.remove(channel);
+    }
+
+    protected void resetTxReconnectAttempts() {
+        txReconnectAttempts.set(0);
     }
 
     protected String buildSendTxMessage(String requestId, int txType, JSONObject txInfo) {
