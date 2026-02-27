@@ -150,6 +150,21 @@ public class LighterWebSocketApiTest {
     }
 
     @Test
+    void reconnectDelayStartsImmediateThenBacksOff() {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
+
+        long attempt1 = api.calculateReconnectDelayMillis(1);
+        long attempt2 = api.calculateReconnectDelayMillis(2);
+        long attempt3 = api.calculateReconnectDelayMillis(3);
+        long attempt4 = api.calculateReconnectDelayMillis(4);
+
+        assertEquals(0L, attempt1);
+        assertTrue(attempt2 > 0L);
+        assertTrue(attempt3 > attempt2);
+        assertTrue(attempt4 >= attempt3);
+    }
+
+    @Test
     void accountAllTradesReconnectRefreshesAuthTokenWhenGeneratorAvailable() throws Exception {
         TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream") {
             private final AtomicInteger tokenCounter = new AtomicInteger(1);
