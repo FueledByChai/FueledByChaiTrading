@@ -40,7 +40,14 @@ public class ParadexQuoteEngine extends QuoteEngine
     protected ITickerRegistry tickerRegistry;
 
     public ParadexQuoteEngine() {
-        tickerRegistry = TickerRegistryFactory.getInstance(Exchange.PARADEX);
+        this(TickerRegistryFactory.getInstance(Exchange.PARADEX));
+    }
+
+    protected ParadexQuoteEngine(ITickerRegistry tickerRegistry) {
+        if (tickerRegistry == null) {
+            throw new IllegalArgumentException("tickerRegistry is required");
+        }
+        this.tickerRegistry = tickerRegistry;
     }
 
     @Override
@@ -155,7 +162,11 @@ public class ParadexQuoteEngine extends QuoteEngine
     @Override
     public void newTrade(long createdAtTimestamp, String market, String price, String side, String size) {
 
-        Ticker ticker = tickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, market);
+        Ticker ticker = resolveTicker(market);
+        if (ticker == null) {
+            logger.warn("Skipping trade update for unknown symbol '{}'", market);
+            return;
+        }
 
         // Format the price according to the ticker's minimum tick size precision
         BigDecimal formattedPrice = ticker.formatPrice(price);
@@ -169,13 +180,12 @@ public class ParadexQuoteEngine extends QuoteEngine
     public void newSummaryUpdate(long createdAtTimestamp, String symbol, String bid, String ask, String lastPrice,
             String markPrice, String openInterest, String volume24h, String underlyingPrice, String fundingRate) {
 
-        Ticker ticker = tickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, symbol);
+        Ticker ticker = resolveTicker(symbol);
+        if (ticker == null) {
+            logger.warn("Skipping market summary update for unknown symbol '{}'", symbol);
+            return;
+        }
 
-        double hourlyFundingRate = Double.parseDouble(fundingRate) / (double) ticker.getFundingRateInterval();
-        double annualizedFundingRate = hourlyFundingRate * 24 * 365 * 100;
-        double fundingRateHourlyBps = hourlyFundingRate * 10000;
-        BigDecimal fundingRateApr = BigDecimal.valueOf(annualizedFundingRate);
-        BigDecimal fundingRateHourlyBpsBigDecimal = BigDecimal.valueOf(fundingRateHourlyBps);
         BigDecimal volumeNotional = ticker.formatPrice(lastPrice).multiply(new BigDecimal(volume24h));
         BigDecimal openInterestBigDecimal = new BigDecimal(openInterest);
         BigDecimal openInterestNotional = ticker.formatPrice(lastPrice).multiply(openInterestBigDecimal);
@@ -192,11 +202,41 @@ public class ParadexQuoteEngine extends QuoteEngine
         quoteValues.put(QuoteType.OPEN_INTEREST_NOTIONAL, openInterestNotional);
         quoteValues.put(QuoteType.VOLUME_NOTIONAL, volumeNotional);
         quoteValues.put(QuoteType.UNDERLYING_PRICE, ticker.formatPrice(underlyingPrice));
-        quoteValues.put(QuoteType.FUNDING_RATE_APR, fundingRateApr);
-        quoteValues.put(QuoteType.FUNDING_RATE_HOURLY_BPS, fundingRateHourlyBpsBigDecimal);
+        addFundingRateQuotes(ticker, fundingRate, quoteValues);
 
         ILevel1Quote quote = new Level1Quote(ticker, convertToZonedDateTime(createdAtTimestamp), quoteValues);
         super.fireLevel1Quote(quote);
+    }
+
+    protected Ticker resolveTicker(String symbol) {
+        Ticker ticker = tickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, symbol);
+        if (ticker == null) {
+            ticker = tickerRegistry.lookupByBrokerSymbol(InstrumentType.CRYPTO_SPOT, symbol);
+        }
+        return ticker;
+    }
+
+    protected void addFundingRateQuotes(Ticker ticker, String fundingRateString, Map<QuoteType, BigDecimal> quoteValues) {
+        if (fundingRateString == null || fundingRateString.isBlank()) {
+            return;
+        }
+
+        int fundingInterval = ticker.getFundingRateInterval();
+        if (fundingInterval <= 0) {
+            logger.debug("Skipping funding rate for symbol '{}' due to non-positive funding interval {}",
+                    ticker.getSymbol(), fundingInterval);
+            return;
+        }
+
+        try {
+            double hourlyFundingRate = Double.parseDouble(fundingRateString) / (double) fundingInterval;
+            double annualizedFundingRate = hourlyFundingRate * 24 * 365 * 100;
+            double fundingRateHourlyBps = hourlyFundingRate * 10000;
+            quoteValues.put(QuoteType.FUNDING_RATE_APR, BigDecimal.valueOf(annualizedFundingRate));
+            quoteValues.put(QuoteType.FUNDING_RATE_HOURLY_BPS, BigDecimal.valueOf(fundingRateHourlyBps));
+        } catch (NumberFormatException e) {
+            logger.warn("Skipping malformed funding_rate '{}' for symbol '{}'", fundingRateString, ticker.getSymbol());
+        }
     }
 
     protected ZonedDateTime convertToZonedDateTime(long timestamp) {

@@ -110,6 +110,26 @@ public class LighterAccountOrdersWebSocketProcessorTest {
     }
 
     @Test
+    void parseAccountOrdersAllChannelUsesOrdersMapMarketKeys() {
+        TestableProcessor processor = new TestableProcessor();
+        String message = "{"
+                + "\"type\":\"update/account_orders\","
+                + "\"channel\":\"account_orders/all/255\","
+                + "\"account\":255,"
+                + "\"nonce\":7,"
+                + "\"orders\":{\"53\":[{\"order_index\":1003,\"price\":\"70300.0\"}]}"
+                + "}";
+
+        LighterOrdersUpdate update = processor.parse(message);
+        assertNotNull(update);
+        assertEquals(1, update.getOrdersByMarket().size());
+        LighterOrder order = update.getFirstOrder();
+        assertNotNull(order);
+        assertEquals(53, order.getMarketIndex());
+        assertEquals(new BigDecimal("70300.0"), order.getPrice());
+    }
+
+    @Test
     void ignoreNonAccountOrdersChannel() {
         TestableProcessor processor = new TestableProcessor();
         String message = "{\"type\":\"update/account_orders\",\"channel\":\"trade:1\",\"orders\":{}}";

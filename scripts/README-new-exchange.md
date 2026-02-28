@@ -33,7 +33,16 @@ Optional flags add implementation modules:
 - `--no-register-modules`: don’t edit parent `pom.xml` module lists.
 - `--update-exchange-enum`: add `Exchange.<NEW_EXCHANGE>` plus `ALL_EXCHANGES` entry.
 
+## Validation
+
+After scaffolding, validate the generated commons module:
+
+```bash
+scripts/validate-common-module.sh commons/<exchange>-common-api
+```
+
 ## Notes
 
-- The script creates compile-ready placeholders with `TODO` methods.
+- The script creates a compile-ready commons module with placeholder implementations, a module `README.md`, example classes, and common-module test skeletons.
 - You still need to implement exchange-specific REST, websocket parsing, and ticker normalization.
+- New modules should follow the shared documentation and lifecycle rules in `docs/commons-api-conventions.md`.

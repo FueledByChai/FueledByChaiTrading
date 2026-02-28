@@ -21,11 +21,35 @@ package com.fueledbychai.util;
 
 import com.fueledbychai.data.Exchange;
 
+/**
+ * Service-provider contract used by {@link ExchangeWebSocketApiFactory}.
+ *
+ * Each exchange module should provide exactly one implementation for its
+ * exchange and register it under
+ * {@code META-INF/services/com.fueledbychai.util.ExchangeWebSocketApiProvider}.
+ *
+ * @param <TApi> the public websocket API interface exposed by the provider
+ */
 public interface ExchangeWebSocketApiProvider<TApi> {
 
+    /**
+     * Returns the exchange served by this provider.
+     *
+     * @return the provider's exchange
+     */
     Exchange getExchange();
 
+    /**
+     * Returns the public API interface type exposed by this provider.
+     *
+     * @return the interface class used for factory type checks
+     */
     Class<TApi> getApiType();
 
+    /**
+     * Returns the long-lived websocket API instance for the exchange.
+     *
+     * @return the websocket API implementation
+     */
     TApi getWebSocketApi();
 }

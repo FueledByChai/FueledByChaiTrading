@@ -113,6 +113,17 @@ public class LighterQuoteEngineTest {
     }
 
     @Test
+    void subscribeLevel1AcceptsZeroMarketIdFromTicker() {
+        LighterQuoteEngine engine = new LighterQuoteEngine(webSocketApi, tickerRegistry);
+        Ticker ticker = createTicker("ETH/USDC", "0", InstrumentType.CRYPTO_SPOT);
+
+        engine.subscribeLevel1(ticker, level1Listener);
+
+        verify(webSocketApi).subscribeMarketStats(eq(0), any());
+        verify(webSocketApi).subscribeOrderBook(eq(0), any());
+    }
+
+    @Test
     void subscribeLevel1ResolvesMarketIdFromTickerRegistry() {
         LighterQuoteEngine engine = new LighterQuoteEngine(webSocketApi, tickerRegistry);
         Ticker inputTicker = createTicker("BTC/USDC", null, InstrumentType.PERPETUAL_FUTURES);
@@ -129,6 +140,24 @@ public class LighterQuoteEngineTest {
         verify(webSocketApi).subscribeMarketStats(eq(7), any());
         assertEquals("7", inputTicker.getId());
         assertEquals(new BigDecimal("0.1"), inputTicker.getMinimumTickSize());
+    }
+
+    @Test
+    void subscribeLevel1ResolvesZeroMarketIdFromTickerRegistry() {
+        LighterQuoteEngine engine = new LighterQuoteEngine(webSocketApi, tickerRegistry);
+        Ticker inputTicker = createTicker("ETH/USDC", null, InstrumentType.CRYPTO_SPOT);
+        Ticker canonicalTicker = createTicker("ETH/USDC", "0", InstrumentType.CRYPTO_SPOT)
+                .setMinimumTickSize(new BigDecimal("0.01"))
+                .setOrderSizeIncrement(new BigDecimal("0.001"));
+
+        when(tickerRegistry.lookupByBrokerSymbol(InstrumentType.CRYPTO_SPOT, "ETH/USDC")).thenReturn(canonicalTicker);
+
+        engine.subscribeLevel1(inputTicker, level1Listener);
+
+        verify(webSocketApi).subscribeMarketStats(eq(0), any());
+        verify(webSocketApi).subscribeOrderBook(eq(0), any());
+        assertEquals("0", inputTicker.getId());
+        assertEquals(new BigDecimal("0.01"), inputTicker.getMinimumTickSize());
     }
 
     @Test

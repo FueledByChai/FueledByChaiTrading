@@ -13,6 +13,8 @@ public class LighterTrade {
     private BigDecimal usdAmount;
     private Long askId;
     private Long bidId;
+    private Long askClientId;
+    private Long bidClientId;
     private Long askAccountId;
     private Long bidAccountId;
     private Boolean makerAsk;
@@ -90,6 +92,22 @@ public class LighterTrade {
 
     public void setBidId(Long bidId) {
         this.bidId = bidId;
+    }
+
+    public Long getAskClientId() {
+        return askClientId;
+    }
+
+    public void setAskClientId(Long askClientId) {
+        this.askClientId = askClientId;
+    }
+
+    public Long getBidClientId() {
+        return bidClientId;
+    }
+
+    public void setBidClientId(Long bidClientId) {
+        this.bidClientId = bidClientId;
     }
 
     public Long getAskAccountId() {

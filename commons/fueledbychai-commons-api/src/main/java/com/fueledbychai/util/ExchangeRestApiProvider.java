@@ -21,22 +21,64 @@ package com.fueledbychai.util;
 
 import com.fueledbychai.data.Exchange;
 
+/**
+ * Service-provider contract used by {@link ExchangeRestApiFactory}.
+ *
+ * Each exchange module should provide exactly one implementation for its
+ * exchange and register it under
+ * {@code META-INF/services/com.fueledbychai.util.ExchangeRestApiProvider}.
+ *
+ * @param <TApi> the public REST API interface exposed by the provider
+ */
 public interface ExchangeRestApiProvider<TApi> {
 
+    /**
+     * Returns the exchange served by this provider.
+     *
+     * @return the provider's exchange
+     */
     Exchange getExchange();
 
+    /**
+     * Returns the public API interface type exposed by this provider.
+     *
+     * @return the interface class used for factory type checks
+     */
     Class<TApi> getApiType();
 
+    /**
+     * Returns the public, unauthenticated REST API instance.
+     *
+     * @return the public REST API
+     */
     TApi getPublicApi();
 
+    /**
+     * Returns the default REST API instance for this exchange.
+     *
+     * Providers commonly return either the public API or an authenticated API
+     * depending on local configuration.
+     *
+     * @return the default REST API instance
+     */
     default TApi getApi() {
         return getPublicApi();
     }
 
+    /**
+     * Indicates whether the provider can supply a private REST API instance.
+     *
+     * @return {@code true} when {@link #getPrivateApi()} is supported
+     */
     default boolean isPrivateApiAvailable() {
         return false;
     }
 
+    /**
+     * Returns the private, authenticated REST API instance.
+     *
+     * @return the private REST API
+     */
     default TApi getPrivateApi() {
         throw new IllegalStateException("Private REST API is not available for exchange "
                 + getExchange().getExchangeName());

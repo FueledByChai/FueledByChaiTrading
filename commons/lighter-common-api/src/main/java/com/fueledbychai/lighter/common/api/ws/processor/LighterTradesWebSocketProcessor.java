@@ -91,6 +91,8 @@ public class LighterTradesWebSocketProcessor extends AbstractWebSocketProcessor<
         trade.setUsdAmount(parseBigDecimal(tradeJson.opt("usd_amount")));
         trade.setAskId(parseLong(tradeJson.opt("ask_id")));
         trade.setBidId(parseLong(tradeJson.opt("bid_id")));
+        trade.setAskClientId(parseLong(tradeJson.opt("ask_client_id")));
+        trade.setBidClientId(parseLong(tradeJson.opt("bid_client_id")));
         trade.setAskAccountId(parseLong(tradeJson.opt("ask_account_id")));
         trade.setBidAccountId(parseLong(tradeJson.opt("bid_account_id")));
         trade.setMakerAsk(parseBoolean(tradeJson.opt("is_maker_ask")));
