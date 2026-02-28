@@ -105,4 +105,26 @@ public class PaperBrokerTest {
         assertTrue(result.isSuccess());
         verify(broker).cancelOrderSubmitWithDelay(order.getOrderId(), true);
     }
+
+    @Test
+    public void testGenerateBalanceFilenameSanitizesSymbol() {
+        PaperBroker broker = new PaperBroker(quoteEngine, new Ticker("AZTEC/USDC"),
+                PaperBrokerCommission.PARADEX_COMMISSION, ZERO_LATENCY, 1000.0);
+
+        String filename = broker.generateBalanceFilename("AZTEC/USDC", "LIGHTER");
+
+        assertEquals("AZTEC_USDC-LIGHTER-paperbroker-startingbalance.txt", filename);
+        assertFalse(filename.contains("/"));
+    }
+
+    @Test
+    public void testGenerateCsvFilenameSanitizesSymbol() {
+        PaperBroker broker = new PaperBroker(quoteEngine, new Ticker("AZTEC/USDC"),
+                PaperBrokerCommission.PARADEX_COMMISSION, ZERO_LATENCY, 1000.0);
+
+        String filename = broker.generateCsvFilename("AZTEC/USDC", "LIGHTER");
+
+        assertTrue(filename.matches("\\d{8}-\\d{4}-AZTEC_USDC-LIGHTER-Trades\\.csv"));
+        assertFalse(filename.contains("/"));
+    }
 }

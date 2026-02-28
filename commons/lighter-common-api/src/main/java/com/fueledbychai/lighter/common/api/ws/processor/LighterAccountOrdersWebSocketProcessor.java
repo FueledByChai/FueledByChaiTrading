@@ -6,6 +6,8 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -21,14 +23,35 @@ import com.fueledbychai.websocket.IWebSocketClosedListener;
 public class LighterAccountOrdersWebSocketProcessor extends AbstractWebSocketProcessor<LighterOrdersUpdate> {
 
     private static final Logger logger = LoggerFactory.getLogger(LighterAccountOrdersWebSocketProcessor.class);
+    private final Runnable subscribeSuccessListener;
+    private final Consumer<String> subscribeFailureListener;
+    private final AtomicBoolean subscriptionResultResolved = new AtomicBoolean(false);
 
     public LighterAccountOrdersWebSocketProcessor(IWebSocketClosedListener listener) {
+        this(listener, null, null);
+    }
+
+    public LighterAccountOrdersWebSocketProcessor(IWebSocketClosedListener listener, Runnable subscribeSuccessListener,
+            Consumer<String> subscribeFailureListener) {
         super(listener);
+        this.subscribeSuccessListener = subscribeSuccessListener;
+        this.subscribeFailureListener = subscribeFailureListener;
     }
 
     @Override
     protected LighterOrdersUpdate parseMessage(String message) {
         JSONObject root = new JSONObject(message);
+        if (root.has("error")) {
+            notifySubscriptionFailure(parseErrorMessage(root), message);
+            return null;
+        }
+
+        String messageType = parseString(root.opt("type"));
+        if (isSubscribedAccountOrdersMessage(messageType)) {
+            notifySubscriptionSuccess();
+            return null;
+        }
+
         String channel = root.optString("channel", null);
         if (!isAccountOrdersChannel(channel)) {
             return null;
@@ -40,10 +63,71 @@ public class LighterAccountOrdersWebSocketProcessor extends AbstractWebSocketPro
             return null;
         }
 
-        String messageType = parseString(root.opt("type"));
         Long accountIndex = parseLong(root.opt("account"));
         Long nonce = parseLong(root.opt("nonce"));
+        notifySubscriptionSuccess();
         return new LighterOrdersUpdate(channel, messageType, accountIndex, nonce, ordersByMarket);
+    }
+
+    protected boolean isSubscribedAccountOrdersMessage(String messageType) {
+        if (messageType == null || messageType.isBlank()) {
+            return false;
+        }
+        return messageType.equalsIgnoreCase("subscribed/account_orders")
+                || messageType.startsWith("subscribed/account_orders");
+    }
+
+    protected String parseErrorMessage(JSONObject root) {
+        if (root == null || !root.has("error")) {
+            return null;
+        }
+        Object errorValue = root.opt("error");
+        if (errorValue instanceof JSONObject errorJson) {
+            Integer code = parseInteger(errorJson.opt("code"));
+            String message = parseString(errorJson.opt("message"));
+            if (code != null && message != null) {
+                return "code=" + code + ", message=" + message;
+            }
+            if (message != null) {
+                return message;
+            }
+            if (code != null) {
+                return "code=" + code;
+            }
+        }
+        return errorValue == null || errorValue == JSONObject.NULL ? null : errorValue.toString();
+    }
+
+    protected void notifySubscriptionSuccess() {
+        if (subscribeSuccessListener == null) {
+            return;
+        }
+        if (!subscriptionResultResolved.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            subscribeSuccessListener.run();
+        } catch (Exception e) {
+            logger.warn("Unable to notify account_orders subscription success", e);
+        }
+    }
+
+    protected void notifySubscriptionFailure(String errorMessage, String rawMessage) {
+        if (subscribeFailureListener == null) {
+            return;
+        }
+        if (!subscriptionResultResolved.compareAndSet(false, true)) {
+            return;
+        }
+        String message = errorMessage;
+        if (message == null || message.isBlank()) {
+            message = rawMessage;
+        }
+        try {
+            subscribeFailureListener.accept(message);
+        } catch (Exception e) {
+            logger.warn("Unable to notify account_orders subscription failure", e);
+        }
     }
 
     protected boolean isAccountOrdersChannel(String channel) {
@@ -60,12 +144,19 @@ public class LighterAccountOrdersWebSocketProcessor extends AbstractWebSocketPro
         }
         String prefix = LighterWSClientBuilder.WS_TYPE_ACCOUNT_ORDERS;
         if (channel.startsWith(prefix + ":")) {
-            return parseInteger(channel.substring((prefix + ":").length()));
+            String marketText = channel.substring((prefix + ":").length());
+            if ("all".equalsIgnoreCase(marketText)) {
+                return null;
+            }
+            return parseInteger(marketText);
         }
         if (channel.startsWith(prefix + "/")) {
             String remainder = channel.substring((prefix + "/").length());
             int separator = remainder.indexOf('/');
             String marketText = separator >= 0 ? remainder.substring(0, separator) : remainder;
+            if ("all".equalsIgnoreCase(marketText)) {
+                return null;
+            }
             return parseInteger(marketText);
         }
         return null;

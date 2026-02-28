@@ -28,6 +28,13 @@ import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.data.Exchange;
 
+/**
+ * Factory entry point for exchange-specific websocket APIs.
+ *
+ * Providers are discovered through {@link ServiceLoader}, validated once, and
+ * the resulting websocket API instances are cached by exchange. Consumers
+ * should prefer this factory over direct provider construction.
+ */
 public final class ExchangeWebSocketApiFactory {
 
     private static final Logger logger = LoggerFactory.getLogger(ExchangeWebSocketApiFactory.class);

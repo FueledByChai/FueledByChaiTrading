@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -113,19 +114,23 @@ public class LighterWebSocketApiTest {
     }
 
     @Test
-    void subscribeAccountOrdersReusesConnectionForSameMarketAndAccount() {
+    void subscribeAccountOrdersReusesConnectionForSameAccountAcrossMarkets() {
         TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
         ILighterAccountOrdersListener listener = update -> {
         };
 
         LighterWebSocketClient client1 = api.subscribeAccountOrders(1, 255L, "auth-token-1", listener);
-        LighterWebSocketClient client2 = api.subscribeAccountOrders(1, 255L, "auth-token-2", listener);
+        LighterWebSocketClient client2 = api.subscribeAccountOrders(2048, 255L, "auth-token-2", listener);
+        String accountOrdersChannel = api.createdClients.keySet().stream()
+                .filter(channel -> channel.startsWith("account_orders/"))
+                .findFirst()
+                .orElseThrow();
 
         assertNotNull(client1);
         assertNotNull(client2);
         assertEquals(client1, client2);
         assertEquals(1, api.createdClients.size());
-        assertEquals(1, api.connectCountByChannel.get("account_orders/1/255").intValue());
+        assertEquals(1, api.connectCountByChannel.get(accountOrdersChannel).intValue());
     }
 
     @Test
@@ -142,6 +147,21 @@ public class LighterWebSocketApiTest {
         assertEquals(client1, client2);
         assertEquals(1, api.createdClients.size());
         assertEquals(1, api.connectCountByChannel.get("user_stats/255").intValue());
+    }
+
+    @Test
+    void reconnectDelayStartsImmediateThenBacksOff() {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
+
+        long attempt1 = api.calculateReconnectDelayMillis(1);
+        long attempt2 = api.calculateReconnectDelayMillis(2);
+        long attempt3 = api.calculateReconnectDelayMillis(3);
+        long attempt4 = api.calculateReconnectDelayMillis(4);
+
+        assertEquals(0L, attempt1);
+        assertTrue(attempt2 > 0L);
+        assertTrue(attempt3 > attempt2);
+        assertTrue(attempt4 >= attempt3);
     }
 
     @Test
@@ -199,18 +219,22 @@ public class LighterWebSocketApiTest {
         };
 
         api.subscribeAccountOrders(1, 255L, "initial-auth", listener);
-        List<String> authHistory = api.subscribeAuthHistoryByChannel.get("account_orders/1/255");
+        String accountOrdersChannel = api.createdClients.keySet().stream()
+                .filter(channel -> channel.startsWith("account_orders/"))
+                .findFirst()
+                .orElseThrow();
+        List<String> authHistory = api.subscribeAuthHistoryByChannel.get(accountOrdersChannel);
         assertNotNull(authHistory);
         assertEquals("generated-order-auth-1", authHistory.get(0));
 
-        TestClient firstClient = api.createdClients.get("account_orders/1/255");
+        TestClient firstClient = api.createdClients.get(accountOrdersChannel);
         assertNotNull(firstClient);
         firstClient.simulateRemoteClose();
 
         long deadlineMillis = System.currentTimeMillis() + 1_000L;
         int connectCount = 0;
         while (System.currentTimeMillis() < deadlineMillis) {
-            Integer count = api.connectCountByChannel.get("account_orders/1/255");
+            Integer count = api.connectCountByChannel.get(accountOrdersChannel);
             connectCount = count == null ? 0 : count;
             if (connectCount >= 2) {
                 break;
@@ -219,7 +243,7 @@ public class LighterWebSocketApiTest {
         }
 
         assertTrue(connectCount >= 2, "Expected reconnect to be attempted");
-        authHistory = api.subscribeAuthHistoryByChannel.get("account_orders/1/255");
+        authHistory = api.subscribeAuthHistoryByChannel.get(accountOrdersChannel);
         assertNotNull(authHistory);
         assertTrue(authHistory.size() >= 2, "Expected refreshed auth token to be used on reconnect");
         assertEquals("generated-order-auth-2", authHistory.get(1));
@@ -249,6 +273,10 @@ public class LighterWebSocketApiTest {
         api.subscribeAccountAllTrades(255L, "auth-token", accountTradesListener);
         api.subscribeAccountOrders(1, 255L, "auth-token", accountOrdersListener);
         api.subscribeAccountStats(255L, accountStatsListener);
+        String accountOrdersChannel = api.createdClients.keySet().stream()
+                .filter(channel -> channel.startsWith("account_orders/"))
+                .findFirst()
+                .orElseThrow();
         api.disconnectAll();
 
         assertEquals(1, api.closeCountByChannel.get("market_stats/53").intValue());
@@ -256,7 +284,7 @@ public class LighterWebSocketApiTest {
         assertEquals(1, api.closeCountByChannel.get("order_book/53").intValue());
         assertEquals(1, api.closeCountByChannel.get("trade/53").intValue());
         assertEquals(1, api.closeCountByChannel.get("account_all_trades/255").intValue());
-        assertEquals(1, api.closeCountByChannel.get("account_orders/1/255").intValue());
+        assertEquals(1, api.closeCountByChannel.get(accountOrdersChannel).intValue());
         assertEquals(1, api.closeCountByChannel.get("user_stats/255").intValue());
     }
 
@@ -405,6 +433,32 @@ public class LighterWebSocketApiTest {
         assertEquals("jsonapi/sendtx", posted.getString("type"));
         assertEquals(10, posted.getJSONObject("data").getInt("tx_type"));
         assertEquals(2, posted.getJSONObject("data").getJSONObject("tx_info").getInt("market_index"));
+    }
+
+    @Test
+    void connectTxWebSocketPreconnectsAndAutoReconnectsAfterClose() throws Exception {
+        TestableLighterWebSocketApi api = new TestableLighterWebSocketApi("wss://example.test/stream");
+
+        api.connectTxWebSocket();
+        assertEquals(1, api.connectCountByChannel.get("tx").intValue());
+        assertNotNull(api.lastTxClient);
+
+        TestTxClient firstTxClient = api.lastTxClient;
+        firstTxClient.simulateRemoteClose();
+
+        long deadlineMillis = System.currentTimeMillis() + 1_000L;
+        int connectCount = 0;
+        while (System.currentTimeMillis() < deadlineMillis) {
+            Integer count = api.connectCountByChannel.get("tx");
+            connectCount = count == null ? 0 : count.intValue();
+            if (connectCount >= 2) {
+                break;
+            }
+            Thread.sleep(20L);
+        }
+
+        assertTrue(connectCount >= 2, "Expected tx websocket reconnect to be attempted");
+        api.disconnectAll();
     }
 
     @Test
@@ -605,6 +659,7 @@ public class LighterWebSocketApiTest {
         private final List<String> postedTxMessages = new CopyOnWriteArrayList<>();
         private final Map<String, List<String>> subscribeAuthHistoryByChannel = new ConcurrentHashMap<>();
         private final ILighterTransactionSigner providedSigner;
+        private volatile TestTxClient lastTxClient;
 
         TestableLighterWebSocketApi(String url) {
             this(url, null);
@@ -641,8 +696,9 @@ public class LighterWebSocketApiTest {
         @Override
         protected LighterWebSocketClient createSendTxClient(IWebSocketProcessor processor) {
             try {
-                return new TestTxClient("wss://example.test/stream", processor, postedTxMessages, connectCountByChannel,
-                        closeCountByChannel);
+                lastTxClient = new TestTxClient("wss://example.test/stream", processor, postedTxMessages,
+                        connectCountByChannel, closeCountByChannel);
+                return lastTxClient;
             } catch (Exception e) {
                 throw new IllegalStateException(e);
             }
@@ -661,6 +717,11 @@ public class LighterWebSocketApiTest {
         @Override
         protected synchronized ILighterTransactionSigner getOrCreateOrderSigner() {
             return providedSigner;
+        }
+
+        @Override
+        protected void waitForAccountOrdersSubscriptionResult(String channel, CompletableFuture<Void> subscribeResult) {
+            // no-op for test doubles
         }
     }
 
@@ -701,6 +762,7 @@ public class LighterWebSocketApiTest {
         private final List<String> postedTxMessages;
         private final Map<String, Integer> connectCountByChannel;
         private final Map<String, Integer> closeCountByChannel;
+        private volatile boolean open;
 
         TestTxClient(String serverUri, IWebSocketProcessor processor, List<String> postedTxMessages,
                 Map<String, Integer> connectCountByChannel, Map<String, Integer> closeCountByChannel) throws Exception {
@@ -712,13 +774,25 @@ public class LighterWebSocketApiTest {
 
         @Override
         public void connect() {
+            open = true;
             connectCountByChannel.merge("tx", 1, Integer::sum);
         }
 
         @Override
         public void close() {
+            open = false;
             closeCountByChannel.merge("tx", 1, Integer::sum);
             processor.connectionClosed(1000, "manual close", false);
+        }
+
+        @Override
+        public boolean isOpen() {
+            return open;
+        }
+
+        void simulateRemoteClose() {
+            open = false;
+            processor.connectionClosed(1006, "remote close", true);
         }
 
         @Override

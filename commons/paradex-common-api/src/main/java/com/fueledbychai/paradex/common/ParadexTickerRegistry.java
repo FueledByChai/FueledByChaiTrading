@@ -1,6 +1,5 @@
 package com.fueledbychai.paradex.common;
 
-import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.TickerTranslator;
@@ -28,9 +27,8 @@ public class ParadexTickerRegistry extends AbstractTickerRegistry implements ITi
 
     protected void initialize() {
         try {
-            for (InstrumentDescriptor descriptor : restApi.getAllInstrumentsForType(InstrumentType.PERPETUAL_FUTURES)) {
-                translateTicker(descriptor);
-            }
+            registerDescriptors(restApi.getAllInstrumentsForTypes(
+                    new InstrumentType[] { InstrumentType.PERPETUAL_FUTURES, InstrumentType.CRYPTO_SPOT }));
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize ParadexTickerRegistry", e);
         }
@@ -38,7 +36,7 @@ public class ParadexTickerRegistry extends AbstractTickerRegistry implements ITi
 
     @Override
     protected boolean supportsInstrumentType(InstrumentType instrumentType) {
-        return instrumentType == InstrumentType.PERPETUAL_FUTURES;
+        return instrumentType == InstrumentType.PERPETUAL_FUTURES || instrumentType == InstrumentType.CRYPTO_SPOT;
     }
 
     @Override
@@ -54,7 +52,10 @@ public class ParadexTickerRegistry extends AbstractTickerRegistry implements ITi
         } else if (commonSymbol.endsWith("/USDT")) {
             commonSymbol = commonSymbol.substring(0, commonSymbol.length() - 5) + "/USD";
         }
-        String exchangeSymbol = commonSymbol.replace("/", "-") + "-PERP";
+        String exchangeSymbol = commonSymbol.replace("/", "-");
+        if (instrumentType == InstrumentType.PERPETUAL_FUTURES) {
+            exchangeSymbol += "-PERP";
+        }
         return exchangeSymbol;
     }
 }

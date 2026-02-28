@@ -501,19 +501,35 @@ public class LighterQuoteEngine extends QuoteEngine {
     }
 
     protected int resolveMarketId(Ticker ticker) {
-        int marketId = ticker.getIdAsInt();
-        if (marketId > 0) {
+        Integer marketId = parseNonNegativeTickerId(ticker);
+        if (marketId != null) {
             return marketId;
         }
 
         Ticker canonical = findTickerInRegistry(ticker);
-        if (canonical != null && canonical.getIdAsInt() > 0) {
+        Integer canonicalMarketId = parseNonNegativeTickerId(canonical);
+        if (canonical != null && canonicalMarketId != null) {
             applyCanonicalFields(ticker, canonical);
-            return canonical.getIdAsInt();
+            return canonicalMarketId;
         }
 
         throw new IllegalArgumentException(
                 "Unable to resolve Lighter market id for ticker " + ticker.getSymbol() + ". Set ticker id or use registry ticker.");
+    }
+
+    protected Integer parseNonNegativeTickerId(Ticker ticker) {
+        if (ticker == null || ticker.getId() == null || ticker.getId().isBlank()) {
+            return null;
+        }
+        try {
+            int parsed = Integer.parseInt(ticker.getId().trim());
+            if (parsed < 0) {
+                return null;
+            }
+            return parsed;
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     protected Ticker findTickerInRegistry(Ticker ticker) {
