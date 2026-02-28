@@ -78,7 +78,6 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
         return privateApi;
     }
 
-
     protected OkHttpClient client;
     protected String baseUrl;
     protected String accountAddressString;
@@ -439,7 +438,14 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
 
     @Override
     public InstrumentDescriptor[] getAllInstrumentsForType(InstrumentType instrumentType) {
-        return getAllInstrumentsForTypes(new InstrumentType[] { instrumentType });
+        if (instrumentType == null) {
+            return new InstrumentDescriptor[0];
+        }
+
+        return executeWithRetry(() -> {
+            String responseBody = getMarketsResponseBody();
+            return parseInstrumentDescriptors(instrumentType, responseBody);
+        }, 3, 500);
     }
 
     @Override
