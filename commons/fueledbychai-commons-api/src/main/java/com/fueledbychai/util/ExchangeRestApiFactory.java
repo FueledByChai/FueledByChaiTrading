@@ -29,6 +29,13 @@ import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.data.Exchange;
 
+/**
+ * Factory entry point for exchange-specific REST APIs.
+ *
+ * Providers are discovered through {@link ServiceLoader}, validated once, and
+ * their API instances are cached by exchange. New exchange modules should wire
+ * into this factory instead of exposing custom static singletons.
+ */
 public final class ExchangeRestApiFactory {
 
     private static final Logger logger = LoggerFactory.getLogger(ExchangeRestApiFactory.class);
