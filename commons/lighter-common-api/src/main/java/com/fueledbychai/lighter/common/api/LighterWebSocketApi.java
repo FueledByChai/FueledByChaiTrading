@@ -44,6 +44,16 @@ import com.fueledbychai.lighter.common.api.ws.client.LighterWebSocketClient;
 import com.fueledbychai.websocket.IWebSocketEventListener;
 import com.fueledbychai.websocket.IWebSocketProcessor;
 
+/**
+ * Concrete websocket client for the Lighter exchange.
+ *
+ * This class is the reference websocket implementation for new exchange modules
+ * in this repository. It reuses one client per logical channel, manages
+ * automatic reconnect with exponential backoff, enforces a shared connect-rate
+ * throttle across all sockets, refreshes private subscription auth on
+ * reconnect, and keeps the dedicated tx websocket separate from market-data and
+ * account subscription channels.
+ */
 public class LighterWebSocketApi
         implements ILighterWebSocketApi, IWebSocketEventListener<LighterSendTxResponse> {
 

@@ -218,6 +218,8 @@ COMMON_MODULE="${EXCHANGE_SLUG}-common-api"
 COMMON_DIR="commons/${COMMON_MODULE}"
 COMMON_BASE_JAVA="${COMMON_DIR}/src/main/java/com/fueledbychai/${PACKAGE_SEGMENT}/common"
 COMMON_API_JAVA="${COMMON_BASE_JAVA}/api"
+COMMON_EXAMPLE_JAVA="${COMMON_API_JAVA}/example"
+COMMON_TEST_JAVA="${COMMON_DIR}/src/test/java/com/fueledbychai/${PACKAGE_SEGMENT}/common/api"
 COMMON_SERVICES_DIR="${COMMON_DIR}/src/main/resources/META-INF/services"
 
 MARKET_MODULE="${EXCHANGE_SLUG}-market-data-impl"
@@ -274,8 +276,61 @@ create_file "${COMMON_DIR}/pom.xml" <<EOF
             <artifactId>fueledbychai-commons-api</artifactId>
             <version>\${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-engine</artifactId>
+            <version>5.9.3</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.0.0-M9</version>
+                <configuration>
+                    <useModulePath>false</useModulePath>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>
+EOF
+
+create_file "${COMMON_DIR}/README.md" <<EOF
+# ${EXCHANGE_CAMEL} Common API
+
+This module is the scaffolded commons integration for ${EXCHANGE_CAMEL}. It follows the shared exchange conventions used by the library for REST APIs, websocket APIs, provider registration, and connection lifecycle management.
+
+## Main Entry Points
+
+- REST interface: \`${COMMON_API_JAVA}/I${EXCHANGE_CAMEL}RestApi.java\`
+- websocket interface: \`${COMMON_API_JAVA}/I${EXCHANGE_CAMEL}WebSocketApi.java\`
+- REST implementation: \`${COMMON_API_JAVA}/${EXCHANGE_CAMEL}RestApi.java\`
+- websocket implementation: \`${COMMON_API_JAVA}/${EXCHANGE_CAMEL}WebSocketApi.java\`
+
+## What This Scaffold Includes
+
+- provider registrations for \`ServiceLoader\`
+- placeholder REST and websocket implementations
+- example entry points under \`${COMMON_EXAMPLE_JAVA}\`
+- test skeletons under \`${COMMON_TEST_JAVA}\`
+
+## Required Follow-Up
+
+Before considering this module complete:
+
+1. Replace placeholder REST methods with normalized exchange-specific implementations.
+2. Replace the websocket bootstrap methods with real stream subscriptions and reconnect behavior.
+3. Update the ticker registry and exchange capabilities with real exchange behavior.
+4. Expand the generated tests to cover real parsing, reconnects, and shutdown paths.
+
+## Shared Conventions
+
+- \`docs/commons-api-conventions.md\`
+- \`scripts/README-new-exchange.md\`
 EOF
 
 create_file "${COMMON_API_JAVA}/I${EXCHANGE_CAMEL}RestApi.java" <<EOF
@@ -284,12 +339,37 @@ package com.fueledbychai.${PACKAGE_SEGMENT}.common.api;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 
+/**
+ * Public REST contract for the ${EXCHANGE_CAMEL} exchange integration.
+ *
+ * Keep this interface small and stable. Strategy code and higher-level factory
+ * consumers should depend on this interface, while the concrete implementation
+ * handles transport details, authentication, and payload normalization.
+ */
 public interface I${EXCHANGE_CAMEL}RestApi {
 
+    /**
+     * Returns known instrument descriptors for the requested instrument type.
+     *
+     * @param instrumentType the instrument type to load
+     * @return the resolved instrument descriptors
+     */
     InstrumentDescriptor[] getAllInstrumentsForType(InstrumentType instrumentType);
 
+    /**
+     * Resolves a single instrument descriptor by symbol.
+     *
+     * @param symbol the exchange symbol
+     * @return the resolved descriptor, or {@code null} when unavailable
+     */
     InstrumentDescriptor getInstrumentDescriptor(String symbol);
 
+    /**
+     * Indicates whether this API instance was created without private
+     * credentials.
+     *
+     * @return {@code true} when the API instance is public-only
+     */
     boolean isPublicApiOnly();
 }
 EOF
@@ -297,15 +377,47 @@ EOF
 create_file "${COMMON_API_JAVA}/I${EXCHANGE_CAMEL}WebSocketApi.java" <<EOF
 package com.fueledbychai.${PACKAGE_SEGMENT}.common.api;
 
+/**
+ * Public websocket contract for the ${EXCHANGE_CAMEL} exchange integration.
+ *
+ * This scaffold provides lifecycle hooks only. Replace or extend it with
+ * exchange-specific subscribe methods such as order book, trade, or account
+ * stream subscriptions.
+ */
 public interface I${EXCHANGE_CAMEL}WebSocketApi {
 
+    /**
+     * Opens the main websocket session when the exchange requires an explicit
+     * bootstrap step.
+     */
     void connect();
+
+    /**
+     * Optionally pre-connects a dedicated order-entry websocket.
+     *
+     * Implementations that do not require a separate order-entry socket may
+     * keep the default no-op behavior.
+     */
+    default void connectOrderEntryWebSocket() {
+        // Optional capability.
+    }
+
+    /**
+     * Closes all managed websocket connections and cancels reconnect work.
+     */
+    void disconnectAll();
 }
 EOF
 
 create_file "${COMMON_API_JAVA}/${EXCHANGE_CAMEL}Configuration.java" <<EOF
 package com.fueledbychai.${PACKAGE_SEGMENT}.common.api;
 
+/**
+ * Centralized configuration holder for ${EXCHANGE_CAMEL}.
+ *
+ * Replace the placeholder property names and defaults as needed for the real
+ * exchange integration.
+ */
 public class ${EXCHANGE_CAMEL}Configuration {
 
     private static volatile ${EXCHANGE_CAMEL}Configuration instance;
@@ -362,6 +474,13 @@ package com.fueledbychai.${PACKAGE_SEGMENT}.common.api;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 
+/**
+ * Scaffold REST implementation for ${EXCHANGE_CAMEL}.
+ *
+ * Replace the placeholder methods with real REST calls, input validation,
+ * response parsing, and normalized domain objects that match the shared library
+ * conventions.
+ */
 public class ${EXCHANGE_CAMEL}RestApi implements I${EXCHANGE_CAMEL}RestApi {
 
     protected final String baseUrl;
@@ -374,6 +493,9 @@ public class ${EXCHANGE_CAMEL}RestApi implements I${EXCHANGE_CAMEL}RestApi {
     }
 
     public ${EXCHANGE_CAMEL}RestApi(String baseUrl, String accountAddress, String privateKey) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            throw new IllegalArgumentException("baseUrl is required");
+        }
         this.baseUrl = baseUrl;
         this.accountAddress = accountAddress;
         this.privateKey = privateKey;
@@ -402,17 +524,39 @@ EOF
 create_file "${COMMON_API_JAVA}/${EXCHANGE_CAMEL}WebSocketApi.java" <<EOF
 package com.fueledbychai.${PACKAGE_SEGMENT}.common.api;
 
+/**
+ * Scaffold websocket implementation for ${EXCHANGE_CAMEL}.
+ *
+ * Replace this baseline lifecycle manager with real subscriptions, reconnect
+ * handling, throttling, and any exchange-specific auth refresh requirements.
+ */
 public class ${EXCHANGE_CAMEL}WebSocketApi implements I${EXCHANGE_CAMEL}WebSocketApi {
 
     protected final String webSocketUrl;
+    protected volatile boolean connected = false;
+    protected volatile boolean orderEntryConnected = false;
 
     public ${EXCHANGE_CAMEL}WebSocketApi(String webSocketUrl) {
+        if (webSocketUrl == null || webSocketUrl.isBlank()) {
+            throw new IllegalArgumentException("webSocketUrl is required");
+        }
         this.webSocketUrl = webSocketUrl;
     }
 
     @Override
     public void connect() {
-        throw new UnsupportedOperationException("TODO: Implement " + getClass().getSimpleName() + ".connect");
+        connected = true;
+    }
+
+    @Override
+    public void connectOrderEntryWebSocket() {
+        orderEntryConnected = true;
+    }
+
+    @Override
+    public void disconnectAll() {
+        connected = false;
+        orderEntryConnected = false;
     }
 }
 EOF
@@ -423,6 +567,9 @@ package com.fueledbychai.${PACKAGE_SEGMENT}.common.api;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.util.ExchangeRestApiProvider;
 
+/**
+ * Registers the ${EXCHANGE_CAMEL} REST API with the shared REST API factory.
+ */
 public class ${EXCHANGE_CAMEL}RestApiProvider implements ExchangeRestApiProvider<I${EXCHANGE_CAMEL}RestApi> {
 
     @Override
@@ -468,6 +615,10 @@ package com.fueledbychai.${PACKAGE_SEGMENT}.common.api;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.util.ExchangeWebSocketApiProvider;
 
+/**
+ * Registers the ${EXCHANGE_CAMEL} websocket API with the shared websocket API
+ * factory.
+ */
 public class ${EXCHANGE_CAMEL}WebSocketApiProvider implements ExchangeWebSocketApiProvider<I${EXCHANGE_CAMEL}WebSocketApi> {
 
     @Override
@@ -484,6 +635,51 @@ public class ${EXCHANGE_CAMEL}WebSocketApiProvider implements ExchangeWebSocketA
     @Override
     public I${EXCHANGE_CAMEL}WebSocketApi getWebSocketApi() {
         return new ${EXCHANGE_CAMEL}WebSocketApi(${EXCHANGE_CAMEL}Configuration.getInstance().getWebSocketUrl());
+    }
+}
+EOF
+
+create_file "${COMMON_EXAMPLE_JAVA}/${EXCHANGE_CAMEL}RestApiExample.java" <<EOF
+package com.fueledbychai.${PACKAGE_SEGMENT}.common.api.example;
+
+import com.fueledbychai.data.Exchange;
+import com.fueledbychai.data.InstrumentType;
+import com.fueledbychai.${PACKAGE_SEGMENT}.common.api.I${EXCHANGE_CAMEL}RestApi;
+import com.fueledbychai.util.ExchangeRestApiFactory;
+
+/**
+ * Minimal example showing how strategy or integration code should obtain the
+ * ${EXCHANGE_CAMEL} REST API from the shared factory.
+ */
+public class ${EXCHANGE_CAMEL}RestApiExample {
+
+    public static void main(String[] args) {
+        I${EXCHANGE_CAMEL}RestApi api = ExchangeRestApiFactory.getApi(Exchange.${EXCHANGE_CONST},
+                I${EXCHANGE_CAMEL}RestApi.class);
+        api.getAllInstrumentsForType(InstrumentType.PERPETUAL_FUTURES);
+    }
+}
+EOF
+
+create_file "${COMMON_EXAMPLE_JAVA}/${EXCHANGE_CAMEL}WebSocketApiExample.java" <<EOF
+package com.fueledbychai.${PACKAGE_SEGMENT}.common.api.example;
+
+import com.fueledbychai.data.Exchange;
+import com.fueledbychai.${PACKAGE_SEGMENT}.common.api.I${EXCHANGE_CAMEL}WebSocketApi;
+import com.fueledbychai.util.ExchangeWebSocketApiFactory;
+
+/**
+ * Minimal example showing how strategy or integration code should obtain the
+ * ${EXCHANGE_CAMEL} websocket API from the shared factory.
+ */
+public class ${EXCHANGE_CAMEL}WebSocketApiExample {
+
+    public static void main(String[] args) {
+        I${EXCHANGE_CAMEL}WebSocketApi api = ExchangeWebSocketApiFactory.getApi(Exchange.${EXCHANGE_CONST},
+                I${EXCHANGE_CAMEL}WebSocketApi.class);
+        api.connect();
+        api.connectOrderEntryWebSocket();
+        api.disconnectAll();
     }
 }
 EOF
@@ -608,6 +804,154 @@ EOF
 
 create_file "${COMMON_SERVICES_DIR}/com.fueledbychai.util.ExchangeCapabilitiesProvider" <<EOF
 com.fueledbychai.${PACKAGE_SEGMENT}.common.${EXCHANGE_CAMEL}ExchangeCapabilitiesProvider
+EOF
+
+create_file "${COMMON_TEST_JAVA}/${EXCHANGE_CAMEL}ConfigurationTest.java" <<EOF
+package com.fueledbychai.${PACKAGE_SEGMENT}.common.api;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
+
+class ${EXCHANGE_CAMEL}ConfigurationTest {
+
+    @Test
+    void readsConfiguredProperties() {
+        String environmentKey = "${EXCHANGE_SLUG}.environment";
+        String restUrlKey = "${EXCHANGE_SLUG}.rest.url";
+        String wsUrlKey = "${EXCHANGE_SLUG}.ws.url";
+        String accountKey = "${EXCHANGE_SLUG}.account.address";
+        String privateKey = "${EXCHANGE_SLUG}.private.key";
+
+        String previousEnvironment = System.getProperty(environmentKey);
+        String previousRestUrl = System.getProperty(restUrlKey);
+        String previousWsUrl = System.getProperty(wsUrlKey);
+        String previousAccount = System.getProperty(accountKey);
+        String previousPrivateKey = System.getProperty(privateKey);
+
+        try {
+            System.setProperty(environmentKey, "test");
+            System.setProperty(restUrlKey, "https://api.unit.test");
+            System.setProperty(wsUrlKey, "wss://ws.unit.test");
+            System.setProperty(accountKey, "unit-account");
+            System.setProperty(privateKey, "unit-private-key");
+
+            ${EXCHANGE_CAMEL}Configuration.reset();
+            ${EXCHANGE_CAMEL}Configuration config = ${EXCHANGE_CAMEL}Configuration.getInstance();
+
+            assertEquals("test", config.getEnvironment());
+            assertEquals("https://api.unit.test", config.getRestUrl());
+            assertEquals("wss://ws.unit.test", config.getWebSocketUrl());
+            assertEquals("unit-account", config.getAccountAddress());
+            assertEquals("unit-private-key", config.getPrivateKey());
+            assertTrue(config.hasPrivateKeyConfiguration());
+        } finally {
+            restoreProperty(environmentKey, previousEnvironment);
+            restoreProperty(restUrlKey, previousRestUrl);
+            restoreProperty(wsUrlKey, previousWsUrl);
+            restoreProperty(accountKey, previousAccount);
+            restoreProperty(privateKey, previousPrivateKey);
+            ${EXCHANGE_CAMEL}Configuration.reset();
+        }
+    }
+
+    private static void restoreProperty(String key, String previousValue) {
+        if (previousValue == null) {
+            System.clearProperty(key);
+            return;
+        }
+        System.setProperty(key, previousValue);
+    }
+}
+EOF
+
+create_file "${COMMON_TEST_JAVA}/${EXCHANGE_CAMEL}RestApiProviderTest.java" <<EOF
+package com.fueledbychai.${PACKAGE_SEGMENT}.common.api;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.ServiceLoader;
+
+import org.junit.jupiter.api.Test;
+
+import com.fueledbychai.data.Exchange;
+import com.fueledbychai.util.ExchangeRestApiProvider;
+
+class ${EXCHANGE_CAMEL}RestApiProviderTest {
+
+    @Test
+    void restProviderIsDiscoverableThroughServiceLoader() {
+        boolean found = false;
+        for (ExchangeRestApiProvider provider : ServiceLoader.load(ExchangeRestApiProvider.class)) {
+            if (provider instanceof ${EXCHANGE_CAMEL}RestApiProvider typedProvider) {
+                found = true;
+                assertEquals(Exchange.${EXCHANGE_CONST}, typedProvider.getExchange());
+                assertEquals(I${EXCHANGE_CAMEL}RestApi.class, typedProvider.getApiType());
+                assertNotNull(typedProvider.getPublicApi());
+                assertNotNull(typedProvider.getApi());
+                if (typedProvider.isPrivateApiAvailable()) {
+                    assertNotNull(typedProvider.getPrivateApi());
+                }
+            }
+        }
+
+        assertTrue(found, "Expected ServiceLoader to discover ${EXCHANGE_CAMEL}RestApiProvider");
+    }
+
+    @Test
+    void restApiRejectsBlankBaseUrl() {
+        assertThrows(IllegalArgumentException.class, () -> new ${EXCHANGE_CAMEL}RestApi("  "));
+    }
+}
+EOF
+
+create_file "${COMMON_TEST_JAVA}/${EXCHANGE_CAMEL}WebSocketApiProviderTest.java" <<EOF
+package com.fueledbychai.${PACKAGE_SEGMENT}.common.api;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.ServiceLoader;
+
+import org.junit.jupiter.api.Test;
+
+import com.fueledbychai.data.Exchange;
+import com.fueledbychai.util.ExchangeWebSocketApiProvider;
+
+class ${EXCHANGE_CAMEL}WebSocketApiProviderTest {
+
+    @Test
+    void websocketProviderIsDiscoverableThroughServiceLoader() {
+        boolean found = false;
+        for (ExchangeWebSocketApiProvider provider : ServiceLoader.load(ExchangeWebSocketApiProvider.class)) {
+            if (provider instanceof ${EXCHANGE_CAMEL}WebSocketApiProvider typedProvider) {
+                found = true;
+                assertEquals(Exchange.${EXCHANGE_CONST}, typedProvider.getExchange());
+                assertEquals(I${EXCHANGE_CAMEL}WebSocketApi.class, typedProvider.getApiType());
+
+                I${EXCHANGE_CAMEL}WebSocketApi api = typedProvider.getWebSocketApi();
+                assertNotNull(api);
+                assertDoesNotThrow(api::connect);
+                assertDoesNotThrow(api::connectOrderEntryWebSocket);
+                assertDoesNotThrow(api::disconnectAll);
+            }
+        }
+
+        assertTrue(found, "Expected ServiceLoader to discover ${EXCHANGE_CAMEL}WebSocketApiProvider");
+    }
+
+    @Test
+    void websocketApiRejectsBlankUrl() {
+        assertThrows(IllegalArgumentException.class, () -> new ${EXCHANGE_CAMEL}WebSocketApi("  "));
+    }
+}
 EOF
 
 if [[ "${WITH_MARKET_DATA}" == "true" ]]; then
@@ -1001,20 +1345,40 @@ else
     log_warn "Exchange enum was not updated. Add Exchange.${EXCHANGE_CONST} manually if needed."
 fi
 
+TEST_MODULE_ARGS="${COMMON_DIR}"
+if [[ "${WITH_MARKET_DATA}" == "true" ]]; then
+    TEST_MODULE_ARGS="${TEST_MODULE_ARGS},${MARKET_DIR}"
+fi
+if [[ "${WITH_BROKER}" == "true" ]]; then
+    TEST_MODULE_ARGS="${TEST_MODULE_ARGS},${BROKER_DIR}"
+fi
+if [[ "${WITH_HISTORICAL}" == "true" ]]; then
+    TEST_MODULE_ARGS="${TEST_MODULE_ARGS},${HIST_DIR}"
+fi
+
 cat <<EOF
 
 Scaffold complete for '${EXCHANGE_SLUG}'.
 
 Next steps:
-1. Implement REST + WebSocket logic in:
+1. Review and update the generated module documentation and examples:
+   - ${COMMON_DIR}/README.md
+   - ${COMMON_EXAMPLE_JAVA}/${EXCHANGE_CAMEL}RestApiExample.java
+   - ${COMMON_EXAMPLE_JAVA}/${EXCHANGE_CAMEL}WebSocketApiExample.java
+2. Implement REST + WebSocket logic in:
    - ${COMMON_API_JAVA}/${EXCHANGE_CAMEL}RestApi.java
    - ${COMMON_API_JAVA}/${EXCHANGE_CAMEL}WebSocketApi.java
-2. Implement symbol normalization and descriptor hydration in:
+3. Replace the websocket bootstrap methods with exchange-specific subscriptions and connection maintenance.
+4. Implement symbol normalization and descriptor hydration in:
    - ${COMMON_BASE_JAVA}/${EXCHANGE_CAMEL}TickerRegistry.java
-3. Set real capabilities in:
+5. Set real capabilities in:
    - ${COMMON_BASE_JAVA}/${EXCHANGE_CAMEL}ExchangeCapabilitiesProvider.java
-4. If you generated implementation modules, fill in TODO methods there.
-5. Run:
-   mvn test -pl ${COMMON_DIR}${WITH_MARKET_DATA:+,${MARKET_DIR}}${WITH_BROKER:+,${BROKER_DIR}}${WITH_HISTORICAL:+,${HIST_DIR}} -am
+6. Expand the generated tests under:
+   - ${COMMON_TEST_JAVA}
+7. Validate the module scaffold:
+   scripts/validate-common-module.sh ${COMMON_DIR}
+8. If you generated implementation modules, fill in TODO methods there.
+9. Run:
+   mvn test -pl ${TEST_MODULE_ARGS} -am
 
 EOF

@@ -54,6 +54,15 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 
+/**
+ * Concrete REST client for the Lighter exchange.
+ *
+ * This class is the reference REST implementation for new crypto exchange
+ * integrations in this repository. It keeps public and private API behavior in
+ * one place, centralizes auth token generation, normalizes REST responses into
+ * shared domain objects, and is intended to be consumed through
+ * {@link com.fueledbychai.util.ExchangeRestApiFactory}.
+ */
 public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
     protected static Logger logger = LoggerFactory.getLogger(LighterRestApi.class);
     protected static Logger latencyLogger = LoggerFactory.getLogger(Span.LATENCY_LOGGER_NAME);
