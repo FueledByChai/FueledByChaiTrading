@@ -1,6 +1,6 @@
-# Binance Common API
+# Binance Spot Common API
 
-This module provides the Binance Spot commons integration. Today it exposes a factory-registered REST API plus lower-level websocket helper classes.
+This module provides the Binance Spot commons integration. Its Maven artifact id is `binance-spot-common-api`, which keeps it distinct from the newer Binance futures module while preserving the existing package structure in this repository.
 
 ## Main Entry Points
 
@@ -8,6 +8,11 @@ This module provides the Binance Spot commons integration. Today it exposes a fa
 - REST implementation: `commons/binance-common-api/src/main/java/com/fueledbychai/binance/BinanceRestApi.java`
 - REST provider: `commons/binance-common-api/src/main/java/com/fueledbychai/binance/BinanceRestApiProvider.java`
 - Ticker registry: `commons/binance-common-api/src/main/java/com/fueledbychai/binance/BinanceTickerRegistry.java`
+
+## Artifact Naming
+
+- Maven artifact: `com.fueledbychai:binance-spot-common-api`
+- Exchange constant: `Exchange.BINANCE_SPOT`
 
 ## Recommended Usage
 
@@ -33,6 +38,7 @@ When modernizing or extending this module:
 1. Keep REST usage aligned with `docs/commons-api-conventions.md`.
 2. If a shared websocket API is added later, prefer a public interface plus `ExchangeWebSocketApiProvider`.
 3. Preserve existing symbol normalization through the ticker registry.
+4. Use the dedicated `binance-futures-*` modules for USD(S)-margined futures instead of extending spot-specific contracts.
 
 ## Shared Conventions
 

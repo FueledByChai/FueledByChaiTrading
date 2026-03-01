@@ -40,11 +40,17 @@
             <artifactId>paradex-broker-api-impl</artifactId>
             <version>${project.version}</version>
         </dependency>                
-                <dependency>
+        <dependency>
             <groupId>${project.groupId}</groupId>
-            <artifactId>binance-market-data-impl</artifactId>
+            <artifactId>binance-spot-market-data-impl</artifactId>
             <version>${project.version}</version>
-        </dependency>                
+        </dependency>   
+        
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>binance-futures-market-data-impl</artifactId>
+            <version>${project.version}</version>
+        </dependency>
     </dependencies>
     <properties>
         <!-- Documentation generation properties -->
