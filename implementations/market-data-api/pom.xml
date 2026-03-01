@@ -52,6 +52,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     <module>hyperliquid-market-data-impl</module>
     <module>lighter-market-data-impl</module>
     <module>paradex-market-data-impl</module>
+    <module>binance-futures-market-data-impl</module>
   </modules>
   
 </project>

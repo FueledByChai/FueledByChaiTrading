@@ -39,7 +39,8 @@ The support level varies by venue and by capability. The table below reflects wh
 | Lighter | Yes | Yes | Yes | Yes | Yes | No | No | Most complete modern crypto commons reference module |
 | Hyperliquid | Yes | Yes | Yes | Yes | Yes | No | No | Shared websocket API exists, but narrower than Lighter |
 | Paradex | Yes | Yes | No | Yes | Yes | Yes | No | Websocket support exists as helper/client + processors |
-| Binance Spot | Yes | Yes | No | Yes | No | No | No | Websocket support exists as helper/client + processors |
+| Binance Spot | Yes | Yes | No | Yes | No | No | No | Artifact ids are `binance-spot-*`; websocket support remains helper/client-level |
+| Binance Futures | Yes | Yes | Yes | Yes | No | No | No | New USD(S)-margined perpetuals integration with shared websocket API and funding stream support |
 | Interactive Brokers | Yes | Yes | Partial / legacy | Yes | Yes | Yes | Yes | Strong coverage across classic trading workflows |
 | dYdX | No commons module in this repo | No shared commons REST layer | No | Yes | Yes | No | No | Implementations exist without a matching commons module here |
 | Paper Broker | No exchange commons module | N/A | N/A | No | Yes | No | No | Local execution/testing broker implementation |
@@ -52,6 +53,7 @@ If you are evaluating exchange support or extending the library, start with thes
 - `commons/hyperliquid-common-api/README.md`
 - `commons/paradex-common-api/README.md`
 - `commons/binance-common-api/README.md`
+- `commons/binance-futures-common-api/README.md`
 
 These document the current public entry points and explain whether a module already follows the newer shared factory/provider websocket pattern or still uses lower-level websocket helpers.
 
