@@ -42,7 +42,7 @@
         </dependency>                
         <dependency>
             <groupId>${project.groupId}</groupId>
-            <artifactId>binance-spot-market-data-impl</artifactId>
+            <artifactId>binance-market-data-impl</artifactId>
             <version>${project.version}</version>
         </dependency>   
         

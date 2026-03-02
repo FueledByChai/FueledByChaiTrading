@@ -52,7 +52,7 @@ If you are evaluating exchange support or extending the library, start with thes
 - `commons/lighter-common-api/README.md`
 - `commons/hyperliquid-common-api/README.md`
 - `commons/paradex-common-api/README.md`
-- `commons/binance-common-api/README.md`
+- `commons/binance-spot-common-api/README.md`
 - `commons/binance-futures-common-api/README.md`
 
 These document the current public entry points and explain whether a module already follows the newer shared factory/provider websocket pattern or still uses lower-level websocket helpers.

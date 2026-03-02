@@ -4,10 +4,10 @@ This module provides the Binance Spot commons integration. Its Maven artifact id
 
 ## Main Entry Points
 
-- REST interface: `commons/binance-common-api/src/main/java/com/fueledbychai/binance/IBinanceRestApi.java`
-- REST implementation: `commons/binance-common-api/src/main/java/com/fueledbychai/binance/BinanceRestApi.java`
-- REST provider: `commons/binance-common-api/src/main/java/com/fueledbychai/binance/BinanceRestApiProvider.java`
-- Ticker registry: `commons/binance-common-api/src/main/java/com/fueledbychai/binance/BinanceTickerRegistry.java`
+- REST interface: `commons/binance-spot-common-api/src/main/java/com/fueledbychai/binance/IBinanceRestApi.java`
+- REST implementation: `commons/binance-spot-common-api/src/main/java/com/fueledbychai/binance/BinanceRestApi.java`
+- REST provider: `commons/binance-spot-common-api/src/main/java/com/fueledbychai/binance/BinanceRestApiProvider.java`
+- Ticker registry: `commons/binance-spot-common-api/src/main/java/com/fueledbychai/binance/BinanceTickerRegistry.java`
 
 ## Artifact Naming
 
@@ -26,8 +26,8 @@ The older `BinanceApiFactory` remains in the module, but the shared factory is t
 
 This module includes websocket helpers and processors:
 
-- `commons/binance-common-api/src/main/java/com/fueledbychai/binance/ws/BinanceWebSocketClient.java`
-- `commons/binance-common-api/src/main/java/com/fueledbychai/binance/ws/BinanceWebSocketClientBuilder.java`
+- `commons/binance-spot-common-api/src/main/java/com/fueledbychai/binance/ws/BinanceWebSocketClient.java`
+- `commons/binance-spot-common-api/src/main/java/com/fueledbychai/binance/ws/BinanceWebSocketClientBuilder.java`
 
 It does not currently expose a shared `ExchangeWebSocketApiProvider`-based websocket API contract like the newer Lighter and Hyperliquid patterns. Websocket support here is still helper/client-level.
 
