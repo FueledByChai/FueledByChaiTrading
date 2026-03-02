@@ -1,6 +1,6 @@
 # Binance Futures Common API
 
-This module provides the Binance USD(S)-margined futures commons integration. It exposes a shared REST API, a shared websocket API, provider registrations, and ticker-registry wiring for `Exchange.BINANCE_FUTURES`.
+This module provides the Binance derivatives commons integration for `Exchange.BINANCE_FUTURES`. It exposes a shared REST API, a shared websocket API, provider registrations, and ticker-registry wiring for Binance USD(S)-margined perpetuals plus Binance options.
 
 ## Main Entry Points
 
@@ -12,13 +12,15 @@ This module provides the Binance USD(S)-margined futures commons integration. It
 ## Main Capabilities
 
 - REST support for:
-  - `exchangeInfo` instrument discovery
+  - `/fapi/v1/exchangeInfo` perpetual instrument discovery
+  - `/eapi/v1/exchangeInfo` options instrument discovery
   - `time` server-time lookup
 - Shared websocket subscriptions for:
-  - `bookTicker`
+  - perpetual `bookTicker`
+  - shared ticker streams (`@ticker`) for perpetuals and options
   - partial depth (`depth5|10|20@100ms`)
-  - aggregate trades (`aggTrade`)
-  - mark price / funding (`markPrice@1s`)
+  - aggregate trades (`aggTrade`) for perpetuals and `trade` for options
+  - mark price / funding (`markPrice@1s`) for perpetuals
 - Provider registrations for `ServiceLoader`
 - Unit tests covering JSON parsing, provider discovery, configuration, and quote translation
 
@@ -31,8 +33,9 @@ This module provides the Binance USD(S)-margined futures commons integration. It
 
 ## Notes
 
-- The current implementation targets Binance USD(S)-margined perpetuals (`InstrumentType.PERPETUAL_FUTURES`).
-- Symbol normalization accepts `BTC/USDT`, `BTCUSDT`, and bare `BTC` and resolves them to the Binance `BTCUSDT` perpetual contract by default.
+- Supported instrument types are `InstrumentType.PERPETUAL_FUTURES` and `InstrumentType.OPTION` on `Exchange.BINANCE_FUTURES`.
+- Perpetual symbol normalization accepts `BTC/USDT`, `BTCUSDT`, and bare `BTC` and resolves them to the Binance `BTCUSDT` perpetual contract by default.
+- Options symbols should use the exchange symbol format (for example `BTC-260627-50000-C`).
 - This module is intentionally separate from the spot-specific `binance-spot-*` artifacts.
 
 ## Shared Conventions

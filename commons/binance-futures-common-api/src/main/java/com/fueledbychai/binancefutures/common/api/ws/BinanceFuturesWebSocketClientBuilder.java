@@ -1,5 +1,6 @@
 package com.fueledbychai.binancefutures.common.api.ws;
 
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.websocket.IWebSocketProcessor;
 
@@ -9,14 +10,26 @@ public final class BinanceFuturesWebSocketClientBuilder {
     }
 
     public static String bookTickerChannel(Ticker ticker) {
+        if (isOptionTicker(ticker)) {
+            return normalizeSymbol(ticker) + "@bookTicker";
+        }
         return normalizeSymbol(ticker) + "@bookTicker";
     }
 
     public static String symbolTickerChannel(Ticker ticker) {
+        if (isOptionTicker(ticker)) {
+            return normalizeSymbol(ticker) + "@optionTicker";
+        }
         return normalizeSymbol(ticker) + "@ticker";
     }
 
     public static String partialDepthChannel(Ticker ticker, int depth) {
+        if (isOptionTicker(ticker)) {
+            if (depth != 5 && depth != 10 && depth != 20) {
+                throw new IllegalArgumentException("option depth must be one of 5, 10, or 20");
+            }
+            return normalizeSymbol(ticker) + "@depth" + depth + "@100ms";
+        }
         if (depth != 5 && depth != 10 && depth != 20) {
             throw new IllegalArgumentException("depth must be one of 5, 10, or 20");
         }
@@ -24,10 +37,16 @@ public final class BinanceFuturesWebSocketClientBuilder {
     }
 
     public static String aggTradeChannel(Ticker ticker) {
+        if (isOptionTicker(ticker)) {
+            return normalizeSymbol(ticker) + "@optionTrade";
+        }
         return normalizeSymbol(ticker) + "@aggTrade";
     }
 
     public static String markPriceChannel(Ticker ticker) {
+        if (isOptionTicker(ticker)) {
+            return normalizeOptionUnderlying(ticker) + "@markPrice";
+        }
         return normalizeSymbol(ticker) + "@markPrice@1s";
     }
 
@@ -60,6 +79,29 @@ public final class BinanceFuturesWebSocketClientBuilder {
         if (ticker == null || ticker.getSymbol() == null || ticker.getSymbol().isBlank()) {
             throw new IllegalArgumentException("ticker with symbol is required");
         }
-        return ticker.getSymbol().toLowerCase();
+        return ticker.getSymbol().trim().toLowerCase();
+    }
+
+    private static String normalizeOptionUnderlying(Ticker ticker) {
+        if (ticker == null) {
+            throw new IllegalArgumentException("ticker is required");
+        }
+        String symbol = ticker.getSymbol();
+        if (symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("ticker with symbol is required");
+        }
+        int dashIndex = symbol.indexOf('-');
+        if (dashIndex > 0) {
+            return symbol.substring(0, dashIndex).toLowerCase() + "usdt";
+        }
+        return symbol.toLowerCase();
+    }
+
+    private static boolean isOptionTicker(Ticker ticker) {
+        if (ticker == null) {
+            return false;
+        }
+        InstrumentType instrumentType = ticker.getInstrumentType();
+        return instrumentType == InstrumentType.OPTION || instrumentType == InstrumentType.PERPETUAL_OPTION;
     }
 }
