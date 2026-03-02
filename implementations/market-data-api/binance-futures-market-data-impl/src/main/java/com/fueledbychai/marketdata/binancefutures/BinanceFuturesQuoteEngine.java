@@ -20,6 +20,7 @@ import com.fueledbychai.binancefutures.common.api.BinanceFuturesConfiguration;
 import com.fueledbychai.binancefutures.common.api.IBinanceFuturesRestApi;
 import com.fueledbychai.binancefutures.common.api.IBinanceFuturesWebSocketApi;
 import com.fueledbychai.data.Exchange;
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.ILevel2Quote;
@@ -57,7 +58,9 @@ public class BinanceFuturesQuoteEngine extends QuoteEngine {
         this(ExchangeRestApiFactory.getPublicApi(Exchange.BINANCE_FUTURES, IBinanceFuturesRestApi.class),
                 ExchangeWebSocketApiFactory.getApi(Exchange.BINANCE_FUTURES, IBinanceFuturesWebSocketApi.class),
                 TickerRegistryFactory.getInstance(Exchange.BINANCE_FUTURES));
-        logger.info("Binance Futures WebSocket URL: {}", BinanceFuturesConfiguration.getInstance().getWebSocketUrl());
+        BinanceFuturesConfiguration config = BinanceFuturesConfiguration.getInstance();
+        logger.info("Binance Futures WebSocket URLs: futures={}, options={}", config.getWebSocketUrl(),
+                config.getOptionsWebSocketUrl());
     }
 
     protected BinanceFuturesQuoteEngine(IBinanceFuturesRestApi restApi, IBinanceFuturesWebSocketApi webSocketApi,
@@ -119,30 +122,35 @@ public class BinanceFuturesQuoteEngine extends QuoteEngine {
     @Override
     public void subscribeLevel1(Ticker ticker, Level1QuoteListener listener) {
         requireTicker(ticker);
-        if (level1StreamsStarted.add(ticker)) {
+        boolean startStreams = level1StreamsStarted.add(ticker);
+        super.subscribeLevel1(ticker, listener);
+        if (startStreams) {
             startBookTickerStream(ticker);
             startSymbolTickerStream(ticker);
-            startMarkPriceStream(ticker);
+            if (!isOptionTicker(ticker)) {
+                startMarkPriceStream(ticker);
+            }
         }
-        super.subscribeLevel1(ticker, listener);
     }
 
     @Override
     public void subscribeMarketDepth(Ticker ticker, Level2QuoteListener listener) {
         requireTicker(ticker);
-        if (depthStreamsStarted.add(ticker)) {
+        boolean startStream = depthStreamsStarted.add(ticker);
+        super.subscribeMarketDepth(ticker, listener);
+        if (startStream) {
             startDepthStream(ticker);
         }
-        super.subscribeMarketDepth(ticker, listener);
     }
 
     @Override
     public void subscribeOrderFlow(Ticker ticker, OrderFlowListener listener) {
         requireTicker(ticker);
-        if (tradeStreamsStarted.add(ticker)) {
+        boolean startStream = tradeStreamsStarted.add(ticker);
+        super.subscribeOrderFlow(ticker, listener);
+        if (startStream) {
             startTradeStream(ticker);
         }
-        super.subscribeOrderFlow(ticker, listener);
     }
 
     @Override
@@ -205,6 +213,11 @@ public class BinanceFuturesQuoteEngine extends QuoteEngine {
     }
 
     void onSymbolTickerUpdate(Ticker ticker, JsonNode message) {
+        if (isOptionTicker(ticker)) {
+            onOptionTickerUpdate(ticker, message);
+            return;
+        }
+
         Level1Quote quote = new Level1Quote(ticker, toTimestamp(message, "E"));
         boolean hasValues = false;
 
@@ -225,6 +238,69 @@ public class BinanceFuturesQuoteEngine extends QuoteEngine {
         }
     }
 
+    void onOptionTickerUpdate(Ticker ticker, JsonNode message) {
+        Level1Quote quote = new Level1Quote(ticker, toTimestamp(message, "E"));
+        boolean hasValues = false;
+
+        BigDecimal bestBid = decimalValue(message, "bo");
+        if (bestBid != null) {
+            quote.addQuote(QuoteType.BID, bestBid);
+            hasValues = true;
+        }
+
+        BigDecimal bidSize = decimalValue(message, "bq");
+        if (bidSize != null) {
+            quote.addQuote(QuoteType.BID_SIZE, bidSize);
+            hasValues = true;
+        }
+
+        BigDecimal bestAsk = decimalValue(message, "ao");
+        if (bestAsk != null) {
+            quote.addQuote(QuoteType.ASK, bestAsk);
+            hasValues = true;
+        }
+
+        BigDecimal askSize = decimalValue(message, "aq");
+        if (askSize != null) {
+            quote.addQuote(QuoteType.ASK_SIZE, askSize);
+            hasValues = true;
+        }
+
+        BigDecimal volume = decimalValue(message, "V");
+        if (volume != null) {
+            quote.addQuote(QuoteType.VOLUME, volume);
+            hasValues = true;
+        }
+
+        BigDecimal volumeNotional = decimalValue(message, "A");
+        if (volumeNotional != null) {
+            quote.addQuote(QuoteType.VOLUME_NOTIONAL, volumeNotional);
+            hasValues = true;
+        }
+
+        BigDecimal lastPrice = decimalValue(message, "c");
+        if (lastPrice != null) {
+            quote.addQuote(QuoteType.LAST, lastPrice);
+            hasValues = true;
+        }
+
+        BigDecimal lastSize = decimalValue(message, "Q");
+        if (lastSize != null) {
+            quote.addQuote(QuoteType.LAST_SIZE, lastSize);
+            hasValues = true;
+        }
+
+        BigDecimal markPrice = decimalValue(message, "mp");
+        if (markPrice != null) {
+            quote.addQuote(QuoteType.MARK_PRICE, markPrice);
+            hasValues = true;
+        }
+
+        if (hasValues) {
+            fireLevel1Quote(quote);
+        }
+    }
+
     void onOrderBookUpdate(Ticker ticker, JsonNode message) {
         List<OrderBook.PriceLevel> bids = toPriceLevels(message.path("b"));
         List<OrderBook.PriceLevel> asks = toPriceLevels(message.path("a"));
@@ -233,7 +309,7 @@ public class BinanceFuturesQuoteEngine extends QuoteEngine {
         }
 
         OrderBook orderBook = new OrderBook(ticker, ticker.getMinimumTickSize());
-        ZonedDateTime timestamp = toTimestamp(message, "E");
+        ZonedDateTime timestamp = isOptionTicker(ticker) ? toTimestamp(message, "T") : toTimestamp(message, "E");
         orderBook.updateFromSnapshot(bids, asks, timestamp);
         fireMarketDepthQuote(new Level2Quote(ticker, orderBook, timestamp));
     }
@@ -245,7 +321,7 @@ public class BinanceFuturesQuoteEngine extends QuoteEngine {
             return;
         }
 
-        OrderFlow.Side side = message.path("m").asBoolean(false) ? OrderFlow.Side.SELL : OrderFlow.Side.BUY;
+        OrderFlow.Side side = resolveTradeSide(ticker, message);
         OrderFlow orderFlow = new OrderFlow(ticker, price, size, side, toTimestamp(message, "T"));
         fireOrderFlow(orderFlow);
     }
@@ -271,7 +347,9 @@ public class BinanceFuturesQuoteEngine extends QuoteEngine {
     }
 
     protected void startTradeStream(Ticker ticker) {
-        webSocketApi.subscribeAggTrades(ticker, message -> safeRun(() -> onTradeUpdate(ticker, message), "aggTrade", ticker));
+        String streamName = isOptionTicker(ticker) ? "optionTrade" : "aggTrade";
+        webSocketApi.subscribeAggTrades(ticker,
+                message -> safeRun(() -> onTradeUpdate(ticker, message), streamName, ticker));
     }
 
     protected void safeRun(Runnable action, String streamType, Ticker ticker) {
@@ -330,5 +408,21 @@ public class BinanceFuturesQuoteEngine extends QuoteEngine {
             priceLevels.add(new OrderBook.PriceLevel(new BigDecimal(priceString), Double.parseDouble(quantityString)));
         }
         return priceLevels;
+    }
+
+    protected OrderFlow.Side resolveTradeSide(Ticker ticker, JsonNode message) {
+        if (isOptionTicker(ticker)) {
+            int signedDirection = message == null ? 0 : message.path("S").asInt(0);
+            return signedDirection < 0 ? OrderFlow.Side.SELL : OrderFlow.Side.BUY;
+        }
+        return message != null && message.path("m").asBoolean(false) ? OrderFlow.Side.SELL : OrderFlow.Side.BUY;
+    }
+
+    protected boolean isOptionTicker(Ticker ticker) {
+        if (ticker == null) {
+            return false;
+        }
+        InstrumentType instrumentType = ticker.getInstrumentType();
+        return instrumentType == InstrumentType.OPTION || instrumentType == InstrumentType.PERPETUAL_OPTION;
     }
 }

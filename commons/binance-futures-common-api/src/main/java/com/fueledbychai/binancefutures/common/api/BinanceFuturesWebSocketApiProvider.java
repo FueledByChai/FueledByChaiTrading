@@ -27,7 +27,9 @@ public class BinanceFuturesWebSocketApiProvider implements ExchangeWebSocketApiP
         if (websocketApi == null) {
             synchronized (BinanceFuturesWebSocketApiProvider.class) {
                 if (websocketApi == null) {
-                    websocketApi = new BinanceFuturesWebSocketApi(BinanceFuturesConfiguration.getInstance().getWebSocketUrl());
+                    BinanceFuturesConfiguration config = BinanceFuturesConfiguration.getInstance();
+                    websocketApi = new BinanceFuturesWebSocketApi(config.getWebSocketUrl(),
+                            config.getOptionsWebSocketUrl());
                 }
             }
         }

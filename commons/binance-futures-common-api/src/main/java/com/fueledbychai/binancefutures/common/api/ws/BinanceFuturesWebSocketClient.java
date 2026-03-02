@@ -1,5 +1,11 @@
 package com.fueledbychai.binancefutures.common.api.ws;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.util.zip.GZIPInputStream;
+
 import org.java_websocket.handshake.ServerHandshake;
 
 import com.fueledbychai.websocket.AbstractWebSocketClient;
@@ -19,13 +25,22 @@ public class BinanceFuturesWebSocketClient extends AbstractWebSocketClient {
     public void onOpen(ServerHandshake handshakedata) {
         processor.connectionOpened();
         if (channel != null && !channel.isBlank()) {
-            JsonObject subscribeJson = new JsonObject();
-            subscribeJson.addProperty("method", "SUBSCRIBE");
-            JsonArray paramsArray = new JsonArray();
-            paramsArray.add(channel);
-            subscribeJson.add("params", paramsArray);
-            subscribeJson.addProperty("id", idCounter++);
-            send(subscribeJson.toString());
+            sendCommand("SUBSCRIBE", channel);
+        }
+    }
+
+    @Override
+    public void onMessage(ByteBuffer bytes) {
+        if (processor == null) {
+            return;
+        }
+        try {
+            String message = decodeBinaryMessage(bytes);
+            if (message != null && !message.isBlank()) {
+                processor.messageReceived(message);
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to decode Binance futures binary websocket payload", e);
         }
     }
 
@@ -34,6 +49,48 @@ public class BinanceFuturesWebSocketClient extends AbstractWebSocketClient {
         super.onError(ex);
         if (processor != null) {
             processor.connectionError(ex);
+        }
+    }
+
+    void sendCommand(String method, String param) {
+        JsonObject commandJson = new JsonObject();
+        commandJson.addProperty("method", method);
+        JsonArray paramsArray = new JsonArray();
+        paramsArray.add(param);
+        commandJson.add("params", paramsArray);
+        commandJson.addProperty("id", idCounter++);
+        send(commandJson.toString());
+    }
+
+    String decodeBinaryMessage(ByteBuffer bytes) throws Exception {
+        if (bytes == null) {
+            return null;
+        }
+        ByteBuffer copy = bytes.asReadOnlyBuffer();
+        byte[] payload = new byte[copy.remaining()];
+        copy.get(payload);
+        if (payload.length == 0) {
+            return null;
+        }
+        if (isGzip(payload)) {
+            return gunzip(payload);
+        }
+        return new String(payload, StandardCharsets.UTF_8);
+    }
+
+    boolean isGzip(byte[] payload) {
+        return payload != null && payload.length >= 2 && (payload[0] & 0xFF) == 0x1F && (payload[1] & 0xFF) == 0x8B;
+    }
+
+    String gunzip(byte[] payload) throws Exception {
+        try (GZIPInputStream gzipInputStream = new GZIPInputStream(new ByteArrayInputStream(payload));
+                ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[1024];
+            int bytesRead;
+            while ((bytesRead = gzipInputStream.read(buffer)) >= 0) {
+                outputStream.write(buffer, 0, bytesRead);
+            }
+            return outputStream.toString(StandardCharsets.UTF_8);
         }
     }
 }

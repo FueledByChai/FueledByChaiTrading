@@ -20,6 +20,7 @@ public class BinanceFuturesExchangeCapabilitiesProvider implements ExchangeCapab
                 .supportsBrokerage(false)
                 .supportsHistoricalData(false)
                 .addInstrumentType(InstrumentType.PERPETUAL_FUTURES)
+                .addInstrumentType(InstrumentType.OPTION)
                 .build();
     }
 }

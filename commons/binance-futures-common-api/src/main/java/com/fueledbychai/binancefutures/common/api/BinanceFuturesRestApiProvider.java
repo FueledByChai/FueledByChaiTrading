@@ -27,7 +27,8 @@ public class BinanceFuturesRestApiProvider implements ExchangeRestApiProvider<IB
         if (publicApi == null) {
             synchronized (BinanceFuturesRestApiProvider.class) {
                 if (publicApi == null) {
-                    publicApi = new BinanceFuturesRestApi(BinanceFuturesConfiguration.getInstance().getRestUrl());
+                    BinanceFuturesConfiguration config = BinanceFuturesConfiguration.getInstance();
+                    publicApi = new BinanceFuturesRestApi(config.getRestUrl(), config.getOptionsRestUrl());
                 }
             }
         }
@@ -53,7 +54,8 @@ public class BinanceFuturesRestApiProvider implements ExchangeRestApiProvider<IB
         if (privateApi == null) {
             synchronized (BinanceFuturesRestApiProvider.class) {
                 if (privateApi == null) {
-                    privateApi = new BinanceFuturesRestApi(config.getRestUrl(), config.getAccountAddress(),
+                    privateApi = new BinanceFuturesRestApi(config.getRestUrl(), config.getOptionsRestUrl(),
+                            config.getAccountAddress(),
                             config.getPrivateKey());
                 }
             }

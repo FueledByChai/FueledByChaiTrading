@@ -8,7 +8,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.math.BigDecimal;
 import java.time.ZonedDateTime;
 import java.util.Date;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 
@@ -67,6 +70,37 @@ class BinanceFuturesQuoteEngineTest {
     }
 
     @Test
+    void subscribeLevel1ForOptionsUsesBookTickerAndOptionTicker() {
+        StubWebSocketApi webSocketApi = new StubWebSocketApi();
+        CapturingQuoteEngine engine = newEngine(webSocketApi);
+
+        engine.subscribeLevel1(optionTicker(), quote -> {
+        });
+
+        assertEquals(1, webSocketApi.bookTickerSubscriptions.get());
+        assertEquals(1, webSocketApi.symbolTickerSubscriptions.get());
+        assertEquals(0, webSocketApi.markPriceSubscriptions.get());
+    }
+
+    @Test
+    void subscribeLevel1RegistersListenerBeforeStartingStreams() throws Exception {
+        ImmediateMessageWebSocketApi webSocketApi = new ImmediateMessageWebSocketApi(
+                json("{\"E\":1710000000123,\"bo\":\"1.25\",\"bq\":\"2.0\",\"ao\":\"1.35\",\"aq\":\"3.0\",\"V\":\"11\",\"A\":\"14.85\",\"c\":\"1.30\",\"mp\":\"1.28\"}"));
+        ForwardingQuoteEngine engine = newForwardingEngine(webSocketApi);
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<ILevel1Quote> quoteRef = new AtomicReference<>();
+
+        engine.subscribeLevel1(optionTicker(), quote -> {
+            quoteRef.set(quote);
+            latch.countDown();
+        });
+
+        assertTrue(latch.await(1, TimeUnit.SECONDS));
+        assertNotNull(quoteRef.get());
+        assertEquals(new BigDecimal("1.25"), quoteRef.get().getValue(QuoteType.BID));
+    }
+
+    @Test
     void subscribeMarketDepthAndTradesStartEachStreamOnce() {
         StubWebSocketApi webSocketApi = new StubWebSocketApi();
         CapturingQuoteEngine engine = newEngine(webSocketApi);
@@ -122,6 +156,25 @@ class BinanceFuturesQuoteEngineTest {
     }
 
     @Test
+    void optionTickerUpdatesProduceLevel1Quote() throws Exception {
+        CapturingQuoteEngine engine = newEngine(new StubWebSocketApi());
+        engine.onSymbolTickerUpdate(optionTicker(),
+                json("{\"E\":1710000000123,\"bo\":\"1.25\",\"bq\":\"2.0\",\"ao\":\"1.35\",\"aq\":\"3.0\",\"V\":\"11\",\"A\":\"14.85\",\"c\":\"1.32\",\"Q\":\"0.5\",\"mp\":\"1.30\"}"));
+
+        ILevel1Quote quote = engine.lastLevel1Quote;
+        assertNotNull(quote);
+        assertEquals(new BigDecimal("1.25"), quote.getValue(QuoteType.BID));
+        assertEquals(new BigDecimal("2.0"), quote.getValue(QuoteType.BID_SIZE));
+        assertEquals(new BigDecimal("1.35"), quote.getValue(QuoteType.ASK));
+        assertEquals(new BigDecimal("3.0"), quote.getValue(QuoteType.ASK_SIZE));
+        assertEquals(new BigDecimal("1.32"), quote.getValue(QuoteType.LAST));
+        assertEquals(new BigDecimal("0.5"), quote.getValue(QuoteType.LAST_SIZE));
+        assertEquals(new BigDecimal("11"), quote.getValue(QuoteType.VOLUME));
+        assertEquals(new BigDecimal("14.85"), quote.getValue(QuoteType.VOLUME_NOTIONAL));
+        assertEquals(new BigDecimal("1.30"), quote.getValue(QuoteType.MARK_PRICE));
+    }
+
+    @Test
     void depthUpdatesProduceLevel2Quote() throws Exception {
         CapturingQuoteEngine engine = newEngine(new StubWebSocketApi());
         engine.onOrderBookUpdate(ticker(),
@@ -149,6 +202,19 @@ class BinanceFuturesQuoteEngineTest {
     }
 
     @Test
+    void optionTradeUpdatesUseSignedDirection() throws Exception {
+        CapturingQuoteEngine engine = newEngine(new StubWebSocketApi());
+        engine.onTradeUpdate(optionTicker(),
+                json("{\"T\":1710000000123,\"p\":\"1.20\",\"q\":\"3.0\",\"S\":-1}"));
+
+        OrderFlow orderFlow = engine.lastOrderFlow;
+        assertNotNull(orderFlow);
+        assertEquals(new BigDecimal("1.20"), orderFlow.getPrice());
+        assertEquals(new BigDecimal("3.0"), orderFlow.getSize());
+        assertEquals(OrderFlow.Side.SELL, orderFlow.getSide());
+    }
+
+    @Test
     void getServerTimeDelegatesToRestApi() {
         Date expected = new Date(1710000000123L);
         CapturingQuoteEngine engine = new CapturingQuoteEngine(new StubRestApi(expected), new StubWebSocketApi(),
@@ -161,12 +227,24 @@ class BinanceFuturesQuoteEngineTest {
                 new NoOpTickerRegistry());
     }
 
+    private static ForwardingQuoteEngine newForwardingEngine(StubWebSocketApi webSocketApi) {
+        return new ForwardingQuoteEngine(new StubRestApi(new Date(1710000000123L)), webSocketApi,
+                new NoOpTickerRegistry());
+    }
+
     private static Ticker ticker() {
         return new Ticker("BTCUSDT")
                 .setExchange(Exchange.BINANCE_FUTURES)
                 .setInstrumentType(InstrumentType.PERPETUAL_FUTURES)
                 .setMinimumTickSize(new BigDecimal("0.1"))
                 .setFundingRateInterval(8);
+    }
+
+    private static Ticker optionTicker() {
+        return new Ticker("BTC-260627-50000-C")
+                .setExchange(Exchange.BINANCE_FUTURES)
+                .setInstrumentType(InstrumentType.OPTION)
+                .setMinimumTickSize(new BigDecimal("0.0001"));
     }
 
     private static JsonNode json(String value) throws Exception {
@@ -199,6 +277,13 @@ class BinanceFuturesQuoteEngineTest {
         }
     }
 
+    private static final class ForwardingQuoteEngine extends BinanceFuturesQuoteEngine {
+        private ForwardingQuoteEngine(IBinanceFuturesRestApi restApi, IBinanceFuturesWebSocketApi webSocketApi,
+                ITickerRegistry tickerRegistry) {
+            super(restApi, webSocketApi, tickerRegistry);
+        }
+    }
+
     private static final class StubRestApi implements IBinanceFuturesRestApi {
         private final Date serverTime;
 
@@ -227,7 +312,7 @@ class BinanceFuturesQuoteEngineTest {
         }
     }
 
-    private static final class StubWebSocketApi implements IBinanceFuturesWebSocketApi {
+    private static class StubWebSocketApi implements IBinanceFuturesWebSocketApi {
         private final AtomicInteger bookTickerSubscriptions = new AtomicInteger();
         private final AtomicInteger symbolTickerSubscriptions = new AtomicInteger();
         private final AtomicInteger markPriceSubscriptions = new AtomicInteger();
@@ -274,6 +359,24 @@ class BinanceFuturesQuoteEngineTest {
         @Override
         public void disconnectAll() {
             disconnectCount.incrementAndGet();
+        }
+    }
+
+    private static final class ImmediateMessageWebSocketApi extends StubWebSocketApi {
+        private final JsonNode symbolTickerMessage;
+
+        private ImmediateMessageWebSocketApi(JsonNode symbolTickerMessage) {
+            this.symbolTickerMessage = symbolTickerMessage;
+        }
+
+        @Override
+        public BinanceFuturesWebSocketClient subscribeSymbolTicker(Ticker ticker,
+                IWebSocketEventListener<JsonNode> listener) {
+            super.subscribeSymbolTicker(ticker, listener);
+            if (symbolTickerMessage != null) {
+                listener.onWebSocketEvent(symbolTickerMessage);
+            }
+            return null;
         }
     }
 
