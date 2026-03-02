@@ -8,10 +8,10 @@
   </parent>
 
   <groupId>com.fueledbychai</groupId>
-  <artifactId>binance-market-data-impl</artifactId>
+  <artifactId>binance-spot-market-data-impl</artifactId>
   <version>0.2.0-SNAPSHOT</version>
 
-  <name>binance-market-data-impl</name>
+  <name>binance-spot-market-data-impl</name>
   <!-- FIXME change it to the project's website -->
   <url>http://www.example.com</url>
 
@@ -27,7 +27,7 @@
         </dependency>
           <dependency>
             <groupId>${project.groupId}</groupId>
-            <artifactId>binance-common-api</artifactId>
+            <artifactId>binance-spot-common-api</artifactId>
             <version>${project.version}</version>
         </dependency>        
           <dependency>
