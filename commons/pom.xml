@@ -46,7 +46,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     <module>paradex-common-api</module>
     <module>lighter-common-api</module>
     <module>hyperliquid-common-api</module>
-    <module>binance-common-api</module>
+    <module>binance-spot-common-api</module>
     <module>binance-futures-common-api</module>
   </modules>
   
