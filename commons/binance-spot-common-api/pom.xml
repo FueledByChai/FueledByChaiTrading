@@ -6,7 +6,7 @@
         <artifactId>fueledbychai-commons</artifactId>
         <version>0.2.0-SNAPSHOT</version>
     </parent>
-    <artifactId>binance-common-api</artifactId>
+    <artifactId>binance-spot-common-api</artifactId>
     <version>0.2.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
