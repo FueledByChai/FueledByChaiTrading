@@ -20,7 +20,7 @@ import com.fueledbychai.websocket.ProxyConfig;
 public class BinanceOptionMarketDataExample {
 
     private static final Logger logger = LoggerFactory.getLogger(BinanceOptionMarketDataExample.class);
-    private static final String REQUESTED_OPTION_SYMBOL = "BTC-260303-69000-C";
+    private static final String REQUESTED_OPTION_SYMBOL = "BTC-260304-69000-C";
 
     public void start() throws Exception {
         ProxyConfig.getInstance().setRunningLocally(true);
@@ -46,7 +46,7 @@ public class BinanceOptionMarketDataExample {
             logger.info("Level 2 Quote Update: {}", quote);
         });
 
-        Thread.sleep(10000L);
+        Thread.sleep(100000L);
         if (!receivedUpdate.get()) {
             logger.warn("No quote updates received for {} in the first 10 seconds. The selected contract may be quiet.",
                     ticker.getSymbol());
