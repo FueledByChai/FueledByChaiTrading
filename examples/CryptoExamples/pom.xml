@@ -41,7 +41,6 @@
             <version>${project.version}</version>
         </dependency>                
         <dependency>
-        <dependency>
             <groupId>${project.groupId}</groupId>
             <artifactId>binance-market-data-impl</artifactId>
             <version>${project.version}</version>
@@ -51,8 +50,6 @@
             <artifactId>deribit-market-data-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
-        </dependency>   
-        
         <dependency>
             <groupId>${project.groupId}</groupId>
             <artifactId>binance-futures-market-data-impl</artifactId>
