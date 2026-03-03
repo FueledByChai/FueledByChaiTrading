@@ -15,7 +15,7 @@ public class BinanceOptionChainLookupExample {
 
     private static final Logger logger = LoggerFactory.getLogger(BinanceOptionChainLookupExample.class);
     private static final String DEFAULT_UNDERLYING = "BTC";
-    private static final LocalDate DEFAULT_EXPIRY = LocalDate.of(2026, 3, 3);
+    private static final LocalDate DEFAULT_EXPIRY = LocalDate.of(2026, 3, 4);
     private static final ITickerRegistry.OptionRightFilter DEFAULT_RIGHT_FILTER = ITickerRegistry.OptionRightFilter.ALL;
 
     public void start(String underlyingSymbol, LocalDate expiry, ITickerRegistry.OptionRightFilter rightFilter) {
@@ -42,7 +42,8 @@ public class BinanceOptionChainLookupExample {
     }
 
     protected String formatExpiry(Ticker ticker) {
-        if (ticker == null || ticker.getExpiryYear() <= 0 || ticker.getExpiryMonth() <= 0 || ticker.getExpiryDay() <= 0) {
+        if (ticker == null || ticker.getExpiryYear() <= 0 || ticker.getExpiryMonth() <= 0
+                || ticker.getExpiryDay() <= 0) {
             return "UNKNOWN";
         }
         return LocalDate.of(ticker.getExpiryYear(), ticker.getExpiryMonth(), ticker.getExpiryDay()).toString();
