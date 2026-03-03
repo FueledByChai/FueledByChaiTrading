@@ -48,6 +48,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     <module>hyperliquid-common-api</module>
     <module>binance-spot-common-api</module>
     <module>binance-futures-common-api</module>
+    <module>deribit-common-api</module>
   </modules>
   
 </project>

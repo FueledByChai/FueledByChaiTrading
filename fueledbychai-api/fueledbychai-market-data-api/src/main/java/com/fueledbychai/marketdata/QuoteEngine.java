@@ -57,7 +57,6 @@ public abstract class QuoteEngine implements IQuoteEngine {
     private static volatile boolean providersLoaded = false;
     ScheduledExecutorService monitor = Executors.newSingleThreadScheduledExecutor();
 
-
     // Custom ThreadFactory for naming quote processing threads
     private static class QuoteThreadFactory implements ThreadFactory {
         private final AtomicInteger threadNumber = new AtomicInteger(1);
@@ -90,8 +89,8 @@ public abstract class QuoteEngine implements IQuoteEngine {
         }
         Class<? extends QuoteEngine> existing = registry.putIfAbsent(exchange, clazz);
         if (existing != null && !existing.equals(clazz)) {
-            throw new IllegalStateException("QuoteEngine already registered for " + exchange.getExchangeName()
-                    + ": " + existing.getName());
+            throw new IllegalStateException(
+                    "QuoteEngine already registered for " + exchange.getExchangeName() + ": " + existing.getName());
         }
     }
 
@@ -163,7 +162,8 @@ public abstract class QuoteEngine implements IQuoteEngine {
         quoteExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(threadPoolSize, new QuoteThreadFactory());
         logger.info("Initialized QuoteEngine with {} threads for quote processing", threadPoolSize);
         monitor.scheduleAtFixedRate(() -> {
-    logger.info("Quote Engine Pool size: " + quoteExecutor.getPoolSize() + ", Active threads: " + quoteExecutor.getActiveCount());
+            logger.debug("Quote Engine Pool size: " + quoteExecutor.getPoolSize() + ", Active threads: "
+                    + quoteExecutor.getActiveCount());
         }, 0, 1, TimeUnit.SECONDS);
     }
 

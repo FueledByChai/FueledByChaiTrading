@@ -53,6 +53,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     <module>lighter-market-data-impl</module>
     <module>paradex-market-data-impl</module>
     <module>binance-futures-market-data-impl</module>
+    <module>deribit-market-data-impl</module>
   </modules>
   
 </project>
