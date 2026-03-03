@@ -284,7 +284,7 @@ public abstract class AbstractTickerRegistry implements ITickerTranslator, ITick
             throw new IllegalArgumentException("expiryYear must be >= 0");
         }
         if (expiryMonth < 0 || expiryMonth > 12) {
-            throw new IllegalArgumentException("expiryMonth must be between 0 and 12");
+            throw new IllegalArgumentException("expiryMonth must be 0 (no month filter) or between 1 and 12");
         }
         if (expiryDay < 0 || expiryDay > 31) {
             throw new IllegalArgumentException("expiryDay must be between 0 and 31");
@@ -350,8 +350,11 @@ public abstract class AbstractTickerRegistry implements ITickerTranslator, ITick
     }
 
     protected boolean matchesOptionRight(Ticker ticker, OptionRightFilter optionRightFilter) {
-        if (ticker == null || optionRightFilter == null || optionRightFilter == OptionRightFilter.ALL) {
-            return ticker != null;
+        if (ticker == null) {
+            return false;
+        }
+        if (optionRightFilter == null || optionRightFilter == OptionRightFilter.ALL) {
+            return true;
         }
 
         if (optionRightFilter == OptionRightFilter.CALL) {
