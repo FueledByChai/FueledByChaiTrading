@@ -19,12 +19,12 @@ class DeribitTickerRegistryTest {
     void translatesOptionMetadataIntoTickerFields() {
         DeribitTickerRegistry registry = new DeribitTickerRegistry(new StubDeribitRestApi());
 
-        Ticker ticker = registry.lookupByCommonSymbol(InstrumentType.OPTION, "BTC/USD-20260327-90000-C");
+        Ticker ticker = registry.lookupByCommonSymbol(InstrumentType.OPTION, "BTC/USD-20260304-90000-C");
         assertNotNull(ticker);
         assertEquals(InstrumentType.OPTION, ticker.getInstrumentType());
         assertEquals(2026, ticker.getExpiryYear());
         assertEquals(3, ticker.getExpiryMonth());
-        assertEquals(27, ticker.getExpiryDay());
+        assertEquals(4, ticker.getExpiryDay());
         assertEquals(0, new BigDecimal("90000").compareTo(ticker.getStrike()));
         assertEquals(Ticker.Right.CALL, ticker.getRight());
     }
@@ -36,6 +36,8 @@ class DeribitTickerRegistryTest {
         assertEquals("BTC_USDC", registry.commonSymbolToExchangeSymbol(InstrumentType.CRYPTO_SPOT, "BTC/USDC"));
         assertEquals("BTC-PERPETUAL",
                 registry.commonSymbolToExchangeSymbol(InstrumentType.PERPETUAL_FUTURES, "BTC/USD"));
+        assertEquals("BTC-4MAR26-90000-C",
+                registry.commonSymbolToExchangeSymbol(InstrumentType.OPTION, "BTC/USD-20260304-90000-C"));
         assertEquals("BTC-27MAR26-90000-C",
                 registry.commonSymbolToExchangeSymbol(InstrumentType.OPTION, "BTC/USD-20260327-90000-C"));
     }
@@ -59,8 +61,8 @@ class DeribitTickerRegistryTest {
                 };
             }
             return new InstrumentDescriptor[] {
-                    new InstrumentDescriptor(InstrumentType.OPTION, Exchange.DERIBIT, "BTC/USD-20260327-90000-C",
-                            "BTC-27MAR26-90000-C", "BTC", "USD", new BigDecimal("0.1"),
+                    new InstrumentDescriptor(InstrumentType.OPTION, Exchange.DERIBIT, "BTC/USD-20260304-90000-C",
+                            "BTC-4MAR26-90000-C", "BTC", "USD", new BigDecimal("0.1"),
                             new BigDecimal("0.0005"), 0, new BigDecimal("0.1"), 0, BigDecimal.ONE, 1, "3")
             };
         }

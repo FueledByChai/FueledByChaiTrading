@@ -16,9 +16,10 @@ import com.fueledbychai.data.TickerTranslator;
 
 public class DeribitTickerTranslator implements ITickerTranslator {
 
+    protected static final DateTimeFormatter COMMON_SYMBOL_OPTION_DATE = DateTimeFormatter.BASIC_ISO_DATE;
     protected static final DateTimeFormatter DERIBIT_OPTION_DATE = new DateTimeFormatterBuilder()
             .parseCaseInsensitive()
-            .appendPattern("ddMMMyy")
+            .appendPattern("dMMMyy")
             .toFormatter(Locale.US);
     protected final TickerTranslator delegate = new TickerTranslator();
 
@@ -29,6 +30,13 @@ public class DeribitTickerTranslator implements ITickerTranslator {
             return ticker;
         }
 
+        LocalDate expiry = parseExpiry(descriptor);
+        if (expiry != null) {
+            ticker.setExpiryYear(expiry.getYear());
+            ticker.setExpiryMonth(expiry.getMonthValue());
+            ticker.setExpiryDay(expiry.getDayOfMonth());
+        }
+
         String symbol = descriptor.getExchangeSymbol();
         if (symbol == null || symbol.isBlank()) {
             return ticker;
@@ -37,15 +45,6 @@ public class DeribitTickerTranslator implements ITickerTranslator {
         String[] parts = symbol.trim().toUpperCase(Locale.US).split("-");
         if (parts.length != 4) {
             return ticker;
-        }
-
-        try {
-            LocalDate expiry = LocalDate.parse(parts[1], DERIBIT_OPTION_DATE);
-            ticker.setExpiryYear(expiry.getYear());
-            ticker.setExpiryMonth(expiry.getMonthValue());
-            ticker.setExpiryDay(expiry.getDayOfMonth());
-        } catch (DateTimeParseException ignored) {
-            // Keep the base ticker when the option date cannot be parsed.
         }
 
         try {
@@ -61,5 +60,53 @@ public class DeribitTickerTranslator implements ITickerTranslator {
         }
 
         return ticker;
+    }
+
+    protected LocalDate parseExpiry(InstrumentDescriptor descriptor) {
+        LocalDate expiry = parseCommonSymbolExpiry(descriptor.getCommonSymbol());
+        if (expiry != null) {
+            return expiry;
+        }
+        return parseExchangeSymbolExpiry(descriptor.getExchangeSymbol());
+    }
+
+    protected LocalDate parseCommonSymbolExpiry(String commonSymbol) {
+        if (commonSymbol == null || commonSymbol.isBlank()) {
+            return null;
+        }
+
+        String normalized = commonSymbol.trim().toUpperCase(Locale.US);
+        int slashIndex = normalized.indexOf('/');
+        if (slashIndex < 0 || slashIndex + 1 >= normalized.length()) {
+            return null;
+        }
+
+        String[] contractParts = normalized.substring(slashIndex + 1).split("-");
+        if (contractParts.length != 4 || !contractParts[1].matches("\\d{8}")) {
+            return null;
+        }
+
+        try {
+            return LocalDate.parse(contractParts[1], COMMON_SYMBOL_OPTION_DATE);
+        } catch (DateTimeParseException ignored) {
+            return null;
+        }
+    }
+
+    protected LocalDate parseExchangeSymbolExpiry(String exchangeSymbol) {
+        if (exchangeSymbol == null || exchangeSymbol.isBlank()) {
+            return null;
+        }
+
+        String[] contractParts = exchangeSymbol.trim().toUpperCase(Locale.US).split("-");
+        if (contractParts.length != 4) {
+            return null;
+        }
+
+        try {
+            return LocalDate.parse(contractParts[1], DERIBIT_OPTION_DATE);
+        } catch (DateTimeParseException ignored) {
+            return null;
+        }
     }
 }

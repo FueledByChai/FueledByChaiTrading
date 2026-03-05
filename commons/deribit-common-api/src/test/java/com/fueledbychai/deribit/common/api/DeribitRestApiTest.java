@@ -43,8 +43,9 @@ class DeribitRestApiTest {
         api.addResponse("public/get_instruments", mapOf("currency", "BTC", "expired", "false", "kind", "option"),
                 """
                         {"jsonrpc":"2.0","result":[
-                          {"kind":"option","instrument_name":"BTC-27MAR26-90000-C","instrument_id":3,
-                           "base_currency":"BTC","tick_size":"0.0005","min_trade_amount":"0.1","contract_size":"1"}
+                          {"kind":"option","instrument_name":"BTC-BADDATE-90000-C","instrument_id":3,
+                           "base_currency":"BTC","tick_size":"0.0005","min_trade_amount":"0.1","contract_size":"1",
+                           "expiration_timestamp":1772582400000}
                         ]}
                         """);
 
@@ -54,8 +55,8 @@ class DeribitRestApiTest {
 
         assertEquals("BTC/USDC", spot.getCommonSymbol());
         assertEquals("BTC/USD", perp.getCommonSymbol());
-        assertEquals("BTC/USD-20260327-90000-C", option.getCommonSymbol());
-        assertEquals("BTC-27MAR26-90000-C", option.getExchangeSymbol());
+        assertEquals("BTC/USD-20260304-90000-C", option.getCommonSymbol());
+        assertEquals("BTC-BADDATE-90000-C", option.getExchangeSymbol());
         assertEquals(8, perp.getFundingPeriodHours());
     }
 
