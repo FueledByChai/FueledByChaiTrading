@@ -100,7 +100,7 @@ public class DeribitTickerRegistry extends AbstractTickerRegistry implements ITi
 
         String deribitDate = contractParts[1];
         if (contractParts[1].matches("\\d{8}")) {
-            deribitDate = contractParts[1].substring(6, 8)
+            deribitDate = Integer.parseInt(contractParts[1].substring(6, 8))
                     + monthCode(contractParts[1].substring(4, 6))
                     + contractParts[1].substring(2, 4);
         }

@@ -9,9 +9,11 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.DateTimeFormatter;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
@@ -41,7 +43,7 @@ public class DeribitRestApi implements IDeribitRestApi {
     protected static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(15L);
     protected static final DateTimeFormatter DERIBIT_OPTION_DATE = new DateTimeFormatterBuilder()
             .parseCaseInsensitive()
-            .appendPattern("ddMMMyy")
+            .appendPattern("dMMMyy")
             .toFormatter(Locale.US);
     protected static final List<InstrumentType> SUPPORTED_TYPES = List.of(
             InstrumentType.CRYPTO_SPOT, InstrumentType.PERPETUAL_FUTURES, InstrumentType.OPTION);
@@ -180,8 +182,9 @@ public class DeribitRestApi implements IDeribitRestApi {
         BigDecimal minTradeAmount = sanitizePositive(getBigDecimal(instrumentObject, "min_trade_amount"), BigDecimal.ONE);
         BigDecimal contractSize = sanitizePositive(getBigDecimal(instrumentObject, "contract_size"), BigDecimal.ONE);
         String instrumentId = getString(instrumentObject, "instrument_id");
+        Long expirationTimestamp = getLong(instrumentObject, "expiration_timestamp");
 
-        String commonSymbol = toCommonSymbol(resolvedType, baseCurrency, quoteCurrency, instrumentName);
+        String commonSymbol = toCommonSymbol(resolvedType, baseCurrency, quoteCurrency, instrumentName, expirationTimestamp);
         int fundingPeriodHours = resolvedType == InstrumentType.PERPETUAL_FUTURES ? 8 : 0;
 
         return new InstrumentDescriptor(resolvedType, Exchange.DERIBIT, commonSymbol, instrumentName, baseCurrency,
@@ -205,7 +208,7 @@ public class DeribitRestApi implements IDeribitRestApi {
     }
 
     protected String toCommonSymbol(InstrumentType instrumentType, String baseCurrency, String quoteCurrency,
-            String instrumentName) {
+            String instrumentName, Long expirationTimestamp) {
         if (instrumentName == null || instrumentName.isBlank()) {
             return null;
         }
@@ -221,14 +224,27 @@ public class DeribitRestApi implements IDeribitRestApi {
             return instrumentName;
         }
 
-        try {
-            LocalDate expiry = LocalDate.parse(parts[1], DERIBIT_OPTION_DATE);
-            return baseCurrency + "/" + quoteCurrency + "-"
-                    + String.format(Locale.US, "%04d%02d%02d", expiry.getYear(), expiry.getMonthValue(),
-                            expiry.getDayOfMonth())
-                    + "-" + parts[2] + "-" + parts[3];
-        } catch (RuntimeException e) {
+        LocalDate expiry = resolveOptionExpiry(expirationTimestamp, parts[1]);
+        if (expiry == null) {
             return instrumentName;
+        }
+        return baseCurrency + "/" + quoteCurrency + "-"
+                + String.format(Locale.US, "%04d%02d%02d", expiry.getYear(), expiry.getMonthValue(),
+                        expiry.getDayOfMonth())
+                + "-" + parts[2] + "-" + parts[3];
+    }
+
+    protected LocalDate resolveOptionExpiry(Long expirationTimestamp, String exchangeExpiryToken) {
+        if (expirationTimestamp != null && expirationTimestamp.longValue() > 0L) {
+            return Instant.ofEpochMilli(expirationTimestamp.longValue()).atZone(ZoneOffset.UTC).toLocalDate();
+        }
+        if (exchangeExpiryToken == null || exchangeExpiryToken.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(exchangeExpiryToken, DERIBIT_OPTION_DATE);
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 
@@ -386,6 +402,17 @@ public class DeribitRestApi implements IDeribitRestApi {
         JsonElement element = object.get(key);
         if (element.isJsonPrimitive()) {
             return new BigDecimal(element.getAsString());
+        }
+        return null;
+    }
+
+    protected Long getLong(JsonObject object, String key) {
+        if (object == null || key == null || !object.has(key) || object.get(key).isJsonNull()) {
+            return null;
+        }
+        JsonElement element = object.get(key);
+        if (element.isJsonPrimitive()) {
+            return Long.valueOf(element.getAsString());
         }
         return null;
     }
