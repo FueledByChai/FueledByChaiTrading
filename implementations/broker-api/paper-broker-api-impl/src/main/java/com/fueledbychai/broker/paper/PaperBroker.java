@@ -5,6 +5,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.ZoneId;
@@ -12,11 +13,14 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -66,6 +70,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     protected String asset;
 
     private Timer accountUpdateTimer = new Timer(true); // Timer to schedule account updates
+    private volatile boolean connected = false;
     protected double makerFee = 0.005 / 100.0; // 0.005% maker rebate
     protected double takerFee = -0.03 / 100.0; // 0.03% taker fee
 
@@ -74,6 +79,8 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     protected ConcurrentHashMap<String, OrderTicket> openBids = new ConcurrentHashMap<>();
     protected ConcurrentHashMap<String, OrderTicket> openAsks = new ConcurrentHashMap<>();
+    protected ConcurrentHashMap<Ticker, InstrumentState> instrumentStates = new ConcurrentHashMap<>();
+    protected Set<Ticker> trackedTickers = ConcurrentHashMap.newKeySet();
 
     protected double bestBidPrice = 0.0; // Best bid price
     protected double bestAskPrice = Double.MAX_VALUE; // Best ask price
@@ -102,7 +109,8 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     protected boolean firstTradeWrittenToFile = false;
 
-    protected Map<String, OrderTicket> openOrders = new LinkedHashMap<>(); // Map to hold open orders, ordered by
+    protected Map<String, OrderTicket> openOrders = new ConcurrentHashMap<>();
+    // Map to hold open orders by orderId
     // insertion
     protected final Set<OrderTicket> executedOrders = java.util.Collections
             .synchronizedSet(new TreeSet<OrderTicket>(new java.util.Comparator<OrderTicket>() {
@@ -125,20 +133,42 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     protected double dollarVolume = 0.0; // Total value of orders placed
     protected String csvFilePath = null;
 
-    private final Deque<SpreadEntry> spreadHistory = new ArrayDeque<>();
     private final long timeWindowMillis = 6000; // 6 seconds
     private final double dislocationMultiplier = 7.5; // Multiplier for dislocation threshold
 
     public PaperBroker(QuoteEngine quoteEngine, Ticker ticker, PaperBrokerCommission commission,
             PaperBrokerLatency latencyModel, double startingBalance) {
+        this(quoteEngine, Collections.singleton(ticker), commission, latencyModel, startingBalance);
+    }
 
-        this.latencyModel = latencyModel;
-        this.quoteEngine = quoteEngine;
-        this.ticker = ticker;
+    public PaperBroker(QuoteEngine quoteEngine, Collection<Ticker> tickers, PaperBrokerCommission commission,
+            PaperBrokerLatency latencyModel, double startingBalance) {
+        if (tickers == null || tickers.isEmpty()) {
+            throw new IllegalArgumentException("At least 1 ticker is required");
+        }
+        this.latencyModel = Objects.requireNonNull(latencyModel, "latencyModel is required");
+        this.quoteEngine = Objects.requireNonNull(quoteEngine, "quoteEngine is required");
         this.makerFee = commission.getMakerFeeBps() / 10000.0; // Convert bps to decimal
         this.takerFee = commission.getTakerFeeBps() / 10000.0; // Convert bps to decimal
         this.startingAccountBalance = startingBalance;
         this.currentAccountBalance = startingBalance;
+
+        Ticker primaryTicker = null;
+        for (Ticker trackedTicker : tickers) {
+            if (trackedTicker == null) {
+                continue;
+            }
+            if (primaryTicker == null) {
+                primaryTicker = trackedTicker;
+            }
+            registerTrackedTicker(trackedTicker);
+        }
+        if (primaryTicker == null) {
+            throw new IllegalArgumentException("At least 1 non-null ticker is required");
+        }
+        this.ticker = primaryTicker;
+        InstrumentState primaryState = getOrCreateState(primaryTicker);
+        syncLegacyFieldsFromState(primaryTicker, primaryState);
     }
 
     private static class SpreadEntry {
@@ -151,15 +181,97 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         }
     }
 
+    private static class InstrumentState {
+        private double bestBidPrice = 0.0;
+        private double bestAskPrice = Double.MAX_VALUE;
+        private double midPrice = 0.0;
+        private double markPrice = 0.0;
+        private double fundingRate = 0.0;
+        private double fundingAccruedOrPaid = 0.0;
+        private long lastFundingTimestamp = 0;
+        private BigDecimal currentPosition = BigDecimal.ZERO;
+        private double averageEntryPrice = 0.0;
+        private double realizedPnL = 0.0;
+        private final Deque<SpreadEntry> spreadHistory = new ArrayDeque<>();
+    }
+
+    protected void registerTrackedTicker(Ticker trackedTicker) {
+        getOrCreateState(trackedTicker);
+        trackedTickers.add(trackedTicker);
+    }
+
+    protected InstrumentState getOrCreateState(Ticker trackedTicker) {
+        if (trackedTicker == null) {
+            return instrumentStates.computeIfAbsent(this.ticker, key -> new InstrumentState());
+        }
+        return instrumentStates.computeIfAbsent(trackedTicker, key -> new InstrumentState());
+    }
+
+    protected InstrumentState getPrimaryState() {
+        return getOrCreateState(ticker);
+    }
+
+    protected void syncLegacyFieldsFromState(Ticker updatedTicker, InstrumentState state) {
+        if (state == null || ticker == null || !ticker.equals(updatedTicker)) {
+            return;
+        }
+        bestBidPrice = state.bestBidPrice;
+        bestAskPrice = state.bestAskPrice;
+        midPrice = state.midPrice;
+        markPrice = state.markPrice;
+        fundingRate = state.fundingRate;
+        fundingAccruedOrPaid = state.fundingAccruedOrPaid;
+        lastFundingTimestamp = state.lastFundingTimestamp;
+        currentPosition = state.currentPosition;
+        averageEntryPrice = state.averageEntryPrice;
+        realizedPnL = state.realizedPnL;
+    }
+
+    protected void ensureTickerSubscription(Ticker trackedTicker) {
+        if (trackedTicker == null) {
+            return;
+        }
+        getOrCreateState(trackedTicker);
+        boolean isNewTicker = trackedTickers.add(trackedTicker);
+        if (!connected || !isNewTicker) {
+            return;
+        }
+        quoteEngine.subscribeLevel1(trackedTicker, this);
+        quoteEngine.subscribeOrderFlow(trackedTicker, this);
+    }
+
+    protected Ticker resolveTickerBySymbol(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            return ticker;
+        }
+        for (Ticker trackedTicker : trackedTickers) {
+            if (trackedTicker != null && symbol.equals(trackedTicker.getSymbol())) {
+                return trackedTicker;
+            }
+        }
+        return ticker;
+    }
+
     @Override
     public String getBrokerName() {
         return "PaperBroker-" + quoteEngine.getDataProviderName();
     }
 
     protected void startAccountUpdateTask() {
+        if (connected) {
+            logger.info("PaperBroker already connected, skipping duplicate connect.");
+            return;
+        }
+        if (accountUpdateTimer != null) {
+            accountUpdateTimer.cancel();
+        }
+        accountUpdateTimer = new Timer(true);
         logger.warn("PaperBroker @PostConstruct startAccountUpdateTask called: {}", System.identityHashCode(this));
+        String symbolForFiles = trackedTickers.size() > 1 ? "MULTI" : ticker.getSymbol();
+        String exchangeName = (ticker.getExchange() == null) ? quoteEngine.getDataProviderName()
+                : ticker.getExchange().getExchangeName();
         // Read starting balance from file
-        String balanceFilePath = generateBalanceFilename(ticker.getSymbol(), ticker.getExchange().getExchangeName());
+        String balanceFilePath = generateBalanceFilename(symbolForFiles, exchangeName);
         File balanceFile = new File(balanceFilePath);
         if (balanceFile.exists()) {
             try {
@@ -173,8 +285,8 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
             }
         }
 
-        csvFilePath = generateCsvFilename(ticker.getSymbol(), ticker.getExchange().getExchangeName());
-        asset = ticker.getSymbol();
+        csvFilePath = generateCsvFilename(symbolForFiles, exchangeName);
+        asset = symbolForFiles;
         brokerStatus.setAsset(asset);
         brokerStatus.setOpenOrders(openOrders.values()); // Set the open orders in the broker status
         brokerStatus.setExecutedOrders(executedOrders);
@@ -201,8 +313,11 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                 }
             }
         }, 0, 1000); // Schedule with a delay of 0 and period of 1000ms (1 second)
-        quoteEngine.subscribeLevel1(ticker, this); // Subscribe to level 1 quotes for the ticker
-        quoteEngine.subscribeOrderFlow(ticker, this); // Subscribe to order flow for the ticker
+        for (Ticker trackedTicker : new HashSet<>(trackedTickers)) {
+            quoteEngine.subscribeLevel1(trackedTicker, this);
+            quoteEngine.subscribeOrderFlow(trackedTicker, this);
+        }
+        connected = true;
     }
 
     private void writeCurrentBalanceToFile(String filePath) {
@@ -218,31 +333,64 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     public void markPriceUpdated(String symbol, BigDecimal markPrice, ZonedDateTime timestamp) {
-        logger.info("Mark Price Updated: {} - {} at {}", symbol, markPrice, timestamp);
-        this.markPrice = markPrice.doubleValue();
+        markPriceUpdated(resolveTickerBySymbol(symbol), markPrice, timestamp);
+    }
+
+    public void markPriceUpdated(Ticker trackedTicker, BigDecimal markPrice, ZonedDateTime timestamp) {
+        if (trackedTicker == null || markPrice == null) {
+            return;
+        }
+        logger.info("Mark Price Updated: {} - {} at {}", trackedTicker.getSymbol(), markPrice, timestamp);
+        InstrumentState state = getOrCreateState(trackedTicker);
+        state.markPrice = markPrice.doubleValue();
+        syncLegacyFieldsFromState(trackedTicker, state);
     }
 
     public void fundingRateUpdated(String symbol, BigDecimal rate, ZonedDateTime timestamp) {
-        logger.info("Funding Rate Updated: {} - {} at {}", symbol, fundingRate, timestamp);
+        fundingRateUpdated(resolveTickerBySymbol(symbol), rate, timestamp);
+    }
+
+    public void fundingRateUpdated(Ticker trackedTicker, BigDecimal rate, ZonedDateTime timestamp) {
+        if (trackedTicker == null || rate == null || timestamp == null) {
+            return;
+        }
+        InstrumentState state = getOrCreateState(trackedTicker);
+        logger.info("Funding Rate Updated: {} - {} at {}", trackedTicker.getSymbol(), state.fundingRate, timestamp);
         double annualizedFundingRate = rate.doubleValue();
-        this.fundingRate = annualizedFundingRate / (365 * 24 * 100); // Convert APR to hourly rate
+        state.fundingRate = annualizedFundingRate / (365 * 24 * 100); // Convert APR to hourly rate
         long currentTimestamp = timestamp.toInstant().toEpochMilli();
-        if (lastFundingTimestamp > 0 && currentTimestamp > lastFundingTimestamp) {
-            double hours = (currentTimestamp - lastFundingTimestamp) / 3600000.0;
+        if (state.lastFundingTimestamp > 0 && currentTimestamp > state.lastFundingTimestamp) {
+            double hours = (currentTimestamp - state.lastFundingTimestamp) / 3600000.0;
             // Funding is paid/collected continuously: funding = size * fundingRate * hours
-            double fundingThisPeriod = (markPrice * currentPosition.doubleValue()) * (-fundingRate) * (hours);
-            this.fundingAccruedOrPaid += fundingThisPeriod;
+            double fundingThisPeriod = (state.markPrice * state.currentPosition.doubleValue()) * (-state.fundingRate) * hours;
+            state.fundingAccruedOrPaid += fundingThisPeriod;
             logger.info("Funding accrued/paid this period: {} total funding: {}", fundingThisPeriod,
-                    fundingAccruedOrPaid);
+                    state.fundingAccruedOrPaid);
             currentAccountBalance += fundingThisPeriod; // Update account balance with funding
         }
-        this.lastFundingTimestamp = currentTimestamp;
+        state.lastFundingTimestamp = currentTimestamp;
+        syncLegacyFieldsFromState(trackedTicker, state);
     }
 
     @Override
     protected void onDisconnect() {
-        // TODO Auto-generated method stub
-
+        connected = false;
+        try {
+            if (accountUpdateTimer != null) {
+                accountUpdateTimer.cancel();
+            }
+        } catch (Exception e) {
+            logger.error("Error cancelling account update timer", e);
+        }
+        for (Ticker trackedTicker : new HashSet<>(trackedTickers)) {
+            try {
+                quoteEngine.unsubscribeLevel1(trackedTicker, this);
+                quoteEngine.unsubscribeOrderFlow(trackedTicker, this);
+            } catch (Exception e) {
+                logger.warn("Error unsubscribing from market data for {}", trackedTicker, e);
+            }
+        }
+        executorService.shutdownNow();
     }
 
     @Override
@@ -265,31 +413,25 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     public synchronized BrokerRequestResult cancelAllOrders(Ticker ticker) {
-        executorService.submit(() -> {
-            delayRestCall(); // Simulate network delay
-            Iterator<Map.Entry<String, OrderTicket>> bidIterator = openBids.entrySet().iterator();
-            while (bidIterator.hasNext()) {
-                Map.Entry<String, OrderTicket> entry = bidIterator.next();
-                try {
-                    cancelOrderSubmitWithDelay(entry.getKey(), false); // Call cancelOrder for each order ID
-                    bidIterator.remove(); // Remove the entry from the map
-                } catch (Exception e) {
-                    logger.error(e.getMessage(), e);
-                }
+        delayRestCall(); // Simulate network delay
+        Set<String> orderIdsToCancel = new HashSet<>();
+        for (OrderTicket order : openBids.values()) {
+            if (ticker == null || ticker.equals(order.getTicker())) {
+                orderIdsToCancel.add(order.getOrderId());
             }
-
-            // Safely iterate over openAsks using an iterator
-            Iterator<Map.Entry<String, OrderTicket>> askIterator = openAsks.entrySet().iterator();
-            while (askIterator.hasNext()) {
-                Map.Entry<String, OrderTicket> entry = askIterator.next();
-                try {
-                    cancelOrderSubmitWithDelay(entry.getKey(), false); // Call cancelOrder for each order ID
-                    askIterator.remove(); // Remove the entry from the map
-                } catch (Exception e) {
-                    logger.error(e.getMessage(), e);
-                }
+        }
+        for (OrderTicket order : openAsks.values()) {
+            if (ticker == null || ticker.equals(order.getTicker())) {
+                orderIdsToCancel.add(order.getOrderId());
             }
-        });
+        }
+        for (String orderId : orderIdsToCancel) {
+            try {
+                cancelOrderSubmitWithDelay(orderId, false);
+            } catch (Exception e) {
+                logger.error(e.getMessage(), e);
+            }
+        }
         return new BrokerRequestResult();
     }
 
@@ -341,13 +483,13 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         List<OrderTicket> openOrders = new ArrayList<>(); // List to hold open orders
         // Add all open bids to the list
         for (OrderTicket order : openBids.values()) {
-            if (order.getTicker().equals(ticker)) {
+            if (ticker == null || order.getTicker().equals(ticker)) {
                 openOrders.add(order);
             }
         }
         // Add all open asks to the list
         for (OrderTicket order : openAsks.values()) {
-            if (order.getTicker().equals(ticker)) {
+            if (ticker == null || order.getTicker().equals(ticker)) {
                 openOrders.add(order);
             }
         }
@@ -359,11 +501,14 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     public List<Position> getAllPositions() {
         delayRestCall(); // Simulate network delay
         List<Position> positions = new ArrayList<>(); // List to hold position info
-        if (!currentPosition.equals(BigDecimal.ZERO)) { // Only add position if there is an inventory
-            Side side = currentPosition.compareTo(BigDecimal.ZERO) > 0 ? Side.LONG : Side.SHORT;
-            Position.Status status = Position.Status.OPEN;
-            Position position = new Position(ticker, side, currentPosition, BigDecimal.valueOf(averageEntryPrice),
-                    status);
+        for (Map.Entry<Ticker, InstrumentState> entry : instrumentStates.entrySet()) {
+            InstrumentState state = entry.getValue();
+            if (state.currentPosition.compareTo(BigDecimal.ZERO) == 0) {
+                continue;
+            }
+            Side side = state.currentPosition.compareTo(BigDecimal.ZERO) > 0 ? Side.LONG : Side.SHORT;
+            Position position = new Position(entry.getKey(), side, state.currentPosition,
+                    BigDecimal.valueOf(state.averageEntryPrice), Position.Status.OPEN);
             positions.add(position);
         }
 
@@ -373,6 +518,14 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     public BrokerRequestResult modifyOrder(OrderTicket order) {
+        if (order == null || order.getOrderId() == null || order.getOrderId().isBlank()) {
+            return new BrokerRequestResult(false, true, "400 Invalid order");
+        }
+        if (order.getTicker() == null) {
+            return new BrokerRequestResult(false, true, "400 Order ticker is required");
+        }
+        ensureTickerSubscription(order.getTicker());
+        InstrumentState state = getOrCreateState(order.getTicker());
 
         order.setOrderEntryTime(getCurrentTime());
         delayRestCall(); // Simulate network delay
@@ -385,9 +538,12 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
             try {
                 String orderId = order.getOrderId();
                 if (order.getType() == Type.LIMIT) {
+                    if (order.getLimitPrice() == null) {
+                        return new BrokerRequestResult(false, true, "400 Limit price is required");
+                    }
                     if (order.getDirection() == TradeDirection.BUY) {
                         if (order.containsModifier(Modifier.POST_ONLY)
-                                && order.getLimitPrice().doubleValue() >= bestAskPrice) {
+                                && order.getLimitPrice().doubleValue() >= state.bestAskPrice) {
                             logger.warn("Limit buy order would cross the best ask price. Cancelling order.");
                             openBids.remove(orderId);
                             cancelOrder(orderId, order.getClientOrderId(), CancelReason.POST_ONLY_WOULD_CROSS);
@@ -401,13 +557,14 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                         }
                         logger.info("Limit buy order modified: {}", order);
                         openBids.put(orderId, order);
-                        OrderStatus status = new OrderStatus(Status.REPLACED, orderId, orderId, ticker,
+                        openOrders.put(orderId, order);
+                        OrderStatus status = new OrderStatus(Status.REPLACED, orderId, orderId, order.getTicker(),
                                 getCurrentTime());
                         OrderEvent event = new OrderEvent(order, status);
                         fireOrderStatusUpdate(event);
                     } else if (order.getDirection() == TradeDirection.SELL) {
                         if (order.containsModifier(Modifier.POST_ONLY)
-                                && order.getLimitPrice().doubleValue() <= bestBidPrice) {
+                                && order.getLimitPrice().doubleValue() <= state.bestBidPrice) {
                             logger.warn("Limit sell order would cross the best bid price. Cancelling order.");
                             openAsks.remove(orderId);
                             cancelOrder(orderId, order.getClientOrderId(), CancelReason.POST_ONLY_WOULD_CROSS);
@@ -421,11 +578,14 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                         }
                         logger.info("Limit sell order modified: {}", order);
                         openAsks.put(orderId, order);
-                        OrderStatus status = new OrderStatus(Status.REPLACED, orderId, orderId, ticker,
+                        openOrders.put(orderId, order);
+                        OrderStatus status = new OrderStatus(Status.REPLACED, orderId, orderId, order.getTicker(),
                                 getCurrentTime());
                         OrderEvent event = new OrderEvent(order, status);
                         fireOrderStatusUpdate(event);
                     }
+                } else {
+                    return new BrokerRequestResult(false, true, "400 Only LIMIT orders can be modified");
                 }
             } finally {
                 orderOperationsLock.writeLock().unlock();
@@ -439,67 +599,83 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     public BrokerRequestResult placeOrder(OrderTicket order) {
+        if (order == null) {
+            return new BrokerRequestResult(false, true, "400 Order cannot be null");
+        }
+        if (order.getTicker() == null) {
+            return new BrokerRequestResult(false, true, "400 Order ticker is required");
+        }
+        ensureTickerSubscription(order.getTicker());
+        InstrumentState state = getOrCreateState(order.getTicker());
         order.setOrderEntryTime(getCurrentTime());
         delayRestCall(); // Simulate network delay
         String orderId = System.currentTimeMillis() + "-" + (int) (Math.random() * 10000); // Generate a unique order ID
         order.setOrderId(orderId); // Set the generated order ID
         openOrders.put(orderId, order); // Add the order to open orders
-
-        executorService.submit((Runnable) () -> {
+        // Take read lock on market data (allows concurrent orders, but waits for fill
+        // processing)
+        marketDataLock.readLock().lock();
+        try {
+            orderOperationsLock.writeLock().lock();
             try {
-                // Take read lock on market data (allows concurrent orders, but waits for fill
-                // processing)
-                marketDataLock.readLock().lock();
-                try {
-                    orderOperationsLock.writeLock().lock();
-                    try {
-                        if (order.getType() == Type.LIMIT) {
-                            if (order.getDirection() == TradeDirection.BUY) {
-                                if (order.containsModifier(Modifier.POST_ONLY)
-                                        && order.getLimitPrice().doubleValue() >= bestAskPrice) {
-                                    logger.warn("Limit buy order would cross the best ask price. Cancelling order.");
-                                    cancelOrder(orderId, order.getClientOrderId(), CancelReason.POST_ONLY_WOULD_CROSS);
-                                    return;
-                                }
-                                openBids.put(orderId, order);
-                                OrderStatus status = new OrderStatus(Status.NEW, orderId, orderId, ticker,
-                                        getCurrentTime());
-                                OrderEvent event = new OrderEvent(order, status);
-                                fireOrderStatusUpdate(event);
-                                logger.info("Limit buy order placed: {}", order);
-                            } else if (order.getDirection() == TradeDirection.SELL) {
-                                if (order.containsModifier(Modifier.POST_ONLY)
-                                        && order.getLimitPrice().doubleValue() <= bestBidPrice) {
-                                    logger.warn("Limit sell order would cross the best bid price. Cancelling order.");
-                                    cancelOrder(orderId, order.getClientOrderId(), CancelReason.POST_ONLY_WOULD_CROSS);
-                                    return;
-                                }
-                                openAsks.put(orderId, order);
-                                OrderStatus status = new OrderStatus(Status.NEW, orderId, orderId, ticker,
-                                        getCurrentTime());
-                                OrderEvent event = new OrderEvent(order, status);
-                                fireOrderStatusUpdate(event);
-                                logger.info("Limit sell order placed: {}", order);
-                            }
-                        } else if (order.getType() == Type.MARKET) {
-                            if (order.getDirection() == TradeDirection.BUY) {
-                                fillOrder(order, bestAskPrice);
-                                logger.info("Market buy executed: {}", order);
-                            } else if (order.getDirection() == TradeDirection.SELL) {
-                                fillOrder(order, bestBidPrice);
-                                logger.info("Market sell executed: {}", order);
-                            }
-                        }
-                    } finally {
-                        orderOperationsLock.writeLock().unlock();
+                if (order.getType() == Type.LIMIT) {
+                    if (order.getLimitPrice() == null) {
+                        cancelOrder(orderId, order.getClientOrderId(), CancelReason.UNKNOWN);
+                        return new BrokerRequestResult(false, true, "400 Limit price is required");
                     }
-                } finally {
-                    marketDataLock.readLock().unlock();
+                    if (order.getDirection() == TradeDirection.BUY) {
+                        if (order.containsModifier(Modifier.POST_ONLY)
+                                && order.getLimitPrice().doubleValue() >= state.bestAskPrice) {
+                            logger.warn("Limit buy order would cross the best ask price. Cancelling order.");
+                            cancelOrder(orderId, order.getClientOrderId(), CancelReason.POST_ONLY_WOULD_CROSS);
+                            return new BrokerRequestResult(false, true, "Post-only buy would cross best ask");
+                        }
+                        openBids.put(orderId, order);
+                    } else if (order.getDirection() == TradeDirection.SELL) {
+                        if (order.containsModifier(Modifier.POST_ONLY)
+                                && order.getLimitPrice().doubleValue() <= state.bestBidPrice) {
+                            logger.warn("Limit sell order would cross the best bid price. Cancelling order.");
+                            cancelOrder(orderId, order.getClientOrderId(), CancelReason.POST_ONLY_WOULD_CROSS);
+                            return new BrokerRequestResult(false, true, "Post-only sell would cross best bid");
+                        }
+                        openAsks.put(orderId, order);
+                    } else {
+                        cancelOrder(orderId, order.getClientOrderId(), CancelReason.UNKNOWN);
+                        return new BrokerRequestResult(false, true, "400 Unsupported trade direction");
+                    }
+
+                    OrderStatus status = new OrderStatus(Status.NEW, orderId, orderId, order.getTicker(),
+                            getCurrentTime());
+                    status.setClientOrderId(order.getClientOrderId());
+                    OrderEvent event = new OrderEvent(order, status);
+                    fireOrderStatusUpdate(event);
+                    logger.info("Limit order placed: {}", order);
+                } else if (order.getType() == Type.MARKET) {
+                    double executionPrice;
+                    if (order.getDirection() == TradeDirection.BUY) {
+                        executionPrice = state.bestAskPrice;
+                    } else if (order.getDirection() == TradeDirection.SELL) {
+                        executionPrice = state.bestBidPrice;
+                    } else {
+                        cancelOrder(orderId, order.getClientOrderId(), CancelReason.UNKNOWN);
+                        return new BrokerRequestResult(false, true, "400 Unsupported trade direction");
+                    }
+                    if (!Double.isFinite(executionPrice) || executionPrice <= 0 || executionPrice == Double.MAX_VALUE) {
+                        cancelOrder(orderId, order.getClientOrderId(), CancelReason.UNKNOWN);
+                        return new BrokerRequestResult(false, true, "503 Market data unavailable for market order");
+                    }
+                    fillOrder(order, executionPrice, order.getSize(), false);
+                    logger.info("Market order executed: {}", order);
+                } else {
+                    cancelOrder(orderId, order.getClientOrderId(), CancelReason.UNKNOWN);
+                    return new BrokerRequestResult(false, true, "400 Unsupported order type");
                 }
-            } catch (Exception e) {
-                logger.error(e.getMessage(), e);
+            } finally {
+                orderOperationsLock.writeLock().unlock();
             }
-        });
+        } finally {
+            marketDataLock.readLock().unlock();
+        }
 
         return new BrokerRequestResult();
 
@@ -507,17 +683,18 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     public BrokerRequestResult cancelAllOrders() {
-        throw new UnsupportedOperationException("Not supported yet.");
-
+        return cancelAllOrders((Ticker) null);
     }
 
     public double getUnrealizedPnL() {
-        if (markPrice == 0 || currentPosition.doubleValue() == 0) {
-            return 0.0; // Avoid division by zero if markPrice or position size is zero
-        } else {
-            return (markPrice - averageEntryPrice) * currentPosition.doubleValue(); // Calculate unrealized PnL
+        double totalUnrealized = 0.0;
+        for (InstrumentState state : instrumentStates.values()) {
+            if (state.markPrice == 0 || state.currentPosition.doubleValue() == 0) {
+                continue;
+            }
+            totalUnrealized += (state.markPrice - state.averageEntryPrice) * state.currentPosition.doubleValue();
         }
-
+        return totalUnrealized;
     }
 
     public double getNetAccountValue() {
@@ -525,27 +702,27 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     protected boolean isSpreadDislocated() {
-        double spread = bestAskPrice - bestBidPrice;
-        if (midPrice == 0) {
+        InstrumentState state = getPrimaryState();
+        double spread = state.bestAskPrice - state.bestBidPrice;
+        if (state.midPrice == 0) {
             return false; // Avoid division by zero if midPrice is not initialized
         }
 
         long currentTime = System.currentTimeMillis();
 
-        synchronized (spreadHistory) {
+        synchronized (state.spreadHistory) {
             // Remove outdated entries from the spread history, but keep a minimum of 20
             // items
-            while (spreadHistory.size() > 20 && !spreadHistory.isEmpty()
-                    && (currentTime - spreadHistory.peekFirst().timestamp > timeWindowMillis)) {
-                spreadHistory.removeFirst();
+            while (state.spreadHistory.size() > 20 && !state.spreadHistory.isEmpty()
+                    && (currentTime - state.spreadHistory.peekFirst().timestamp > timeWindowMillis)) {
+                state.spreadHistory.removeFirst();
             }
 
             // Add the current spread to the history
-            spreadHistory.addLast(new SpreadEntry(spread, currentTime));
+            state.spreadHistory.addLast(new SpreadEntry(spread, currentTime));
 
             // Calculate the moving average of spreads within the time window
-            double movingAverageSpread = spreadHistory.stream().filter(entry -> entry != null) // Filter out null
-                                                                                               // entries
+            double movingAverageSpread = state.spreadHistory.stream().filter(entry -> entry != null)
                     .mapToDouble(entry -> entry.spread).average().orElse(0.0);
 
             // Determine if the current spread exceeds the dislocation threshold
@@ -553,7 +730,8 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
             if (spread > spreadThreshold) {
                 logger.warn("Spread dislocation detected: {} > {}", spread, spreadThreshold);
-                logger.warn("Best Bid: {}, Best Ask: {}, Mid Price: {}", bestBidPrice, bestAskPrice, midPrice);
+                logger.warn("Best Bid: {}, Best Ask: {}, Mid Price: {}", state.bestBidPrice, state.bestAskPrice,
+                        state.midPrice);
             }
 
             return spread > spreadThreshold;
@@ -561,43 +739,87 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     public void askUpdated(BigDecimal newAsk, boolean isTrade) {
-        if (!isTrade) {
-            bestAskPrice = newAsk.doubleValue();
-        }
-        checkBidsFills(newAsk.doubleValue(), isTrade); // Check for filled orders based on the new ask price
+        askUpdated(ticker, newAsk, isTrade, null);
+    }
 
+    public void askUpdated(Ticker trackedTicker, BigDecimal newAsk, boolean isTrade, BigDecimal tradeSize) {
+        if (trackedTicker == null || newAsk == null) {
+            return;
+        }
+        ensureTickerSubscription(trackedTicker);
+        if (!isTrade) {
+            InstrumentState state = getOrCreateState(trackedTicker);
+            state.bestAskPrice = newAsk.doubleValue();
+            state.midPrice = (state.bestBidPrice + state.bestAskPrice) / 2.0;
+            syncLegacyFieldsFromState(trackedTicker, state);
+        }
+        checkBidsFills(trackedTicker, newAsk.doubleValue(), isTrade, tradeSize);
     }
 
     public void bidUpdated(BigDecimal newBid, boolean isTrade) {
-        if (!isTrade) {
-            bestBidPrice = newBid.doubleValue();
-        }
-        checkAsksFills(newBid.doubleValue(), isTrade); // Check for filled orders based on the new bid price
+        bidUpdated(ticker, newBid, isTrade, null);
+    }
 
+    public void bidUpdated(Ticker trackedTicker, BigDecimal newBid, boolean isTrade, BigDecimal tradeSize) {
+        if (trackedTicker == null || newBid == null) {
+            return;
+        }
+        ensureTickerSubscription(trackedTicker);
+        if (!isTrade) {
+            InstrumentState state = getOrCreateState(trackedTicker);
+            state.bestBidPrice = newBid.doubleValue();
+            state.midPrice = (state.bestBidPrice + state.bestAskPrice) / 2.0;
+            syncLegacyFieldsFromState(trackedTicker, state);
+        }
+        checkAsksFills(trackedTicker, newBid.doubleValue(), isTrade, tradeSize);
     }
 
     protected List<OrderTicket> checkAsksFills(double bestBid, boolean isTrade) {
+        return checkAsksFills(ticker, bestBid, isTrade, null);
+    }
+
+    protected List<OrderTicket> checkAsksFills(Ticker trackedTicker, double bestBid, boolean isTrade,
+            BigDecimal tradeSize) {
         List<OrderTicket> filledOrders = new ArrayList<>();
+        BigDecimal remainingTradeSize = (tradeSize != null && tradeSize.compareTo(BigDecimal.ZERO) > 0) ? tradeSize
+                : null;
         // Take write lock on market data for exclusive access during fill processing
         marketDataLock.writeLock().lock();
         try {
+            InstrumentState state = getOrCreateState(trackedTicker);
             if (!isTrade) {
-                bestBidPrice = bestBid; // Update the best ask price
-                midPrice = (bestBidPrice + bestAskPrice) / 2.0; // Update the mid price
+                state.bestBidPrice = bestBid;
+                state.midPrice = (state.bestBidPrice + state.bestAskPrice) / 2.0;
+                syncLegacyFieldsFromState(trackedTicker, state);
             }
 
             for (Iterator<Map.Entry<String, OrderTicket>> it = openAsks.entrySet().iterator(); it.hasNext();) {
                 Map.Entry<String, OrderTicket> entry = it.next();
                 OrderTicket order = entry.getValue();
+                if (order.getTicker() == null || !order.getTicker().equals(trackedTicker)) {
+                    continue;
+                }
+                if (order.getLimitPrice() == null) {
+                    continue;
+                }
+                boolean filled = order.getLimitPrice().doubleValue() <= bestBid;
+                if (!filled) {
+                    continue;
+                }
 
-                boolean filled = order.getLimitPrice().doubleValue() < bestBid; // Check if the order can be filled
-                                                                                // at
-                                                                                // the best bid price
-
-                if (filled) {
-                    it.remove();
-                    fillOrder(order, order.getLimitPrice().doubleValue()); // Fill the order at the best ask price
+                BigDecimal fillSize = determineFillSize(order, remainingTradeSize);
+                if (fillSize.compareTo(BigDecimal.ZERO) > 0) {
+                    boolean fullyFilled = fillOrder(order, order.getLimitPrice().doubleValue(), fillSize, true);
+                    if (fullyFilled) {
+                        it.remove();
+                    }
                     filledOrders.add(order);
+                    if (remainingTradeSize != null) {
+                        remainingTradeSize = remainingTradeSize.subtract(fillSize);
+                    }
+                }
+                if (remainingTradeSize != null && remainingTradeSize.compareTo(BigDecimal.ZERO) <= 0) {
+                    break;
                 }
             }
         } finally {
@@ -608,27 +830,51 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     protected List<OrderTicket> checkBidsFills(double askPrice, boolean isTrade) {
+        return checkBidsFills(ticker, askPrice, isTrade, null);
+    }
+
+    protected List<OrderTicket> checkBidsFills(Ticker trackedTicker, double askPrice, boolean isTrade,
+            BigDecimal tradeSize) {
         List<OrderTicket> filledOrders = new ArrayList<>();
+        BigDecimal remainingTradeSize = (tradeSize != null && tradeSize.compareTo(BigDecimal.ZERO) > 0) ? tradeSize
+                : null;
         // Take write lock on market data for exclusive access during fill processing
         marketDataLock.writeLock().lock();
         try {
+            InstrumentState state = getOrCreateState(trackedTicker);
             if (!isTrade) {
-                bestAskPrice = askPrice; // Update the best ask price
-                midPrice = (bestBidPrice + bestAskPrice) / 2.0; // Update the mid price
+                state.bestAskPrice = askPrice;
+                state.midPrice = (state.bestBidPrice + state.bestAskPrice) / 2.0;
+                syncLegacyFieldsFromState(trackedTicker, state);
             }
 
             for (Iterator<Map.Entry<String, OrderTicket>> it = openBids.entrySet().iterator(); it.hasNext();) {
                 Map.Entry<String, OrderTicket> entry = it.next();
                 OrderTicket order = entry.getValue();
+                if (order.getTicker() == null || !order.getTicker().equals(trackedTicker)) {
+                    continue;
+                }
+                if (order.getLimitPrice() == null) {
+                    continue;
+                }
+                boolean filled = order.getLimitPrice().doubleValue() >= askPrice;
+                if (!filled) {
+                    continue;
+                }
 
-                boolean filled = order.getLimitPrice().doubleValue() > askPrice; // Check if the order can be filled at
-                                                                                 // the
-                                                                                 // best ask price
-
-                if (filled) {
-                    it.remove();
-                    fillOrder(order, order.getLimitPrice().doubleValue()); // Fill the order at the best ask price
+                BigDecimal fillSize = determineFillSize(order, remainingTradeSize);
+                if (fillSize.compareTo(BigDecimal.ZERO) > 0) {
+                    boolean fullyFilled = fillOrder(order, order.getLimitPrice().doubleValue(), fillSize, true);
+                    if (fullyFilled) {
+                        it.remove();
+                    }
                     filledOrders.add(order);
+                    if (remainingTradeSize != null) {
+                        remainingTradeSize = remainingTradeSize.subtract(fillSize);
+                    }
+                }
+                if (remainingTradeSize != null && remainingTradeSize.compareTo(BigDecimal.ZERO) <= 0) {
+                    break;
                 }
             }
         } finally {
@@ -643,28 +889,40 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
             logger.warn("Broker status is not set, cannot update status.");
             return;
         }
+        InstrumentState primaryState = getPrimaryState();
+        double totalRealizedPnL = 0.0;
+        double totalFunding = 0.0;
+        for (InstrumentState state : instrumentStates.values()) {
+            totalRealizedPnL += state.realizedPnL;
+            totalFunding += state.fundingAccruedOrPaid;
+        }
+        double unrealizedPnL = getUnrealizedPnL();
+        realizedPnL = totalRealizedPnL;
+        fundingAccruedOrPaid = totalFunding;
+        syncLegacyFieldsFromState(ticker, primaryState);
+
         synchronized (brokerStatus) { // Ensure thread-safe access
-            brokerStatus.setCurrentPosition(currentPosition.doubleValue()); // Update current position
+            brokerStatus.setCurrentPosition(primaryState.currentPosition.doubleValue());
             brokerStatus.setAccountValue(getNetAccountValue()); // Update account value
             brokerStatus.setDollarVolume(dollarVolume); // Calculate dollar volume
             brokerStatus.setFeesCollectedOrPaid(totalFees); // Update total fees paidasdfasdf
             brokerStatus.setTotalTrades(totalOrdersPlaced); // Update total trades
-            brokerStatus.setBestAsk(bestAskPrice); // Update best ask price
-            brokerStatus.setBestBid(bestBidPrice); // Update best bid price
-            brokerStatus.setMidPoint(midPrice); // Update mid price
+            brokerStatus.setBestAsk(primaryState.bestAskPrice); // Update best ask price
+            brokerStatus.setBestBid(primaryState.bestBidPrice); // Update best bid price
+            brokerStatus.setMidPoint(primaryState.midPrice); // Update mid price
             // brokerStatus.setVWAPMidpoint(orderBook.getVWAPMidpoint(30).doubleValue()); //
             // Update VWAP midpoint from
             // brokerStatus.setCOGMidpoint(orderBook.getCenterOfGravityMidpoint(30).doubleValue());
             // // Update COG midpoint
             // from order
-            brokerStatus.setRealizedPnL(realizedPnL); // Update realized PnL
-            brokerStatus.setUnrealizedPnL(getUnrealizedPnL()); // Update unrealized PnL
-            brokerStatus.setTotalPnL(realizedPnL + getUnrealizedPnL()); // Update total PnL
-            brokerStatus.setPnlWithFees(realizedPnL + getUnrealizedPnL() + totalFees); // Update PnL with fees
-            brokerStatus.setPnlWithFeesAndFunding(fundingAccruedOrPaid + realizedPnL + getUnrealizedPnL() + totalFees); // Update
+            brokerStatus.setRealizedPnL(totalRealizedPnL);
+            brokerStatus.setUnrealizedPnL(unrealizedPnL);
+            brokerStatus.setTotalPnL(totalRealizedPnL + unrealizedPnL);
+            brokerStatus.setPnlWithFees(totalRealizedPnL + unrealizedPnL + totalFees);
+            brokerStatus.setPnlWithFeesAndFunding(totalFunding + totalRealizedPnL + unrealizedPnL + totalFees);
             brokerStatus.setOpenOrdersCount(openBids.size() + openAsks.size()); // Update the count of open orders
-            brokerStatus.setFundingAccruedOrPaid(fundingAccruedOrPaid); // Update total funding paid or collected
-            brokerStatus.setFundingRateAnnualized(((fundingRate / 8.0) * 24.0 * 365.0) * 100.0);
+            brokerStatus.setFundingAccruedOrPaid(totalFunding); // Update total funding paid or collected
+            brokerStatus.setFundingRateAnnualized(((primaryState.fundingRate / 8.0) * 24.0 * 365.0) * 100.0);
 
             logger.info("Broker status updated: {}", brokerStatus); // Log the updated
             // status
@@ -672,66 +930,109 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     protected void fillOrder(OrderTicket order, double price) {
-        logger.debug("Attempting to remove order with ID: {} from openOrders", order.getOrderId());
-        if (openOrders.containsKey(order.getOrderId())) {
-            logger.debug("Order with ID: {} exists in openOrders before removal", order.getOrderId());
-        } else {
-            logger.debug("Order with ID: {} does not exist in openOrders before removal", order.getOrderId());
-        }
-        openOrders.remove(order.getOrderId());
-        if (openOrders.containsKey(order.getOrderId())) {
-            logger.debug("Order with ID: {} still exists in openOrders after removal", order.getOrderId());
-        } else {
-            logger.debug("Order with ID: {} successfully removed from openOrders", order.getOrderId());
-        }
-        String orderId = order.getOrderId();
-        BigDecimal remainingSize = BigDecimal.ZERO;
-        BigDecimal originalSize = order.getSize();
-        BigDecimal averageFillPrice = BigDecimal.valueOf(price); // Use the fill price
-        order.setFilledPrice(averageFillPrice);
-        order.setFilledSize(originalSize);
-        order.setCurrentStatus(OrderStatus.Status.FILLED);
-        order.setOrderFilledTime(getCurrentTime());
-        // Increment the total number of orders placed
+        fillOrder(order, price, order.getRemainingSize(), order.getType() != Type.MARKET);
+    }
 
-        logger.info("Filling order: {} at price: {} with size: {}", order, price, order.getSize());
+    protected BigDecimal determineFillSize(OrderTicket order, BigDecimal remainingTradeSize) {
+        BigDecimal orderRemaining = order.getRemainingSize();
+        if (orderRemaining == null || orderRemaining.compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ZERO;
+        }
+        if (remainingTradeSize == null) {
+            return orderRemaining;
+        }
+        return orderRemaining.min(remainingTradeSize);
+    }
+
+    protected BigDecimal weightedAveragePrice(BigDecimal previousAverage, BigDecimal previousSize, BigDecimal newPrice,
+            BigDecimal newSize) {
+        if (newSize == null || newSize.compareTo(BigDecimal.ZERO) <= 0) {
+            return previousAverage == null ? BigDecimal.ZERO : previousAverage;
+        }
+        if (previousSize == null || previousSize.compareTo(BigDecimal.ZERO) <= 0 || previousAverage == null) {
+            return newPrice;
+        }
+        BigDecimal totalSize = previousSize.add(newSize);
+        if (totalSize.compareTo(BigDecimal.ZERO) == 0) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal totalNotional = previousAverage.multiply(previousSize).add(newPrice.multiply(newSize));
+        return totalNotional.divide(totalSize, 10, RoundingMode.HALF_UP);
+    }
+
+    protected boolean fillOrder(OrderTicket order, double price, BigDecimal fillSize, boolean isMaker) {
+        if (order == null || fillSize == null || fillSize.compareTo(BigDecimal.ZERO) <= 0) {
+            return false;
+        }
+
+        String orderId = order.getOrderId();
+        BigDecimal orderTotalSize = order.getSize();
+        BigDecimal previousFilled = order.getFilledSize();
+        BigDecimal remainingBeforeFill = orderTotalSize.subtract(previousFilled);
+        if (remainingBeforeFill.compareTo(BigDecimal.ZERO) <= 0) {
+            return true;
+        }
+        BigDecimal executedSize = fillSize.min(remainingBeforeFill);
+        if (executedSize.compareTo(BigDecimal.ZERO) <= 0) {
+            return false;
+        }
+        BigDecimal fillPrice = BigDecimal.valueOf(price);
+        BigDecimal newFilledSize = previousFilled.add(executedSize);
+        BigDecimal remainingAfterFill = orderTotalSize.subtract(newFilledSize);
+        boolean fullyFilled = remainingAfterFill.compareTo(BigDecimal.ZERO) <= 0;
+
+        order.setFilledPrice(weightedAveragePrice(order.getFilledPrice(), previousFilled, fillPrice, executedSize));
+        order.setFilledSize(newFilledSize);
+        order.setCurrentStatus(fullyFilled ? OrderStatus.Status.FILLED : OrderStatus.Status.PARTIAL_FILL);
+        if (fullyFilled) {
+            order.setOrderFilledTime(getCurrentTime());
+            openOrders.remove(order.getOrderId());
+        }
+
+        logger.info("Filling order: {} at price: {} with size: {}", order, price, executedSize);
 
         try {
-            updatePosition(order.getTradeDirection(), order.getSize(), price, order.getType() != Type.MARKET);
+            updatePosition(order.getTradeDirection(), executedSize, price, isMaker, order.getTicker());
         } catch (Exception e) {
             logger.error(e.getLocalizedMessage(), e);
         }
 
-        OrderStatus orderStatus = new OrderStatus(OrderStatus.Status.FILLED, orderId, orderId, originalSize,
-                remainingSize, averageFillPrice, ticker, getCurrentTime());
+        OrderStatus.Status status = fullyFilled ? OrderStatus.Status.FILLED : OrderStatus.Status.PARTIAL_FILL;
+        OrderStatus orderStatus = new OrderStatus(status, orderId, orderId, newFilledSize,
+                remainingAfterFill.max(BigDecimal.ZERO), fillPrice, order.getTicker(), getCurrentTime());
         orderStatus.setClientOrderId(order.getClientOrderId());
         OrderEvent event = new OrderEvent(order, orderStatus);
 
         logger.debug("Created OrderStatus for filled order: {}", orderStatus);
 
-        executedOrders.add(order);
+        if (fullyFilled) {
+            executedOrders.add(order);
+        }
 
-        double fee = calcFee(price, order.getSize().doubleValue(), order.getType() != Type.MARKET);
+        double fee = calcFee(price, executedSize.doubleValue(), isMaker);
         logger.debug("Calculated fee for order {}: {}", orderId, fee);
+        BigDecimal currentCommission = order.getCommission() == null ? BigDecimal.ZERO : order.getCommission();
+        order.setCommission(currentCommission.add(BigDecimal.valueOf(fee)));
 
         Fill fill = new Fill();
         fill.setCommission(BigDecimal.valueOf(fee));
         fill.setFillId(System.currentTimeMillis() + "-" + (int) (Math.random() * 10000));
         fill.setOrderId(orderId);
         fill.setClientOrderId(order.getClientOrderId());
-        fill.setPrice(averageFillPrice);
+        fill.setPrice(fillPrice);
         fill.setSide(order.getTradeDirection());
-        fill.setSize(originalSize);
-        fill.setTaker(order.getType() == Type.MARKET);
-        fill.setTicker(ticker);
+        fill.setSize(executedSize);
+        fill.setTaker(!isMaker);
+        fill.setTicker(order.getTicker());
         fill.setTime(getCurrentTime());
+        order.addFill(fill);
 
         fireFillUpdate(fill); // Notify listeners of the fill event
 
         fireOrderStatusUpdate(event); // Notify listeners of the order status update
 
-        writeTradeToCsv(order, price, fee);
-
+        writeTradeToCsv(order, price, fee, executedSize);
+        return fullyFilled;
     }
 
     protected void cancelOrder(String orderId, String clientOrderId, CancelReason reason) {
@@ -749,7 +1050,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
             BigDecimal averageFillPrice = BigDecimal.ZERO; // No fill price since it's cancelled
 
             OrderStatus orderStatus = new OrderStatus(status, orderId, orderId, averageFillPrice, remainingSize,
-                    averageFillPrice, ticker, getCurrentTime());
+                    averageFillPrice, order != null ? order.getTicker() : ticker, getCurrentTime());
             orderStatus.setClientOrderId(clientOrderId);
             orderStatus.setCancelReason(reason);
 
@@ -797,56 +1098,62 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     protected void updatePosition(TradeDirection side, BigDecimal orderSize, double price, boolean isMaker) {
+        updatePosition(side, orderSize, price, isMaker, ticker);
+    }
+
+    protected void updatePosition(TradeDirection side, BigDecimal orderSize, double price, boolean isMaker,
+            Ticker trackedTicker) {
         logger.debug("Updating position. Side: {}, Order Size: {}, Price: {}, Is Maker: {}", side, orderSize, price,
                 isMaker);
+        InstrumentState state = getOrCreateState(trackedTicker);
         BigDecimal size = orderSize; // Use the initial size passed to the method
         double notional = size.doubleValue() * price;
         if (side == TradeDirection.BUY) {
-            if (currentPosition.compareTo(BigDecimal.ZERO) < 0) {
-                BigDecimal closingSize = currentPosition.negate().min(size);
+            if (state.currentPosition.compareTo(BigDecimal.ZERO) < 0) {
+                BigDecimal closingSize = state.currentPosition.negate().min(size);
 
-                double pnl = (averageEntryPrice - price) * closingSize.doubleValue();
-                realizedPnL += pnl;
+                double pnl = (state.averageEntryPrice - price) * closingSize.doubleValue();
+                state.realizedPnL += pnl;
                 currentAccountBalance += pnl; // Add realized PnL to the account balance
-                currentPosition = currentPosition.add(closingSize);
+                state.currentPosition = state.currentPosition.add(closingSize);
                 size = size.subtract(closingSize);
 
-                if (currentPosition.compareTo(BigDecimal.ZERO) == 0)
-                    averageEntryPrice = 0;
+                if (state.currentPosition.compareTo(BigDecimal.ZERO) == 0)
+                    state.averageEntryPrice = 0;
 
                 if (size.compareTo(BigDecimal.ZERO) > 0) {
-                    averageEntryPrice = price;
+                    state.averageEntryPrice = price;
                     // currentAccountBalance -= size * price;
-                    currentPosition = currentPosition.add(size);
+                    state.currentPosition = state.currentPosition.add(size);
                 }
             } else {
-                averageEntryPrice = ((averageEntryPrice * currentPosition.doubleValue()) + (price * size.doubleValue()))
-                        / (currentPosition.doubleValue() + size.doubleValue());
+                state.averageEntryPrice = ((state.averageEntryPrice * state.currentPosition.doubleValue())
+                        + (price * size.doubleValue())) / (state.currentPosition.doubleValue() + size.doubleValue());
                 // currentAccountBalance -= size * price;
-                currentPosition = currentPosition.add(size);
+                state.currentPosition = state.currentPosition.add(size);
             }
         } else { // SELL
-            if (currentPosition.compareTo(BigDecimal.ZERO) > 0) {
-                BigDecimal closingSize = currentPosition.min(size);
-                double pnl = (price - averageEntryPrice) * closingSize.doubleValue();
-                realizedPnL += pnl;
+            if (state.currentPosition.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal closingSize = state.currentPosition.min(size);
+                double pnl = (price - state.averageEntryPrice) * closingSize.doubleValue();
+                state.realizedPnL += pnl;
                 currentAccountBalance += pnl; // Add realized PnL to the account balance
-                currentPosition = currentPosition.subtract(closingSize);
+                state.currentPosition = state.currentPosition.subtract(closingSize);
                 size = size.subtract(closingSize);
 
-                if (currentPosition.compareTo(BigDecimal.ZERO) == 0)
-                    averageEntryPrice = 0;
+                if (state.currentPosition.compareTo(BigDecimal.ZERO) == 0)
+                    state.averageEntryPrice = 0;
 
                 if (size.compareTo(BigDecimal.ZERO) > 0) {
-                    averageEntryPrice = price;
+                    state.averageEntryPrice = price;
                     // currentAccountBalance += size * price;
-                    currentPosition = currentPosition.subtract(size);
+                    state.currentPosition = state.currentPosition.subtract(size);
                 }
             } else {
-                averageEntryPrice = ((averageEntryPrice * -currentPosition.doubleValue())
-                        + (price * size.doubleValue())) / (-currentPosition.doubleValue() + size.doubleValue());
+                state.averageEntryPrice = ((state.averageEntryPrice * -state.currentPosition.doubleValue())
+                        + (price * size.doubleValue())) / (-state.currentPosition.doubleValue() + size.doubleValue());
                 // currentAccountBalance += size * price;
-                currentPosition = currentPosition.subtract(size);
+                state.currentPosition = state.currentPosition.subtract(size);
             }
         }
 
@@ -862,6 +1169,12 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         brokerStatus.setTotalTrades(totalOrdersPlaced); // Update total trades in the broker status
         brokerStatus.setFeesCollectedOrPaid(totalFees); // Update total fees in the broker status
         brokerStatus.setAccountValue(getNetAccountValue()); // Update the account value in the broker status
+        syncLegacyFieldsFromState(trackedTicker, state);
+        double totalRealized = 0.0;
+        for (InstrumentState instrumentState : instrumentStates.values()) {
+            totalRealized += instrumentState.realizedPnL;
+        }
+        realizedPnL = totalRealized;
 
     }
 
@@ -872,6 +1185,13 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     protected void writeTradeToCsv(OrderTicket order, double price, double fee) {
+        writeTradeToCsv(order, price, fee, order.getSize());
+    }
+
+    protected void writeTradeToCsv(OrderTicket order, double price, double fee, BigDecimal fillSize) {
+        if (order == null || csvFilePath == null) {
+            return;
+        }
         executorService.submit(() -> {
             try {
                 try (BufferedWriter writer = new BufferedWriter(new FileWriter(csvFilePath, true))) {
@@ -884,13 +1204,15 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                     }
 
                     // Prepare the trade details as a CSV line
-                    String csvLine = String.format("%s,%s,%s,%.5f,%s,%s,%s,%.5f,%.5f,%d", asset, order.getOrderId(), // Order
-                                                                                                                     // ID
+                    String symbol = order.getTicker() == null ? asset : order.getTicker().getSymbol();
+                    ZonedDateTime orderFilledTime = order.getOrderFilledTime() == null ? getCurrentTime()
+                            : order.getOrderFilledTime();
+                    String csvLine = String.format("%s,%s,%s,%.5f,%s,%s,%s,%.5f,%.5f,%d", symbol, order.getOrderId(),
                             order.getDirection(), // Side (BUY/SELL)
-                            order.getSize(), // Size
+                            fillSize.doubleValue(), // Size
                             order.getType(), order.getOrderEntryTime().format(DateTimeFormatter.ISO_INSTANT), // Submitted
                                                                                                               // Time
-                            order.getOrderFilledTime().format(DateTimeFormatter.ISO_INSTANT), // Filled Time
+                            orderFilledTime.format(DateTimeFormatter.ISO_INSTANT), // Filled Time
                             price, // Price
                             fee, // Fee
                             System.currentTimeMillis()); // Timestamp
@@ -1039,26 +1361,20 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     @Override
     public List<OrderTicket> getOpenOrders() {
         delayRestCall(); // Simulate network delay
-        List<OrderTicket> openOrders = new ArrayList<>(); // List to hold open orders
-        // Add all open bids to the list in a thread-safe manner
-        synchronized (openBids) {
-            for (OrderTicket order : openBids.values()) {
-                openOrders.add(order);
-            }
+        List<OrderTicket> orders = new ArrayList<>(); // List to hold open orders
+        for (OrderTicket order : openBids.values()) {
+            orders.add(order);
         }
-        // Add all open asks to the list in a thread-safe manner
-        synchronized (openAsks) {
-            for (OrderTicket order : openAsks.values()) {
-                openOrders.add(order);
-            }
+        for (OrderTicket order : openAsks.values()) {
+            orders.add(order);
         }
 
-        return openOrders; // Return the list of open orders
+        return orders; // Return the list of open orders
     }
 
     @Override
     public boolean isConnected() {
-        throw new UnsupportedOperationException("isConnected not supported in PaperBroker");
+        return connected;
     }
 
     @Override
@@ -1084,30 +1400,41 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     public void quoteRecieved(ILevel1Quote quote) {
+        if (quote == null || quote.getTicker() == null) {
+            return;
+        }
+        Ticker quoteTicker = quote.getTicker();
+        ensureTickerSubscription(quoteTicker);
 
         if (quote.containsType(QuoteType.MARK_PRICE)) {
-            markPriceUpdated(ticker.getSymbol(), quote.getValue(QuoteType.MARK_PRICE), quote.getTimeStamp());
+            markPriceUpdated(quoteTicker, quote.getValue(QuoteType.MARK_PRICE), quote.getTimeStamp());
         }
 
         if (quote.containsType(QuoteType.FUNDING_RATE_APR)) {
-            fundingRateUpdated(ticker.getSymbol(), quote.getValue(QuoteType.FUNDING_RATE_APR), quote.getTimeStamp());
+            fundingRateUpdated(quoteTicker, quote.getValue(QuoteType.FUNDING_RATE_APR), quote.getTimeStamp());
         }
 
         if (quote.containsType(QuoteType.BID)) {
-            bidUpdated(quote.getValue(QuoteType.BID), false);
+            bidUpdated(quoteTicker, quote.getValue(QuoteType.BID), false, null);
         }
 
         if (quote.containsType(QuoteType.ASK)) {
-            askUpdated(quote.getValue(QuoteType.ASK), false);
+            askUpdated(quoteTicker, quote.getValue(QuoteType.ASK), false, null);
         }
     }
 
     @Override
     public void orderflowReceived(OrderFlow orderflow) {
+        if (orderflow == null || orderflow.getTicker() == null) {
+            return;
+        }
+        Ticker flowTicker = orderflow.getTicker();
+        ensureTickerSubscription(flowTicker);
+
         if (orderflow.getSide() == OrderFlow.Side.BUY) {
-            bidUpdated(orderflow.getPrice(), true);
+            bidUpdated(flowTicker, orderflow.getPrice(), true, orderflow.getSize());
         } else if (orderflow.getSide() == OrderFlow.Side.SELL) {
-            askUpdated(orderflow.getPrice(), true);
+            askUpdated(flowTicker, orderflow.getPrice(), true, orderflow.getSize());
         }
 
     }
