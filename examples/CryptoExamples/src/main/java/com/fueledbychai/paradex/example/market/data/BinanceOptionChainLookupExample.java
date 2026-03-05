@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.data.Exchange;
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.util.ITickerRegistry;
 import com.fueledbychai.util.TickerRegistryFactory;
@@ -18,13 +19,18 @@ public class BinanceOptionChainLookupExample {
     private static final LocalDate DEFAULT_EXPIRY = LocalDate.of(2026, 3, 4);
     private static final ITickerRegistry.OptionRightFilter DEFAULT_RIGHT_FILTER = ITickerRegistry.OptionRightFilter.ALL;
 
+    // private Exchange exchange = Exchange.BINANCE_FUTURES;
+    private Exchange exchange = Exchange.DERIBIT;
+
     public void start(String underlyingSymbol, LocalDate expiry, ITickerRegistry.OptionRightFilter rightFilter) {
         ProxyConfig.getInstance().setRunningLocally(true);
 
-        ITickerRegistry tickerRegistry = TickerRegistryFactory.getInstance(Exchange.BINANCE_FUTURES);
+        ITickerRegistry tickerRegistry = TickerRegistryFactory.getInstance(exchange);
 
         Ticker[] optionChain = tickerRegistry.getOptionChain(underlyingSymbol, expiry.getYear(), expiry.getMonthValue(),
                 expiry.getDayOfMonth(), rightFilter);
+
+        // optionChain = tickerRegistry.getAllTickersForType(InstrumentType.OPTION);
 
         logger.info("Retrieved {} Binance option contracts for {} expiring {} ({})", optionChain.length,
                 underlyingSymbol.toUpperCase(), expiry, rightFilter);
