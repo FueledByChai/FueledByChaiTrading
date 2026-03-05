@@ -44,7 +44,7 @@ public class DeribitOptionMarketDataExample {
         Ticker optionTicker = registry.lookupByBrokerSymbol(InstrumentType.OPTION, optionSymbol);
         if (optionTicker == null) {
             throw new IllegalArgumentException("Unknown Deribit option '" + optionSymbol
-                    + "'. Use an active Deribit option instrument name such as BTC-01MAR26-68000-C.");
+                    + "'. Use an active Deribit option instrument name such as BTC-1MAR26-68000-C.");
         }
 
         QuoteEngine quoteEngine = QuoteEngine.getInstance(Exchange.DERIBIT);

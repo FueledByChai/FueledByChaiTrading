@@ -30,7 +30,7 @@ public class BinanceOptionChainLookupExample {
         Ticker[] optionChain = tickerRegistry.getOptionChain(underlyingSymbol, expiry.getYear(), expiry.getMonthValue(),
                 expiry.getDayOfMonth(), rightFilter);
 
-                optionChain = tickerRegistry.getAllTickersForType(InstrumentType.OPTION);
+        // optionChain = tickerRegistry.getAllTickersForType(InstrumentType.OPTION);
 
         logger.info("Retrieved {} Binance option contracts for {} expiring {} ({})", optionChain.length,
                 underlyingSymbol.toUpperCase(), expiry, rightFilter);
