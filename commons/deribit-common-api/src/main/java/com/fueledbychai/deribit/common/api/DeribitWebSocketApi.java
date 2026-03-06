@@ -6,6 +6,7 @@ import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -13,6 +14,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -46,6 +48,9 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
     protected static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10L);
     protected static final long RECONNECT_BASE_DELAY_MILLIS = 1_000L;
     protected static final long RECONNECT_MAX_DELAY_MILLIS = 30_000L;
+    protected static final int DEFAULT_SUBSCRIBE_BATCH_SIZE = 100;
+    protected static final long DEFAULT_SUBSCRIBE_SEND_INTERVAL_MILLIS = 350L;
+    protected static final int DEFAULT_MAX_SUBSCRIBE_RETRIES = 3;
 
     protected final String webSocketUrl;
     protected final HttpClient httpClient;
@@ -61,16 +66,31 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
                     return thread;
                 }
             });
+    protected final ScheduledExecutorService subscribeExecutor = Executors.newSingleThreadScheduledExecutor(
+            new ThreadFactory() {
+                @Override
+                public Thread newThread(Runnable runnable) {
+                    Thread thread = new Thread(runnable, "deribit-ws-subscribe");
+                    thread.setDaemon(true);
+                    return thread;
+                }
+            });
     protected final Map<String, CopyOnWriteArrayList<IDeribitTickerListener>> tickerListeners = new ConcurrentHashMap<>();
     protected final Map<String, CopyOnWriteArrayList<IDeribitOrderBookListener>> orderBookListeners = new ConcurrentHashMap<>();
     protected final Map<String, CopyOnWriteArrayList<IDeribitTradeListener>> tradeListeners = new ConcurrentHashMap<>();
     protected final Set<String> requestedChannels = ConcurrentHashMap.newKeySet();
     protected final Set<String> activeChannels = ConcurrentHashMap.newKeySet();
+    protected final Set<String> inFlightChannels = ConcurrentHashMap.newKeySet();
+    protected final Set<String> queuedChannels = ConcurrentHashMap.newKeySet();
+    protected final ConcurrentLinkedQueue<String> subscribeQueue = new ConcurrentLinkedQueue<>();
+    protected final Map<Long, List<String>> pendingSubscribeRequests = new ConcurrentHashMap<>();
+    protected final Map<String, Integer> subscribeRetryCounts = new ConcurrentHashMap<>();
     protected final Object connectLock = new Object();
 
     protected volatile WebSocket webSocket;
     protected volatile CompletableFuture<WebSocket> connectFuture;
     protected volatile ScheduledFuture<?> reconnectFuture;
+    protected volatile ScheduledFuture<?> subscribeFuture;
     protected volatile boolean connected;
     protected volatile boolean manualDisconnect = true;
 
@@ -116,7 +136,9 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
         tickerListeners.clear();
         orderBookListeners.clear();
         tradeListeners.clear();
+        clearSubscribeState();
         cancelReconnect();
+        cancelSubscribeDrain();
 
         CompletableFuture<WebSocket> pendingConnect = connectFuture;
         connectFuture = null;
@@ -149,9 +171,7 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
         requestedChannels.add(channel);
         manualDisconnect = false;
         ensureConnected();
-        if (connected) {
-            sendSubscribe(channel);
-        }
+        queueSubscribeChannel(channel);
     }
 
     protected String validateInstrumentName(String instrumentName) {
@@ -188,29 +208,145 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
         }
     }
 
-    protected void sendSubscribe(String channel) {
-        if (!connected || webSocket == null || !activeChannels.add(channel)) {
+    protected void queueSubscribeChannel(String channel) {
+        if (channel == null || channel.isBlank()) {
+            return;
+        }
+        if (activeChannels.contains(channel) || inFlightChannels.contains(channel)) {
+            return;
+        }
+        if (!queuedChannels.add(channel)) {
+            return;
+        }
+        subscribeQueue.offer(channel);
+        ensureSubscribeDrainScheduled();
+    }
+
+    protected void ensureSubscribeDrainScheduled() {
+        synchronized (connectLock) {
+            if (subscribeFuture != null && !subscribeFuture.isDone()) {
+                return;
+            }
+            subscribeFuture = subscribeExecutor.scheduleWithFixedDelay(this::drainSubscribeQueue, 0L,
+                    getSubscribeSendIntervalMillis(), TimeUnit.MILLISECONDS);
+        }
+    }
+
+    protected void cancelSubscribeDrain() {
+        synchronized (connectLock) {
+            if (subscribeFuture != null) {
+                subscribeFuture.cancel(false);
+                subscribeFuture = null;
+            }
+        }
+    }
+
+    protected void clearSubscribeState() {
+        activeChannels.clear();
+        inFlightChannels.clear();
+        queuedChannels.clear();
+        subscribeQueue.clear();
+        pendingSubscribeRequests.clear();
+        subscribeRetryCounts.clear();
+    }
+
+    protected void drainSubscribeQueue() {
+        if (!canSend()) {
             return;
         }
 
+        List<String> channels = new ArrayList<>();
+        int maxChannels = getSubscribeBatchSize();
+        while (channels.size() < maxChannels) {
+            String channel = subscribeQueue.poll();
+            if (channel == null) {
+                break;
+            }
+            queuedChannels.remove(channel);
+            if (activeChannels.contains(channel) || inFlightChannels.contains(channel) || !requestedChannels.contains(channel)) {
+                continue;
+            }
+            channels.add(channel);
+        }
+
+        if (channels.isEmpty()) {
+            if (subscribeQueue.isEmpty() && inFlightChannels.isEmpty()) {
+                cancelSubscribeDrain();
+            }
+            return;
+        }
+        sendSubscribeBatch(channels);
+    }
+
+    protected void sendSubscribeBatch(List<String> channels) {
+        if (!canSend() || channels == null || channels.isEmpty()) {
+            return;
+        }
+        List<String> sanitized = new ArrayList<>();
+        for (String channel : channels) {
+            if (channel == null || channel.isBlank() || activeChannels.contains(channel) || inFlightChannels.contains(channel)) {
+                continue;
+            }
+            sanitized.add(channel);
+        }
+        if (sanitized.isEmpty()) {
+            return;
+        }
+        inFlightChannels.addAll(sanitized);
+
+        long id = requestId.getAndIncrement();
         JsonObject request = new JsonObject();
         request.addProperty("jsonrpc", "2.0");
-        request.addProperty("id", requestId.getAndIncrement());
+        request.addProperty("id", id);
         request.addProperty("method", "public/subscribe");
 
         JsonObject params = new JsonObject();
-        JsonArray channels = new JsonArray();
-        channels.add(channel);
-        params.add("channels", channels);
+        JsonArray channelArray = new JsonArray();
+        for (String channel : sanitized) {
+            channelArray.add(channel);
+        }
+        params.add("channels", channelArray);
         request.add("params", params);
 
-        webSocket.sendText(request.toString(), true);
+        pendingSubscribeRequests.put(id, sanitized);
+        try {
+            sendText(request.toString());
+        } catch (RuntimeException e) {
+            pendingSubscribeRequests.remove(id);
+            for (String channel : sanitized) {
+                inFlightChannels.remove(channel);
+                queueSubscribeWithRetry(channel, "send failure", e);
+            }
+        }
+    }
+
+    protected void sendText(String payload) {
+        webSocket.sendText(payload, true);
+    }
+
+    protected boolean canSend() {
+        return connected && webSocket != null;
+    }
+
+    protected int getSubscribeBatchSize() {
+        int configured = Integer.getInteger("deribit.ws.subscribe.batch.size", DEFAULT_SUBSCRIBE_BATCH_SIZE);
+        return configured > 0 ? configured : DEFAULT_SUBSCRIBE_BATCH_SIZE;
+    }
+
+    protected long getSubscribeSendIntervalMillis() {
+        long configured = Long.getLong("deribit.ws.subscribe.interval.ms", DEFAULT_SUBSCRIBE_SEND_INTERVAL_MILLIS);
+        return configured > 0 ? configured : DEFAULT_SUBSCRIBE_SEND_INTERVAL_MILLIS;
+    }
+
+    protected int getMaxSubscribeRetries() {
+        int configured = Integer.getInteger("deribit.ws.subscribe.max.retries", DEFAULT_MAX_SUBSCRIBE_RETRIES);
+        return configured >= 0 ? configured : DEFAULT_MAX_SUBSCRIBE_RETRIES;
     }
 
     protected void resubscribeAll() {
-        activeChannels.clear();
+        clearSubscribeState();
         for (String channel : requestedChannels) {
-            sendSubscribe(channel);
+            queueSubscribeChannel(channel);
         }
     }
 
@@ -256,6 +392,11 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
             return;
         }
 
+        if (isRpcResponse(payload)) {
+            handleRpcResponse(payload);
+            return;
+        }
+
         if (!payload.has("method") || payload.get("method").isJsonNull()) {
             return;
         }
@@ -285,6 +426,76 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
         if (channel.startsWith("trades.")) {
             dispatchTrades(channel, data);
         }
+    }
+
+    protected boolean isRpcResponse(JsonObject payload) {
+        return payload.has("id") && (payload.has("result") || payload.has("error"));
+    }
+
+    protected void handleRpcResponse(JsonObject payload) {
+        Long id = getLong(payload, "id");
+        if (id == null) {
+            return;
+        }
+
+        List<String> channels = pendingSubscribeRequests.remove(id);
+        if (channels == null || channels.isEmpty()) {
+            return;
+        }
+
+        if (payload.has("error") && payload.get("error").isJsonObject()) {
+            JsonObject error = payload.getAsJsonObject("error");
+            String code = getString(error, "code");
+            String message = getString(error, "message");
+            logger.warn("Deribit subscribe failed id={} code={} message={} channels={} sample={}", id, code, message,
+                    channels.size(), abbreviateChannels(channels));
+
+            for (String channel : channels) {
+                inFlightChannels.remove(channel);
+                activeChannels.remove(channel);
+                queueSubscribeWithRetry(channel, "rpc_error " + code + " " + message, null);
+            }
+            return;
+        }
+
+        for (String channel : channels) {
+            inFlightChannels.remove(channel);
+            activeChannels.add(channel);
+            subscribeRetryCounts.remove(channel);
+        }
+    }
+
+    protected String abbreviateChannels(Collection<String> channels) {
+        if (channels == null || channels.isEmpty()) {
+            return "[]";
+        }
+        int maxSamples = 6;
+        List<String> sample = new ArrayList<>(maxSamples);
+        int count = 0;
+        for (String channel : channels) {
+            if (count++ >= maxSamples) {
+                break;
+            }
+            sample.add(channel);
+        }
+        if (channels.size() > maxSamples) {
+            return sample + " ...";
+        }
+        return sample.toString();
+    }
+
+    protected void queueSubscribeWithRetry(String channel, String reason, Throwable error) {
+        if (channel == null || channel.isBlank() || !requestedChannels.contains(channel)) {
+            return;
+        }
+        int attempts = subscribeRetryCounts.merge(channel, 1, Integer::sum);
+        if (attempts > getMaxSubscribeRetries()) {
+            logger.error("Giving up Deribit subscribe for {} after {} attempts. reason={}", channel, attempts, reason,
+                    error);
+            return;
+        }
+        logger.warn("Retrying Deribit subscribe for {} attempt {} reason={}", channel, attempts, reason, error);
+        queueSubscribeChannel(channel);
     }
 
     protected void dispatchTicker(String channel, JsonElement data) {
@@ -495,7 +706,7 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
         @Override
         public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
             connected = false;
-            activeChannels.clear();
+            clearSubscribeState();
             DeribitWebSocketApi.this.webSocket = null;
             synchronized (connectLock) {
                 connectFuture = null;
@@ -509,7 +720,7 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
         @Override
         public void onError(WebSocket webSocket, Throwable error) {
             connected = false;
-            activeChannels.clear();
+            clearSubscribeState();
             DeribitWebSocketApi.this.webSocket = null;
             synchronized (connectLock) {
                 connectFuture = null;
