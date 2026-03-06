@@ -54,6 +54,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     <module>paradex-market-data-impl</module>
     <module>binance-futures-market-data-impl</module>
     <module>deribit-market-data-impl</module>
+    <module>okx-market-data-impl</module>
   </modules>
   
 </project>
