@@ -46,9 +46,8 @@ public class OkxQuoteEngine extends QuoteEngine {
     protected static final BigDecimal PERCENT_MULTIPLIER = BigDecimal.valueOf(100L);
     protected static final BigDecimal BPS_MULTIPLIER = BigDecimal.valueOf(10_000L);
     protected static final MathContext FUNDING_MATH = MathContext.DECIMAL64;
-    protected static final InstrumentType[] SUPPORTED_TYPES = new InstrumentType[] {
-            InstrumentType.CRYPTO_SPOT, InstrumentType.PERPETUAL_FUTURES, InstrumentType.FUTURES, InstrumentType.OPTION
-    };
+    protected static final InstrumentType[] SUPPORTED_TYPES = new InstrumentType[] { InstrumentType.CRYPTO_SPOT,
+            InstrumentType.PERPETUAL_FUTURES, InstrumentType.FUTURES, InstrumentType.OPTION };
 
     protected final IOkxWebSocketApi webSocketApi;
     protected final ITickerRegistry tickerRegistry;
@@ -186,8 +185,10 @@ public class OkxQuoteEngine extends QuoteEngine {
         ZonedDateTime timestamp = toZonedDateTime(update.getTimestamp());
         Level1Quote quote = new Level1Quote(ticker, timestamp);
 
-        addPriceQuote(quote, ticker, QuoteType.BID, update.getBestBidPrice(), QuoteType.BID_SIZE, update.getBestBidSize());
-        addPriceQuote(quote, ticker, QuoteType.ASK, update.getBestAskPrice(), QuoteType.ASK_SIZE, update.getBestAskSize());
+        addPriceQuote(quote, ticker, QuoteType.BID, update.getBestBidPrice(), QuoteType.BID_SIZE,
+                update.getBestBidSize());
+        addPriceQuote(quote, ticker, QuoteType.ASK, update.getBestAskPrice(), QuoteType.ASK_SIZE,
+                update.getBestAskSize());
         addPriceQuote(quote, ticker, QuoteType.LAST, update.getLastPrice(), QuoteType.LAST_SIZE, update.getLastSize());
         addScalarQuote(quote, ticker, QuoteType.MARK_PRICE, update.getMarkPrice(), true);
         addScalarQuote(quote, ticker, QuoteType.OPEN_INTEREST, update.getOpenInterest(), false);
@@ -195,8 +196,8 @@ public class OkxQuoteEngine extends QuoteEngine {
         addScalarQuote(quote, ticker, QuoteType.VOLUME_NOTIONAL, update.getVolumeNotional(), false);
 
         if (update.getOpenInterest() != null) {
-            BigDecimal referencePrice = firstNonNull(update.getMarkPrice(), update.getLastPrice(), update.getBestBidPrice(),
-                    update.getBestAskPrice());
+            BigDecimal referencePrice = firstNonNull(update.getMarkPrice(), update.getLastPrice(),
+                    update.getBestBidPrice(), update.getBestAskPrice());
             if (referencePrice != null) {
                 quote.addQuote(QuoteType.OPEN_INTEREST_NOTIONAL, update.getOpenInterest().multiply(referencePrice));
             }
@@ -444,15 +445,21 @@ public class OkxQuoteEngine extends QuoteEngine {
         }
     }
 
-    protected ZonedDateTime toZonedDateTime(Long timestamp) {
+    private static final long EPOCH_MILLIS_THRESHOLD = 100_000_000_000L;
+
+    protected static ZonedDateTime convertEpochToZonedDateTime(Long timestamp, ZoneId zoneId) {
         if (timestamp == null) {
-            return ZonedDateTime.now(UTC);
+            return ZonedDateTime.now(zoneId);
         }
         long epochMillis = timestamp;
-        if (Math.abs(epochMillis) < 100_000_000_000L) {
+        if (Math.abs(epochMillis) < EPOCH_MILLIS_THRESHOLD) {
             epochMillis = epochMillis * 1000L;
         }
-        return ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), UTC);
+        return ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), zoneId);
+    }
+
+    protected ZonedDateTime toZonedDateTime(Long timestamp) {
+        return convertEpochToZonedDateTime(timestamp, UTC);
     }
 
     protected BigDecimal firstNonNull(BigDecimal... values) {
