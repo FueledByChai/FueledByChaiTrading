@@ -57,9 +57,10 @@ public class Exchange implements Serializable {
 
     public static final Exchange BINANCE_FUTURES = new Exchange("BINANCE_FUTURES");
     public static final Exchange DERIBIT = new Exchange("DERIBIT");
+    public static final Exchange OKX = new Exchange("OKX");
     public static final Exchange[] ALL_EXCHANGES = { ARCA, GLOBEX, NYMEX, CBOE, ECBOT, NYBOT, CFE, NYSE_LIFFE, IDEALPRO,
             PSE, INTERACTIVE_BROKERS_SMART, NASDAQ, TSEJ, SEHKNTL, SEHK, HKFE, OSE, SGX, BOX, DYDX, HYPERLIQUID,
-            PARADEX, LIGHTER, BINANCE_SPOT, BINANCE_FUTURES, DERIBIT };
+            PARADEX, LIGHTER, BINANCE_SPOT, BINANCE_FUTURES, DERIBIT, OKX };
 
     protected String exchangeName;
 
