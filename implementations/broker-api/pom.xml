@@ -42,5 +42,6 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
         <module>paradex-broker-api-impl</module>
 
         <module>hyperliquid-broker-api-impl</module>
+    <module>okx-broker-api-impl</module>
     </modules>
 </project>
