@@ -27,6 +27,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.Objects;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,12 +63,12 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     private final ExecutorService executorService = Executors.newCachedThreadPool(); // Thread pool with cached threads
     protected PaperBrokerLatency latencyModel;
+    protected PaperBrokerCommission commissionModel;
+    protected PaperBrokerAccounting accountingModel;
 
     protected String asset;
 
     private Timer accountUpdateTimer = new Timer(true); // Timer to schedule account updates
-    protected double makerFee = 0.005 / 100.0; // 0.005% maker rebate
-    protected double takerFee = -0.03 / 100.0; // 0.03% taker fee
 
     protected double startingAccountBalance = 100000.0; // Starting account balance for paper trading
     protected double currentAccountBalance = startingAccountBalance; // Current account balance
@@ -80,6 +81,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     protected double midPrice = 0.0; // Mid price (average of best bid and ask
 
     protected double markPrice = 0.0;
+    protected double underlyingPrice = 0.0;
     protected double fundingRate = 0.0; // Funding rate for the asset
     protected double fundingAccruedOrPaid = 0.0; // Total funding accrued or paid
     protected long lastFundingTimestamp = 0; // Last funding timestamp
@@ -131,12 +133,17 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     public PaperBroker(QuoteEngine quoteEngine, Ticker ticker, PaperBrokerCommission commission,
             PaperBrokerLatency latencyModel, double startingBalance) {
+        this(quoteEngine, ticker, commission, latencyModel, PaperBrokerAccounting.forTicker(ticker), startingBalance);
+    }
+
+    public PaperBroker(QuoteEngine quoteEngine, Ticker ticker, PaperBrokerCommission commission,
+            PaperBrokerLatency latencyModel, PaperBrokerAccounting accountingModel, double startingBalance) {
 
         this.latencyModel = latencyModel;
         this.quoteEngine = quoteEngine;
         this.ticker = ticker;
-        this.makerFee = commission.getMakerFeeBps() / 10000.0; // Convert bps to decimal
-        this.takerFee = commission.getTakerFeeBps() / 10000.0; // Convert bps to decimal
+        this.commissionModel = Objects.requireNonNull(commission, "commission is required");
+        this.accountingModel = Objects.requireNonNull(accountingModel, "accountingModel is required");
         this.startingAccountBalance = startingBalance;
         this.currentAccountBalance = startingBalance;
     }
@@ -222,6 +229,11 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         this.markPrice = markPrice.doubleValue();
     }
 
+    public void underlyingPriceUpdated(String symbol, BigDecimal underlyingPrice, ZonedDateTime timestamp) {
+        logger.debug("Underlying Price Updated: {} - {} at {}", symbol, underlyingPrice, timestamp);
+        this.underlyingPrice = underlyingPrice.doubleValue();
+    }
+
     public void fundingRateUpdated(String symbol, BigDecimal rate, ZonedDateTime timestamp) {
         logger.info("Funding Rate Updated: {} - {} at {}", symbol, fundingRate, timestamp);
         double annualizedFundingRate = rate.doubleValue();
@@ -229,8 +241,8 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         long currentTimestamp = timestamp.toInstant().toEpochMilli();
         if (lastFundingTimestamp > 0 && currentTimestamp > lastFundingTimestamp) {
             double hours = (currentTimestamp - lastFundingTimestamp) / 3600000.0;
-            // Funding is paid/collected continuously: funding = size * fundingRate * hours
-            double fundingThisPeriod = (markPrice * currentPosition.doubleValue()) * (-fundingRate) * (hours);
+            double fundingThisPeriod = accountingModel.calculateFunding(ticker, markPrice, currentPosition.doubleValue(),
+                    fundingRate, hours);
             this.fundingAccruedOrPaid += fundingThisPeriod;
             logger.info("Funding accrued/paid this period: {} total funding: {}", fundingThisPeriod,
                     fundingAccruedOrPaid);
@@ -515,7 +527,8 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         if (markPrice == 0 || currentPosition.doubleValue() == 0) {
             return 0.0; // Avoid division by zero if markPrice or position size is zero
         } else {
-            return (markPrice - averageEntryPrice) * currentPosition.doubleValue(); // Calculate unrealized PnL
+            return accountingModel.calculateUnrealizedPnl(ticker, averageEntryPrice, markPrice,
+                    currentPosition.doubleValue());
         }
 
     }
@@ -800,12 +813,13 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         logger.debug("Updating position. Side: {}, Order Size: {}, Price: {}, Is Maker: {}", side, orderSize, price,
                 isMaker);
         BigDecimal size = orderSize; // Use the initial size passed to the method
-        double notional = size.doubleValue() * price;
+        double tradeVolume = accountingModel.calculateVolume(ticker, price, size.doubleValue());
         if (side == TradeDirection.BUY) {
             if (currentPosition.compareTo(BigDecimal.ZERO) < 0) {
                 BigDecimal closingSize = currentPosition.negate().min(size);
 
-                double pnl = (averageEntryPrice - price) * closingSize.doubleValue();
+                double pnl = accountingModel.calculateRealizedPnl(ticker, averageEntryPrice, price,
+                        closingSize.doubleValue(), currentPosition.doubleValue());
                 realizedPnL += pnl;
                 currentAccountBalance += pnl; // Add realized PnL to the account balance
                 currentPosition = currentPosition.add(closingSize);
@@ -820,15 +834,16 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                     currentPosition = currentPosition.add(size);
                 }
             } else {
-                averageEntryPrice = ((averageEntryPrice * currentPosition.doubleValue()) + (price * size.doubleValue()))
-                        / (currentPosition.doubleValue() + size.doubleValue());
+                averageEntryPrice = accountingModel.blendAverageEntryPrice(ticker, currentPosition.doubleValue(),
+                        averageEntryPrice, size.doubleValue(), price);
                 // currentAccountBalance -= size * price;
                 currentPosition = currentPosition.add(size);
             }
         } else { // SELL
             if (currentPosition.compareTo(BigDecimal.ZERO) > 0) {
                 BigDecimal closingSize = currentPosition.min(size);
-                double pnl = (price - averageEntryPrice) * closingSize.doubleValue();
+                double pnl = accountingModel.calculateRealizedPnl(ticker, averageEntryPrice, price,
+                        closingSize.doubleValue(), currentPosition.doubleValue());
                 realizedPnL += pnl;
                 currentAccountBalance += pnl; // Add realized PnL to the account balance
                 currentPosition = currentPosition.subtract(closingSize);
@@ -843,8 +858,8 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                     currentPosition = currentPosition.subtract(size);
                 }
             } else {
-                averageEntryPrice = ((averageEntryPrice * -currentPosition.doubleValue())
-                        + (price * size.doubleValue())) / (-currentPosition.doubleValue() + size.doubleValue());
+                averageEntryPrice = accountingModel.blendAverageEntryPrice(ticker, -currentPosition.doubleValue(),
+                        averageEntryPrice, size.doubleValue(), price);
                 // currentAccountBalance += size * price;
                 currentPosition = currentPosition.subtract(size);
             }
@@ -856,7 +871,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         currentAccountBalance += fee;
         totalFees += fee; // Update total fees paid
 
-        dollarVolume += Math.abs(notional);
+        dollarVolume += tradeVolume;
         brokerStatus.setDollarVolume(dollarVolume); // Update the dollar volume in the broker status
         totalOrdersPlaced++;
         brokerStatus.setTotalTrades(totalOrdersPlaced); // Update total trades in the broker status
@@ -866,9 +881,8 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     protected double calcFee(double price, double size, boolean isMaker) {
-        double notional = Math.abs(price * size); // Calculate the notional value of the trade
-        double feeRate = isMaker ? makerFee : takerFee; // Determine the fee rate based on order type
-        return notional * feeRate; // Calculate and return the fee
+        Double latestUnderlyingPrice = underlyingPrice > 0.0 ? underlyingPrice : null;
+        return commissionModel.calculateFee(ticker, price, size, isMaker, latestUnderlyingPrice);
     }
 
     protected void writeTradeToCsv(OrderTicket order, double price, double fee) {
@@ -1087,6 +1101,11 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
         if (quote.containsType(QuoteType.MARK_PRICE)) {
             markPriceUpdated(ticker.getSymbol(), quote.getValue(QuoteType.MARK_PRICE), quote.getTimeStamp());
+        }
+
+        if (quote.containsType(QuoteType.UNDERLYING_PRICE)) {
+            underlyingPriceUpdated(ticker.getSymbol(), quote.getValue(QuoteType.UNDERLYING_PRICE),
+                    quote.getTimeStamp());
         }
 
         if (quote.containsType(QuoteType.FUNDING_RATE_APR)) {

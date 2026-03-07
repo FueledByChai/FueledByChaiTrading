@@ -6,8 +6,10 @@ public class TickerTranslator implements ITickerTranslator {
 
     @Override
     public Ticker translateTicker(InstrumentDescriptor descriptor) {
+        BigDecimal contractMultiplier = descriptor.getContractMultiplier() == null ? BigDecimal.ONE
+                : descriptor.getContractMultiplier();
         Ticker ticker = new Ticker(descriptor.getExchangeSymbol());
-        ticker.setInstrumentType(descriptor.getInstrumentType()).setContractMultiplier(BigDecimal.ONE)
+        ticker.setInstrumentType(descriptor.getInstrumentType()).setContractMultiplier(contractMultiplier)
                 .setCurrency(descriptor.getQuoteCurrency()).setExchange(descriptor.getExchange())
                 .setInstrumentType(descriptor.getInstrumentType()).setMinimumTickSize(descriptor.getPriceTickSize())
                 .setOrderSizeIncrement(descriptor.getOrderSizeIncrement()).setPrimaryExchange(descriptor.getExchange())
