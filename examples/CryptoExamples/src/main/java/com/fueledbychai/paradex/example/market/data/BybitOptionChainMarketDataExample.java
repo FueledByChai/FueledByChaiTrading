@@ -102,13 +102,9 @@ public class BybitOptionChainMarketDataExample {
         if (requestedOptionSymbol != null && !requestedOptionSymbol.isBlank()) {
             String requested = requestedOptionSymbol.trim().toUpperCase(Locale.US);
             for (Ticker ticker : optionChain) {
-                if (ticker.getStrike().equals(new BigDecimal("67500"))) {
-                       logger.info("Found 67500 strike: {}", ticker);
-                       return ticker;
+                if (ticker != null && requested.equalsIgnoreCase(ticker.getSymbol())) {
+                    return ticker;
                 }
-                // if (ticker != null && requested.equalsIgnoreCase(ticker.getSymbol())) {
-                //     return ticker;
-                // }
             }
             throw new IllegalArgumentException("Requested option symbol " + requested + " was not found in chain.");
         }
@@ -227,9 +223,14 @@ public class BybitOptionChainMarketDataExample {
         System.setProperty("bybit.proxy.host", "127.0.0.1");
         System.setProperty("bybit.proxy.port", "1080");
         System.setProperty("bybit.run.proxy", "false");        
-        String underlyingSymbol = args.length > 0 ? args[0] : DEFAULT_UNDERLYING;
+        // System.setProperty("socksProxyPort", "1080");
+        // Example proxy configuration for Bybit connections. These values are for local testing only
+        // and may not be appropriate for your environment. Adjust or remove them as needed.
+        // Set "bybit.run.proxy" to "true" only if you actually want to route traffic via the proxy
+        // defined by "bybit.proxy.host" and "bybit.proxy.port".
+                String underlyingSymbol = args.length > 0 ? args[0] : DEFAULT_UNDERLYING;
         String requestedOptionSymbol = args.length > 1 ? args[1] : null;
-        requestedOptionSymbol = "BTC";
+
         ITickerRegistry.OptionRightFilter rightFilter = args.length > 2
                 ? ITickerRegistry.OptionRightFilter.valueOf(args[2].trim().toUpperCase(Locale.US))
                 : DEFAULT_RIGHT_FILTER;
