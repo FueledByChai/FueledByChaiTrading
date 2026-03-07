@@ -1,5 +1,6 @@
 package com.fueledbychai.paradex.example.market.data;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.Arrays;
@@ -101,9 +102,13 @@ public class BybitOptionChainMarketDataExample {
         if (requestedOptionSymbol != null && !requestedOptionSymbol.isBlank()) {
             String requested = requestedOptionSymbol.trim().toUpperCase(Locale.US);
             for (Ticker ticker : optionChain) {
-                if (ticker != null && requested.equalsIgnoreCase(ticker.getSymbol())) {
-                    return ticker;
+                if (ticker.getStrike().equals(new BigDecimal("67500"))) {
+                       logger.info("Found 67500 strike: {}", ticker);
+                       return ticker;
                 }
+                // if (ticker != null && requested.equalsIgnoreCase(ticker.getSymbol())) {
+                //     return ticker;
+                // }
             }
             throw new IllegalArgumentException("Requested option symbol " + requested + " was not found in chain.");
         }
@@ -224,6 +229,7 @@ public class BybitOptionChainMarketDataExample {
         System.setProperty("bybit.run.proxy", "false");        
         String underlyingSymbol = args.length > 0 ? args[0] : DEFAULT_UNDERLYING;
         String requestedOptionSymbol = args.length > 1 ? args[1] : null;
+        requestedOptionSymbol = "BTC";
         ITickerRegistry.OptionRightFilter rightFilter = args.length > 2
                 ? ITickerRegistry.OptionRightFilter.valueOf(args[2].trim().toUpperCase(Locale.US))
                 : DEFAULT_RIGHT_FILTER;
