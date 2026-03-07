@@ -142,6 +142,11 @@ class DeribitWebSocketApiTest {
         }
 
         @Override
+        protected void ensureSubscribeDrainScheduled() {
+            // Disable background scheduling in tests so drain order is deterministic.
+        }
+
+        @Override
         protected void sendText(String payload) {
             sentRequests.add(JsonParser.parseString(payload).getAsJsonObject());
         }
