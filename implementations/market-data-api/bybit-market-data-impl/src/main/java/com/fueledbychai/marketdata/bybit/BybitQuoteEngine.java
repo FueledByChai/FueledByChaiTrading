@@ -138,6 +138,14 @@ public class BybitQuoteEngine extends QuoteEngine {
         if (tickerSubscriptions.add(instrumentId)) {
             webSocketApi.subscribeTicker(instrumentId, normalizedTicker.getInstrumentType(), this::handleTickerUpdate);
         }
+
+        // Bybit option ticker updates can omit top-of-book fields. Subscribe to
+        // orderbook for options so L1 listeners still receive bid/ask via
+        // buildTopOfBookQuote.
+        if (normalizedTicker.getInstrumentType() == InstrumentType.OPTION && orderBookSubscriptions.add(instrumentId)) {
+            webSocketApi.subscribeOrderBook(instrumentId, normalizedTicker.getInstrumentType(),
+                    this::handleOrderBookUpdate);
+        }
     }
 
     @Override

@@ -27,6 +27,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,6 +58,10 @@ public class BybitWebSocketApi implements IBybitWebSocketApi {
     protected static final long RECONNECT_MAX_DELAY_MILLIS = 30_000L;
     protected static final long DEFAULT_PING_INTERVAL_SECONDS = 20L;
     protected static final int MAX_BOOK_LEVELS = 200;
+    protected static final Pattern OPTION_EXCHANGE_SYMBOL_PATTERN = Pattern
+            .compile("^[A-Z0-9]+-\\d{1,2}[A-Z]{3}\\d{2}-[0-9.]+-[CP](?:-[A-Z0-9]+)?$");
+    protected static final Pattern OPTION_COMMON_SYMBOL_PATTERN = Pattern
+            .compile("^[A-Z0-9]+/[A-Z0-9]+-\\d{8}-[0-9.]+-[CP]$");
 
     protected final BybitConfiguration configuration;
     protected final HttpClient httpClient;
@@ -241,6 +246,9 @@ public class BybitWebSocketApi implements IBybitWebSocketApi {
         }
 
         String normalized = symbol == null ? "" : symbol.toUpperCase(Locale.US);
+        if (looksLikeOptionSymbol(normalized)) {
+            return BybitWsCategory.OPTION;
+        }
         if (normalized.contains("USDT") || normalized.contains("USDC")) {
             return BybitWsCategory.LINEAR;
         }
@@ -251,6 +259,14 @@ public class BybitWebSocketApi implements IBybitWebSocketApi {
             return BybitWsCategory.LINEAR;
         }
         return BybitWsCategory.LINEAR;
+    }
+
+    protected boolean looksLikeOptionSymbol(String symbol) {
+        if (!isPresent(symbol)) {
+            return false;
+        }
+        return OPTION_EXCHANGE_SYMBOL_PATTERN.matcher(symbol).matches()
+                || OPTION_COMMON_SYMBOL_PATTERN.matcher(symbol).matches();
     }
 
     protected String extractBaseAsset(String symbol) {
@@ -596,14 +612,31 @@ public class BybitWebSocketApi implements IBybitWebSocketApi {
         }
 
         return new BybitTickerUpdate(symbol, category == null ? null : category.name().toLowerCase(Locale.US),
-                rootTimestamp, getBigDecimal(data, "bid1Price"), getBigDecimal(data, "bid1Size"),
-                getBigDecimal(data, "ask1Price"), getBigDecimal(data, "ask1Size"), getBigDecimal(data, "lastPrice"),
-                getBigDecimal(data, "lastQty"), getBigDecimal(data, "markPrice"), getBigDecimal(data, "indexPrice"),
-                getBigDecimal(data, "underlyingPrice"), getBigDecimal(data, "openInterest"),
-                getBigDecimal(data, "volume24h"), getBigDecimal(data, "turnover24h"), getBigDecimal(data, "fundingRate"),
-                getBigDecimal(data, "bid1Iv"), getBigDecimal(data, "ask1Iv"), getBigDecimal(data, "markIv"),
-                getBigDecimal(data, "delta"), getBigDecimal(data, "gamma"), getBigDecimal(data, "theta"),
-                getBigDecimal(data, "vega"));
+                rootTimestamp, firstBigDecimal(data, "bid1Price", "bidPrice", "bestBidPrice"),
+                firstBigDecimal(data, "bid1Size", "bidSize", "bestBidSize"),
+                firstBigDecimal(data, "ask1Price", "askPrice", "bestAskPrice"),
+                firstBigDecimal(data, "ask1Size", "askSize", "bestAskSize"), getBigDecimal(data, "lastPrice"),
+                firstBigDecimal(data, "lastQty", "lastSize"), getBigDecimal(data, "markPrice"),
+                getBigDecimal(data, "indexPrice"), getBigDecimal(data, "underlyingPrice"),
+                getBigDecimal(data, "openInterest"), getBigDecimal(data, "volume24h"),
+                getBigDecimal(data, "turnover24h"), getBigDecimal(data, "fundingRate"),
+                firstBigDecimal(data, "bid1Iv", "bidIv"), firstBigDecimal(data, "ask1Iv", "askIv"),
+                getBigDecimal(data, "markIv"), getBigDecimal(data, "delta"), getBigDecimal(data, "gamma"),
+                getBigDecimal(data, "theta"), getBigDecimal(data, "vega"));
+    }
+
+    protected BigDecimal firstBigDecimal(JsonObject object, String... keys) {
+        if (object == null || keys == null) {
+            return null;
+        }
+
+        for (String key : keys) {
+            BigDecimal value = getBigDecimal(object, key);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
     }
 
     protected List<BybitOrderBookLevel> parseBookLevels(JsonArray levelsJson) {
