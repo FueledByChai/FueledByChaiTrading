@@ -20,7 +20,7 @@ public class OkxMarketDataExample {
 
     protected static final Logger logger = LoggerFactory.getLogger(OkxMarketDataExample.class);
     protected static final String DEFAULT_SYMBOL = "BTC-USDT";
-    protected static final InstrumentType DEFAULT_TYPE = InstrumentType.CRYPTO_SPOT;
+    protected static final InstrumentType DEFAULT_TYPE = InstrumentType.PERPETUAL_FUTURES;
     protected static final Duration RUN_DURATION = Duration.ofMinutes(1);
 
     public void start(String symbol, InstrumentType instrumentType) throws InterruptedException {
@@ -41,6 +41,11 @@ public class OkxMarketDataExample {
         quoteEngine.subscribeOrderFlow(ticker, this::onOrderFlow);
 
         logger.info("Subscribed to OKX market data for {} ({})", ticker.getSymbol(), ticker.getInstrumentType());
+        if (ticker.getInstrumentType() != InstrumentType.PERPETUAL_FUTURES) {
+            logger.warn(
+                    "Funding, mark price, and open interest are expected to be null for {}. Use BTC-USDT-SWAP with {} if you want perpetual funding data.",
+                    ticker.getInstrumentType(), InstrumentType.PERPETUAL_FUTURES);
+        }
 
         try {
             Thread.sleep(RUN_DURATION.toMillis());
@@ -50,8 +55,11 @@ public class OkxMarketDataExample {
     }
 
     protected void onLevel1(ILevel1Quote quote) {
-        logger.info("L1 {} bid={} ask={} last={}", quote.getTicker().getSymbol(), value(quote, QuoteType.BID),
-                value(quote, QuoteType.ASK), value(quote, QuoteType.LAST));
+        logger.info("L1 {} bid={} ask={} last={} mark={} oi={} vol={} fundingHourlyBps={} fundingApr={}",
+                quote.getTicker().getSymbol(), value(quote, QuoteType.BID), value(quote, QuoteType.ASK),
+                value(quote, QuoteType.LAST), value(quote, QuoteType.MARK_PRICE), value(quote, QuoteType.OPEN_INTEREST),
+                value(quote, QuoteType.VOLUME), value(quote, QuoteType.FUNDING_RATE_HOURLY_BPS),
+                value(quote, QuoteType.FUNDING_RATE_APR));
     }
 
     protected void onLevel2(ILevel2Quote quote) {

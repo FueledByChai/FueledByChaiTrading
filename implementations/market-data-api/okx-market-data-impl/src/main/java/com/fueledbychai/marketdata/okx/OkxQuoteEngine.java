@@ -28,11 +28,14 @@ import com.fueledbychai.marketdata.OrderFlow;
 import com.fueledbychai.marketdata.OrderFlowListener;
 import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.QuoteType;
+import com.fueledbychai.okx.common.api.IOkxRestApi;
 import com.fueledbychai.okx.common.api.IOkxWebSocketApi;
+import com.fueledbychai.okx.common.api.ws.model.OkxFundingRateUpdate;
 import com.fueledbychai.okx.common.api.ws.model.OkxOrderBookLevel;
 import com.fueledbychai.okx.common.api.ws.model.OkxOrderBookUpdate;
 import com.fueledbychai.okx.common.api.ws.model.OkxTickerUpdate;
 import com.fueledbychai.okx.common.api.ws.model.OkxTrade;
+import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.ExchangeWebSocketApiFactory;
 import com.fueledbychai.util.ITickerRegistry;
 import com.fueledbychai.util.TickerRegistryFactory;
@@ -46,9 +49,11 @@ public class OkxQuoteEngine extends QuoteEngine {
     protected static final BigDecimal PERCENT_MULTIPLIER = BigDecimal.valueOf(100L);
     protected static final BigDecimal BPS_MULTIPLIER = BigDecimal.valueOf(10_000L);
     protected static final MathContext FUNDING_MATH = MathContext.DECIMAL64;
+    protected static final int DEFAULT_FUNDING_INTERVAL_HOURS = 8;
     protected static final InstrumentType[] SUPPORTED_TYPES = new InstrumentType[] { InstrumentType.CRYPTO_SPOT,
             InstrumentType.PERPETUAL_FUTURES, InstrumentType.FUTURES, InstrumentType.OPTION };
 
+    protected final IOkxRestApi restApi;
     protected final IOkxWebSocketApi webSocketApi;
     protected final ITickerRegistry tickerRegistry;
 
@@ -57,23 +62,29 @@ public class OkxQuoteEngine extends QuoteEngine {
     protected final Map<String, Ticker> orderFlowTickersBySymbol = new ConcurrentHashMap<>();
 
     protected final Set<String> tickerSubscriptions = ConcurrentHashMap.newKeySet();
+    protected final Set<String> fundingRateSubscriptions = ConcurrentHashMap.newKeySet();
     protected final Set<String> orderBookSubscriptions = ConcurrentHashMap.newKeySet();
     protected final Set<String> orderFlowSubscriptions = ConcurrentHashMap.newKeySet();
 
     protected volatile boolean started;
 
     public OkxQuoteEngine() {
-        this(ExchangeWebSocketApiFactory.getApi(Exchange.OKX, IOkxWebSocketApi.class),
+        this(ExchangeRestApiFactory.getPublicApi(Exchange.OKX, IOkxRestApi.class),
+                ExchangeWebSocketApiFactory.getApi(Exchange.OKX, IOkxWebSocketApi.class),
                 TickerRegistryFactory.getInstance(Exchange.OKX));
     }
 
-    protected OkxQuoteEngine(IOkxWebSocketApi webSocketApi, ITickerRegistry tickerRegistry) {
+    protected OkxQuoteEngine(IOkxRestApi restApi, IOkxWebSocketApi webSocketApi, ITickerRegistry tickerRegistry) {
+        if (restApi == null) {
+            throw new IllegalArgumentException("restApi is required");
+        }
         if (webSocketApi == null) {
             throw new IllegalArgumentException("webSocketApi is required");
         }
         if (tickerRegistry == null) {
             throw new IllegalArgumentException("tickerRegistry is required");
         }
+        this.restApi = restApi;
         this.webSocketApi = webSocketApi;
         this.tickerRegistry = tickerRegistry;
     }
@@ -117,6 +128,7 @@ public class OkxQuoteEngine extends QuoteEngine {
         level2TickersBySymbol.clear();
         orderFlowTickersBySymbol.clear();
         tickerSubscriptions.clear();
+        fundingRateSubscriptions.clear();
         orderBookSubscriptions.clear();
         orderFlowSubscriptions.clear();
     }
@@ -136,6 +148,11 @@ public class OkxQuoteEngine extends QuoteEngine {
         level1TickersBySymbol.put(instrumentId, normalizedTicker);
         if (tickerSubscriptions.add(instrumentId)) {
             webSocketApi.subscribeTicker(instrumentId, this::handleTickerUpdate);
+        }
+        if (normalizedTicker.getInstrumentType() == InstrumentType.PERPETUAL_FUTURES
+                && fundingRateSubscriptions.add(instrumentId)) {
+            webSocketApi.subscribeFundingRate(instrumentId, this::handleFundingRateUpdate);
+            seedFundingRate(normalizedTicker, instrumentId);
         }
     }
 
@@ -181,6 +198,40 @@ public class OkxQuoteEngine extends QuoteEngine {
         }
     }
 
+    protected void handleFundingRateUpdate(OkxFundingRateUpdate update) {
+        if (update == null || update.getInstrumentId() == null) {
+            return;
+        }
+
+        Ticker ticker = level1TickersBySymbol.get(update.getInstrumentId());
+        if (ticker == null || ticker.getInstrumentType() != InstrumentType.PERPETUAL_FUTURES || !hasLevel1Listeners(ticker)) {
+            return;
+        }
+
+        applyFundingInterval(ticker, update);
+        Level1Quote quote = buildFundingQuote(ticker, update);
+        if (quote.getTypes().length > 0) {
+            fireLevel1Quote(quote);
+        }
+    }
+
+    protected void seedFundingRate(Ticker ticker, String instrumentId) {
+        try {
+            OkxFundingRateUpdate snapshot = restApi.getFundingRate(instrumentId);
+            if (snapshot == null) {
+                return;
+            }
+
+            applyFundingInterval(ticker, snapshot);
+            Level1Quote quote = buildFundingQuote(ticker, snapshot);
+            if (quote.getTypes().length > 0) {
+                fireLevel1Quote(quote);
+            }
+        } catch (RuntimeException e) {
+            logger.warn("Unable to seed OKX funding-rate snapshot for {}", instrumentId, e);
+        }
+    }
+
     protected Level1Quote buildLevel1Quote(Ticker ticker, OkxTickerUpdate update) {
         ZonedDateTime timestamp = toZonedDateTime(update.getTimestamp());
         Level1Quote quote = new Level1Quote(ticker, timestamp);
@@ -216,6 +267,12 @@ public class OkxQuoteEngine extends QuoteEngine {
         return quote;
     }
 
+    protected Level1Quote buildFundingQuote(Ticker ticker, OkxFundingRateUpdate update) {
+        Level1Quote quote = new Level1Quote(ticker, toZonedDateTime(update.getTimestamp()));
+        addFundingQuotes(ticker, update.getFundingRate(), quote);
+        return quote;
+    }
+
     protected void addPriceQuote(Level1Quote quote, Ticker ticker, QuoteType priceType, BigDecimal price,
             QuoteType sizeType, BigDecimal size) {
         if (price == null) {
@@ -240,7 +297,8 @@ public class OkxQuoteEngine extends QuoteEngine {
             return;
         }
 
-        int fundingIntervalHours = ticker.getFundingRateInterval() > 0 ? ticker.getFundingRateInterval() : 8;
+        int fundingIntervalHours = ticker.getFundingRateInterval() > 0 ? ticker.getFundingRateInterval()
+                : DEFAULT_FUNDING_INTERVAL_HOURS;
         BigDecimal hourlyFundingRate = fundingRate.divide(BigDecimal.valueOf(fundingIntervalHours), FUNDING_MATH);
         BigDecimal hourlyBps = hourlyFundingRate.multiply(BPS_MULTIPLIER);
         BigDecimal annualizedPercent = hourlyFundingRate.multiply(HOURS_PER_DAY).multiply(DAYS_PER_YEAR)
@@ -248,6 +306,22 @@ public class OkxQuoteEngine extends QuoteEngine {
 
         quote.addQuote(QuoteType.FUNDING_RATE_HOURLY_BPS, hourlyBps);
         quote.addQuote(QuoteType.FUNDING_RATE_APR, annualizedPercent);
+    }
+
+    protected void applyFundingInterval(Ticker ticker, OkxFundingRateUpdate update) {
+        if (ticker == null || update == null || update.getFundingTime() == null || update.getNextFundingTime() == null) {
+            return;
+        }
+
+        long intervalMillis = update.getNextFundingTime().longValue() - update.getFundingTime().longValue();
+        if (intervalMillis <= 0L || intervalMillis % 3_600_000L != 0L) {
+            return;
+        }
+
+        long intervalHours = intervalMillis / 3_600_000L;
+        if (intervalHours > 0L && intervalHours <= Integer.MAX_VALUE) {
+            ticker.setFundingRateInterval((int) intervalHours);
+        }
     }
 
     protected void handleOrderBookUpdate(OkxOrderBookUpdate update) {
