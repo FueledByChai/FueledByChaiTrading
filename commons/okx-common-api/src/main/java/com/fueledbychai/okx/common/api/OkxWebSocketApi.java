@@ -30,9 +30,11 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.fueledbychai.okx.common.api.ws.listener.IOkxFundingRateListener;
 import com.fueledbychai.okx.common.api.ws.listener.IOkxOrderBookListener;
 import com.fueledbychai.okx.common.api.ws.listener.IOkxTickerListener;
 import com.fueledbychai.okx.common.api.ws.listener.IOkxTradeListener;
+import com.fueledbychai.okx.common.api.ws.model.OkxFundingRateUpdate;
 import com.fueledbychai.okx.common.api.ws.model.OkxOrderBookLevel;
 import com.fueledbychai.okx.common.api.ws.model.OkxOrderBookUpdate;
 import com.fueledbychai.okx.common.api.ws.model.OkxTickerUpdate;
@@ -64,6 +66,7 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
             daemonThreadFactory("okx-ws-heartbeat"));
 
     protected final Map<String, CopyOnWriteArrayList<IOkxTickerListener>> tickerListeners = new ConcurrentHashMap<>();
+    protected final Map<String, CopyOnWriteArrayList<IOkxFundingRateListener>> fundingRateListeners = new ConcurrentHashMap<>();
     protected final Map<String, CopyOnWriteArrayList<IOkxOrderBookListener>> orderBookListeners = new ConcurrentHashMap<>();
     protected final Map<String, CopyOnWriteArrayList<IOkxTradeListener>> tradeListeners = new ConcurrentHashMap<>();
 
@@ -109,6 +112,16 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
     }
 
     @Override
+    public void subscribeFundingRate(String instrumentId, IOkxFundingRateListener listener) {
+        String normalizedInstrumentId = normalizeInstrumentId(instrumentId);
+        if (listener == null) {
+            throw new IllegalArgumentException("listener is required");
+        }
+        fundingRateListeners.computeIfAbsent(normalizedInstrumentId, key -> new CopyOnWriteArrayList<>()).add(listener);
+        subscribe("funding-rate", normalizedInstrumentId);
+    }
+
+    @Override
     public void subscribeOrderBook(String instrumentId, IOkxOrderBookListener listener) {
         String normalizedInstrumentId = normalizeInstrumentId(instrumentId);
         if (listener == null) {
@@ -133,6 +146,7 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
         manualDisconnect = true;
         connected = false;
         tickerListeners.clear();
+        fundingRateListeners.clear();
         orderBookListeners.clear();
         tradeListeners.clear();
         requestedSubscriptions.clear();
@@ -463,6 +477,10 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
             dispatchTicker(instrumentId, data);
             return;
         }
+        if ("funding-rate".equalsIgnoreCase(channel)) {
+            dispatchFundingRate(instrumentId, data);
+            return;
+        }
         if ("books5".equalsIgnoreCase(channel) || "books".equalsIgnoreCase(channel)
                 || "books-l2-tbt".equalsIgnoreCase(channel) || "bbo-tbt".equalsIgnoreCase(channel)) {
             dispatchOrderBook(instrumentId, data);
@@ -536,6 +554,34 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
                     listener.onTicker(update);
                 } catch (RuntimeException e) {
                     logger.warn("OKX ticker listener failed for {}", instrumentId, e);
+                }
+            }
+        }
+    }
+
+    protected void dispatchFundingRate(String instrumentId, JsonArray data) {
+        if (data == null || data.isEmpty()) {
+            return;
+        }
+
+        List<IOkxFundingRateListener> listeners = fundingRateListeners.get(instrumentId);
+        if (listeners == null || listeners.isEmpty()) {
+            return;
+        }
+
+        for (JsonElement element : data) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            OkxFundingRateUpdate update = parseFundingRateUpdate(instrumentId, element.getAsJsonObject());
+            if (update == null) {
+                continue;
+            }
+            for (IOkxFundingRateListener listener : listeners) {
+                try {
+                    listener.onFundingRate(update);
+                } catch (RuntimeException e) {
+                    logger.warn("OKX funding-rate listener failed for {}", instrumentId, e);
                 }
             }
         }
@@ -620,6 +666,31 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
                 firstNonNull(getBigDecimal(data, "fundingRate"), getBigDecimal(data, "funding_rate")),
                 getBigDecimal(data, "delta"), getBigDecimal(data, "gamma"), getBigDecimal(data, "theta"),
                 getBigDecimal(data, "vega"));
+    }
+
+    protected OkxFundingRateUpdate parseFundingRateUpdate(String fallbackInstrumentId, JsonObject data) {
+        if (data == null) {
+            return null;
+        }
+
+        String instrumentId = normalizeInstrumentIdOrNull(getString(data, "instId"));
+        if (instrumentId == null) {
+            instrumentId = fallbackInstrumentId;
+        }
+
+        BigDecimal fundingRate = firstNonNull(getBigDecimal(data, "fundingRate"), getBigDecimal(data, "funding_rate"));
+        BigDecimal nextFundingRate = firstNonNull(getBigDecimal(data, "nextFundingRate"),
+                getBigDecimal(data, "next_funding_rate"));
+        Long timestamp = firstNonNull(getLong(data, "ts"), getLong(data, "fundingTime"), getLong(data, "funding_time"));
+        Long fundingTime = firstNonNull(getLong(data, "fundingTime"), getLong(data, "funding_time"));
+        Long nextFundingTime = firstNonNull(getLong(data, "nextFundingTime"), getLong(data, "next_funding_time"));
+
+        if (instrumentId == null || fundingRate == null) {
+            return null;
+        }
+
+        return new OkxFundingRateUpdate(instrumentId, getString(data, "instType"), timestamp, fundingRate,
+                nextFundingRate, fundingTime, nextFundingTime);
     }
 
     protected OkxOrderBookUpdate parseOrderBookUpdate(String fallbackInstrumentId, JsonObject data) {
@@ -790,6 +861,20 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
 
     protected BigDecimal firstNonNull(BigDecimal first, BigDecimal second) {
         return first != null ? first : second;
+    }
+
+    protected Long firstNonNull(Long first, Long second) {
+        return first != null ? first : second;
+    }
+
+    protected Long firstNonNull(Long first, Long second, Long third) {
+        if (first != null) {
+            return first;
+        }
+        if (second != null) {
+            return second;
+        }
+        return third;
     }
 
     protected void handleConnected(WebSocket socket) {

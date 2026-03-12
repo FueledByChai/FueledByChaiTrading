@@ -34,6 +34,7 @@ import com.google.gson.JsonParser;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
+import com.fueledbychai.okx.common.api.ws.model.OkxFundingRateUpdate;
 
 /**
  * Public REST implementation for OKX market metadata.
@@ -121,6 +122,24 @@ public class OkxRestApi implements IOkxRestApi {
         }
 
         return null;
+    }
+
+    @Override
+    public OkxFundingRateUpdate getFundingRate(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) {
+            throw new IllegalArgumentException("instrumentId is required");
+        }
+
+        String normalizedInstrumentId = instrumentId.trim().toUpperCase(Locale.US);
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("instId", normalizedInstrumentId);
+
+        JsonObject payload = executeGet("public/funding-rate", params);
+        JsonArray data = getDataArray(payload);
+        if (data == null || data.isEmpty() || !data.get(0).isJsonObject()) {
+            return null;
+        }
+        return toFundingRateUpdate(data.get(0).getAsJsonObject(), normalizedInstrumentId);
     }
 
     @Override
@@ -547,6 +566,38 @@ public class OkxRestApi implements IOkxRestApi {
         return payload.getAsJsonArray("data");
     }
 
+    protected OkxFundingRateUpdate toFundingRateUpdate(JsonObject payload, String fallbackInstrumentId) {
+        if (payload == null) {
+            return null;
+        }
+
+        String instrumentId = getString(payload, "instId");
+        if (!isPresent(instrumentId)) {
+            instrumentId = fallbackInstrumentId;
+        }
+        if (!isPresent(instrumentId)) {
+            return null;
+        }
+        instrumentId = instrumentId.trim().toUpperCase(Locale.US);
+
+        BigDecimal fundingRate = firstPresentDecimal(
+                getBigDecimal(payload, "fundingRate"),
+                getBigDecimal(payload, "funding_rate"));
+        if (fundingRate == null) {
+            return null;
+        }
+
+        BigDecimal nextFundingRate = firstPresentDecimal(
+                getBigDecimal(payload, "nextFundingRate"),
+                getBigDecimal(payload, "next_funding_rate"));
+        Long fundingTime = firstPresentLong(getLong(payload, "fundingTime"), getLong(payload, "funding_time"));
+        Long nextFundingTime = firstPresentLong(getLong(payload, "nextFundingTime"), getLong(payload, "next_funding_time"));
+        Long timestamp = firstPresentLong(getLong(payload, "ts"), fundingTime);
+
+        return new OkxFundingRateUpdate(instrumentId, getString(payload, "instType"), timestamp, fundingRate,
+                nextFundingRate, fundingTime, nextFundingTime);
+    }
+
     protected String getString(JsonObject object, String key) {
         if (object == null || key == null || !object.has(key) || object.get(key).isJsonNull()) {
             return null;
@@ -624,5 +675,13 @@ public class OkxRestApi implements IOkxRestApi {
 
     protected boolean isPresent(String value) {
         return value != null && !value.isBlank();
+    }
+
+    protected BigDecimal firstPresentDecimal(BigDecimal primary, BigDecimal fallback) {
+        return primary != null ? primary : fallback;
+    }
+
+    protected Long firstPresentLong(Long primary, Long fallback) {
+        return primary != null ? primary : fallback;
     }
 }
