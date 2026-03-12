@@ -2,6 +2,7 @@ package com.fueledbychai.okx.common.api;
 
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
+import com.fueledbychai.okx.common.api.ws.model.OkxFundingRateUpdate;
 
 /**
  * Public REST contract for the Okx exchange integration.
@@ -27,6 +28,14 @@ public interface IOkxRestApi {
      * @return the resolved descriptor, or {@code null} when unavailable
      */
     InstrumentDescriptor getInstrumentDescriptor(String symbol);
+
+    /**
+     * Returns the latest funding-rate snapshot for a perpetual instrument.
+     *
+     * @param instrumentId the OKX instrument id, for example {@code BTC-USDT-SWAP}
+     * @return the latest funding-rate snapshot, or {@code null} when unavailable
+     */
+    OkxFundingRateUpdate getFundingRate(String instrumentId);
 
     /**
      * Indicates whether this API instance was created without private

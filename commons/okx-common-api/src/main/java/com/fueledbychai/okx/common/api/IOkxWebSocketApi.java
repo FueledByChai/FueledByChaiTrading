@@ -1,5 +1,6 @@
 package com.fueledbychai.okx.common.api;
 
+import com.fueledbychai.okx.common.api.ws.listener.IOkxFundingRateListener;
 import com.fueledbychai.okx.common.api.ws.listener.IOkxOrderBookListener;
 import com.fueledbychai.okx.common.api.ws.listener.IOkxTickerListener;
 import com.fueledbychai.okx.common.api.ws.listener.IOkxTradeListener;
@@ -22,6 +23,14 @@ public interface IOkxWebSocketApi {
      * @param listener the listener that receives ticker updates
      */
     void subscribeTicker(String instrumentId, IOkxTickerListener listener);
+
+    /**
+     * Subscribes to funding-rate updates for a single instrument.
+     *
+     * @param instrumentId the OKX instrument id
+     * @param listener the listener that receives funding-rate updates
+     */
+    void subscribeFundingRate(String instrumentId, IOkxFundingRateListener listener);
 
     /**
      * Subscribes to order-book updates for a single instrument.

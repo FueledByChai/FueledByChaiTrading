@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.fueledbychai.okx.common.api.ws.model.OkxFundingRateUpdate;
 import com.fueledbychai.okx.common.api.ws.model.OkxOrderBookUpdate;
 import com.fueledbychai.okx.common.api.ws.model.OkxTickerUpdate;
 import com.fueledbychai.okx.common.api.ws.model.OkxTrade;
@@ -65,14 +66,16 @@ class OkxWebSocketApiTest {
     }
 
     @Test
-    void parsesAndDispatchesTickerBookAndTrades() {
+    void parsesAndDispatchesTickerFundingBookAndTrades() {
         TestableOkxWebSocketApi api = newApi(5, 10L, 1);
 
         AtomicReference<OkxTickerUpdate> tickerUpdate = new AtomicReference<>();
+        AtomicReference<OkxFundingRateUpdate> fundingRateUpdate = new AtomicReference<>();
         AtomicReference<OkxOrderBookUpdate> bookUpdate = new AtomicReference<>();
         AtomicReference<List<OkxTrade>> trades = new AtomicReference<>();
 
         api.subscribeTicker("BTC-USDT", tickerUpdate::set);
+        api.subscribeFundingRate("BTC-USDT-SWAP", fundingRateUpdate::set);
         api.subscribeOrderBook("BTC-USDT", bookUpdate::set);
         api.subscribeTrades("BTC-USDT", (instrumentId, updateTrades) -> trades.set(updateTrades));
 
@@ -88,20 +91,33 @@ class OkxWebSocketApiTest {
 
         api.processMessage(
                 """
+                        {"arg":{"channel":"funding-rate","instId":"BTC-USDT-SWAP"},"data":[{"instId":"BTC-USDT-SWAP","instType":"SWAP","fundingRate":"0.0008","nextFundingRate":"0.0010","fundingTime":"1710003600000","nextFundingTime":"1710032400000"}]}
+                        """);
+
+        api.processMessage(
+                """
                         {"arg":{"channel":"trades","instId":"BTC-USDT"},"data":[{"instId":"BTC-USDT","tradeId":"1","px":"100.12","sz":"0.5","side":"buy","ts":"1710000000200"}]}
                         """);
 
         OkxTickerUpdate ticker = tickerUpdate.get();
+        OkxFundingRateUpdate funding = fundingRateUpdate.get();
         OkxOrderBookUpdate book = bookUpdate.get();
         List<OkxTrade> tradeList = trades.get();
 
         assertNotNull(ticker);
+        assertNotNull(funding);
         assertNotNull(book);
         assertNotNull(tradeList);
 
         assertEquals("BTC-USDT", ticker.getInstrumentId());
         assertEquals("100.1", ticker.getBestBidPrice().toPlainString());
         assertEquals("100.2", ticker.getBestAskPrice().toPlainString());
+
+        assertEquals("BTC-USDT-SWAP", funding.getInstrumentId());
+        assertEquals("0.0008", funding.getFundingRate().toPlainString());
+        assertEquals("0.0010", funding.getNextFundingRate().toPlainString());
+        assertEquals(1710003600000L, funding.getTimestamp());
+        assertEquals(1710032400000L, funding.getNextFundingTime());
 
         assertEquals("BTC-USDT", book.getInstrumentId());
         assertFalse(book.getBids().isEmpty());
