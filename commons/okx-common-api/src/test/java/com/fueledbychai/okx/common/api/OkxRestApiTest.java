@@ -13,6 +13,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
+import com.fueledbychai.okx.common.api.ws.model.OkxFundingRateUpdate;
 
 class OkxRestApiTest {
 
@@ -87,6 +88,27 @@ class OkxRestApiTest {
                         """);
 
         assertNull(api.getInstrumentDescriptor("UNKNOWN-SYMBOL"));
+    }
+
+    @Test
+    void returnsFundingRateSnapshot() {
+        StubOkxRestApi api = new StubOkxRestApi();
+        api.addResponse("public/funding-rate", mapOf("instId", "BTC-USDT-SWAP"),
+                """
+                        {"code":"0","data":[
+                          {"instId":"BTC-USDT-SWAP","instType":"SWAP","fundingRate":"0.0008",
+                           "nextFundingRate":"0.0010","fundingTime":"1710003600000","nextFundingTime":"1710032400000"}
+                        ]}
+                        """);
+
+        OkxFundingRateUpdate fundingRate = api.getFundingRate("btc-usdt-swap");
+
+        assertNotNull(fundingRate);
+        assertEquals("BTC-USDT-SWAP", fundingRate.getInstrumentId());
+        assertEquals("0.0008", fundingRate.getFundingRate().toPlainString());
+        assertEquals("0.0010", fundingRate.getNextFundingRate().toPlainString());
+        assertEquals(1710003600000L, fundingRate.getTimestamp());
+        assertEquals(1710032400000L, fundingRate.getNextFundingTime());
     }
 
     private static Map<String, String> mapOf(String... values) {
