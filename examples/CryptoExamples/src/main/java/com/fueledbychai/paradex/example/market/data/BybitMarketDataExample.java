@@ -73,6 +73,8 @@ public class BybitMarketDataExample {
     }
 
     public static void main(String[] args) throws Exception {
+        System.setProperty("proxy.host", "localhost");
+        System.setProperty("proxy.port", "1080");
         String symbol = args.length > 0 ? args[0] : DEFAULT_SYMBOL;
         InstrumentType instrumentType = args.length > 1 ? InstrumentType.valueOf(args[1].trim().toUpperCase())
                 : DEFAULT_TYPE;

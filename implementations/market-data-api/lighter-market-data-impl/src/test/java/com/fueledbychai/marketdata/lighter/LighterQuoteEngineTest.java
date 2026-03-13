@@ -329,14 +329,20 @@ public class LighterQuoteEngineTest {
     @Test
     void handleOrderBookUpdateRemovesLevelWhenSizeIsZero() {
         LighterQuoteEngine engine = spy(new LighterQuoteEngine(webSocketApi, tickerRegistry));
+        AtomicReference<ILevel1Quote> capturedLevel1Quote = new AtomicReference<>();
         AtomicReference<ILevel2Quote> capturedLevel2Quote = new AtomicReference<>();
         Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES);
 
+        doAnswer(invocation -> {
+            capturedLevel1Quote.set(invocation.getArgument(0));
+            return null;
+        }).when(engine).fireLevel1Quote(any(ILevel1Quote.class));
         doAnswer(invocation -> {
             capturedLevel2Quote.set(invocation.getArgument(0));
             return null;
         }).when(engine).fireMarketDepthQuote(any(ILevel2Quote.class));
 
+        engine.subscribeLevel1(ticker, level1Listener);
         engine.subscribeMarketDepth(ticker, level2Listener);
 
         LighterOrderBookUpdate snapshot = new LighterOrderBookUpdate(
@@ -364,6 +370,15 @@ public class LighterQuoteEngineTest {
 
         engine.handleOrderBookUpdate(snapshot);
         engine.handleOrderBookUpdate(delta);
+
+        ILevel1Quote level1Quote = capturedLevel1Quote.get();
+        assertNotNull(level1Quote);
+        assertEquals(new BigDecimal("100.50"), level1Quote.getValue(QuoteType.BID));
+        assertEquals(new BigDecimal("3.0"), level1Quote.getValue(QuoteType.BID_SIZE));
+        assertFalse(level1Quote.containsType(QuoteType.ASK));
+        assertFalse(level1Quote.containsType(QuoteType.ASK_SIZE));
+        assertTrue(level1Quote.isCleared(QuoteType.ASK));
+        assertTrue(level1Quote.isCleared(QuoteType.ASK_SIZE));
 
         ILevel2Quote level2Quote = capturedLevel2Quote.get();
         assertNotNull(level2Quote);

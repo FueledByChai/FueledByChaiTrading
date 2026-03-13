@@ -111,6 +111,12 @@ public class BarBuilder implements IBarBuilder {
 
     protected BigDecimal getValue(ILevel1Quote quote) {
         if (isCurrency) {
+            if (quote.isCleared(QuoteType.BID)) {
+                lastBid = BigDecimal.ZERO;
+            }
+            if (quote.isCleared(QuoteType.ASK)) {
+                lastAsk = BigDecimal.ZERO;
+            }
             if (quote.containsType(QuoteType.BID)) {
                 lastBid = quote.getValue(QuoteType.BID);
             }
