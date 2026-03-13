@@ -186,7 +186,7 @@ public class BybitQuoteEngine extends QuoteEngine {
         }
 
         Level1Quote quote = buildLevel1Quote(ticker, update);
-        if (quote.getTypes().length > 0) {
+        if (quote.hasUpdates()) {
             fireLevel1Quote(quote);
         }
     }
@@ -289,7 +289,7 @@ public class BybitQuoteEngine extends QuoteEngine {
 
         if (hasLevel1Listeners(ticker)) {
             Level1Quote topOfBookQuote = buildTopOfBookQuote(ticker, orderBook, timestamp);
-            if (topOfBookQuote.getTypes().length > 0) {
+            if (topOfBookQuote.hasUpdates()) {
                 fireLevel1Quote(topOfBookQuote);
             }
         }

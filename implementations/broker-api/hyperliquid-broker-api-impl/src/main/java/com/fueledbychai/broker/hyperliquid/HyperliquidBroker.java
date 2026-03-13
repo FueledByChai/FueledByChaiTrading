@@ -17,6 +17,7 @@
  */
 package com.fueledbychai.broker.hyperliquid;
 
+import java.math.BigDecimal;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -471,9 +472,31 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
     @Override
     public void quoteRecieved(ILevel1Quote quote) {
         // logger.info("Quote received: {}", quote);
-        if (quote.containsType(QuoteType.BID) && quote.containsType(QuoteType.ASK)) {
-            bestBidOfferMap.put(quote.getTicker().getSymbol(),
-                    new BestBidOffer(quote.getValue(QuoteType.BID), quote.getValue(QuoteType.ASK)));
+        boolean bidChanged = quote.containsType(QuoteType.BID) || quote.isCleared(QuoteType.BID);
+        boolean askChanged = quote.containsType(QuoteType.ASK) || quote.isCleared(QuoteType.ASK);
+        if (bidChanged || askChanged) {
+            String symbol = quote.getTicker().getSymbol();
+            BestBidOffer current = bestBidOfferMap.get(symbol);
+            BigDecimal bid = current == null ? null : current.getBid();
+            BigDecimal ask = current == null ? null : current.getAsk();
+
+            if (quote.isCleared(QuoteType.BID)) {
+                bid = null;
+            } else if (quote.containsType(QuoteType.BID)) {
+                bid = quote.getValue(QuoteType.BID);
+            }
+
+            if (quote.isCleared(QuoteType.ASK)) {
+                ask = null;
+            } else if (quote.containsType(QuoteType.ASK)) {
+                ask = quote.getValue(QuoteType.ASK);
+            }
+
+            if (bid == null && ask == null) {
+                bestBidOfferMap.remove(symbol);
+            } else {
+                bestBidOfferMap.put(symbol, new BestBidOffer(bid, ask));
+            }
         }
 
     }

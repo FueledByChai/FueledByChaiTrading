@@ -65,4 +65,36 @@ public interface IQuote {
         public ZonedDateTime getTimeStamp();
 
         public BigDecimal getValue(QuoteType type);
+
+        /**
+         * Returns true if the quote explicitly clears the specified type.
+         *
+         * This is distinct from {@link #containsType(QuoteType)}. A missing type
+         * means "no change" for delta-style updates, while a cleared type means
+         * the venue explicitly removed that field from the current market state.
+         *
+         * @param type The type of quote to check for an explicit clear
+         * @return true if the quote explicitly clears the type
+         */
+        public default boolean isCleared(QuoteType type) {
+                return false;
+        }
+
+        /**
+         * Returns all quote types that were explicitly cleared by this update.
+         *
+         * @return the cleared quote types
+         */
+        public default QuoteType[] getClearedTypes() {
+                return new QuoteType[0];
+        }
+
+        /**
+         * Returns true if this quote carries any value updates or explicit clears.
+         *
+         * @return true if the quote contains any updates
+         */
+        public default boolean hasUpdates() {
+                return getTypes().length > 0 || getClearedTypes().length > 0;
+        }
 }
