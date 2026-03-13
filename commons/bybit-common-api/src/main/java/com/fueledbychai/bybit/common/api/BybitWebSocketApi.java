@@ -1,14 +1,7 @@
 package com.fueledbychai.bybit.common.api;
 
-import java.io.IOException;
 import java.math.BigDecimal;
-import java.net.InetSocketAddress;
-import java.net.Proxy;
-import java.net.ProxySelector;
-import java.net.SocketAddress;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.WebSocket;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -18,7 +11,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
@@ -29,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
+import org.java_websocket.handshake.ServerHandshake;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,7 +37,7 @@ import com.fueledbychai.bybit.common.api.ws.model.BybitOrderBookUpdate;
 import com.fueledbychai.bybit.common.api.ws.model.BybitTickerUpdate;
 import com.fueledbychai.bybit.common.api.ws.model.BybitTrade;
 import com.fueledbychai.data.InstrumentType;
-import com.fueledbychai.websocket.ProxyConfig;
+import com.fueledbychai.websocket.ProxyAwareWebSocketClient;
 
 /**
  * Shared public websocket API for Bybit market data streams.
@@ -64,7 +57,6 @@ public class BybitWebSocketApi implements IBybitWebSocketApi {
             .compile("^[A-Z0-9]+/[A-Z0-9]+-\\d{8}-[0-9.]+-[CP]$");
 
     protected final BybitConfiguration configuration;
-    protected final HttpClient httpClient;
 
     protected final ScheduledExecutorService reconnectExecutor = Executors.newSingleThreadScheduledExecutor(
             daemonThreadFactory("bybit-ws-reconnect"));
@@ -87,50 +79,11 @@ public class BybitWebSocketApi implements IBybitWebSocketApi {
             throw new IllegalArgumentException("configuration is required");
         }
         this.configuration = configuration;
-        this.httpClient = createHttpClient();
 
         for (BybitWsCategory category : BybitWsCategory.values()) {
             String url = configuration.getWebSocketUrl(category);
             connections.put(category, new ConnectionState(category, URI.create(url)));
         }
-    }
-
-    protected HttpClient createHttpClient() {
-        HttpClient.Builder builder = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT);
-        ProxySelector proxySelector = resolveProxySelector();
-        if (proxySelector != null) {
-            builder.proxy(proxySelector);
-        }
-        return builder.build();
-    }
-
-    protected ProxySelector resolveProxySelector() {
-        Proxy proxy = ProxyConfig.getInstance().getProxy();
-        if (proxy == null || proxy == Proxy.NO_PROXY) {
-            return null;
-        }
-        if (!(proxy.address() instanceof InetSocketAddress address)) {
-            logger.warn("Bybit websocket proxy address is not an InetSocketAddress. Ignoring proxy: {}",
-                    proxy.address());
-            return null;
-        }
-        logger.info("Bybit websocket proxy enabled type={} host={} port={}", proxy.type(), address.getHostString(),
-                address.getPort());
-        return createFixedProxySelector(proxy);
-    }
-
-    protected ProxySelector createFixedProxySelector(Proxy proxy) {
-        return new ProxySelector() {
-            @Override
-            public List<Proxy> select(URI uri) {
-                return List.of(proxy);
-            }
-
-            @Override
-            public void connectFailed(URI uri, SocketAddress sa, IOException ioe) {
-                logger.warn("Bybit websocket proxy connection failed uri={} proxy={}", uri, sa, ioe);
-            }
-        };
     }
 
     @Override
@@ -211,17 +164,17 @@ public class BybitWebSocketApi implements IBybitWebSocketApi {
                     state.reconnectFuture = null;
                 }
 
-                CompletableFuture<WebSocket> pendingConnect = state.connectFuture;
+                CompletableFuture<BybitSocketClient> pendingConnect = state.connectFuture;
                 state.connectFuture = null;
                 if (pendingConnect != null && !pendingConnect.isDone()) {
                     pendingConnect.cancel(true);
                 }
 
-                WebSocket socket = state.webSocket;
+                BybitSocketClient socket = state.webSocket;
                 state.webSocket = null;
                 if (socket != null) {
                     try {
-                        socket.sendClose(WebSocket.NORMAL_CLOSURE, "shutdown");
+                        socket.close(1000, "shutdown");
                     } catch (Exception e) {
                         logger.debug("Ignoring Bybit websocket close failure category={}", state.category, e);
                     }
@@ -301,19 +254,18 @@ public class BybitWebSocketApi implements IBybitWebSocketApi {
                 return;
             }
 
-            state.connectFuture = httpClient.newWebSocketBuilder()
-                    .connectTimeout(CONNECT_TIMEOUT)
-                    .buildAsync(state.uri, new BybitListener(state));
-            state.connectFuture.whenComplete((socket, error) -> {
-                if (error != null) {
-                    logger.warn("Failed to connect Bybit websocket category={}", state.category, error);
-                    synchronized (state.connectLock) {
-                        state.connectFuture = null;
-                        state.connected = false;
-                    }
-                    scheduleReconnect(state);
-                }
-            });
+            state.connectFuture = new CompletableFuture<>();
+            try {
+                BybitSocketClient socket = new BybitSocketClient(state);
+                state.webSocket = socket;
+                socket.connect();
+            } catch (RuntimeException e) {
+                logger.warn("Failed to start Bybit websocket connect category={}", state.category, e);
+                state.connectFuture = null;
+                state.connected = false;
+                state.webSocket = null;
+                scheduleReconnect(state);
+            }
         }
     }
 
@@ -369,7 +321,7 @@ public class BybitWebSocketApi implements IBybitWebSocketApi {
         request.add("args", args);
 
         try {
-            state.webSocket.sendText(request.toString(), true);
+            state.webSocket.send(request.toString());
             for (JsonElement element : args) {
                 state.activeTopics.add(element.getAsString());
             }
@@ -379,7 +331,7 @@ public class BybitWebSocketApi implements IBybitWebSocketApi {
         }
     }
 
-    protected void onConnected(ConnectionState state, WebSocket socket) {
+    protected void onConnected(ConnectionState state, BybitSocketClient socket) {
         state.webSocket = socket;
         state.connected = true;
         state.reconnectAttempts.set(0);
@@ -388,6 +340,9 @@ public class BybitWebSocketApi implements IBybitWebSocketApi {
             if (state.reconnectFuture != null) {
                 state.reconnectFuture.cancel(false);
                 state.reconnectFuture = null;
+            }
+            if (state.connectFuture != null && !state.connectFuture.isDone()) {
+                state.connectFuture.complete(socket);
             }
         }
 
@@ -403,6 +358,9 @@ public class BybitWebSocketApi implements IBybitWebSocketApi {
         synchronized (state.connectLock) {
             state.connected = false;
             state.webSocket = null;
+            if (state.connectFuture != null && !state.connectFuture.isDone() && error != null) {
+                state.connectFuture.completeExceptionally(error);
+            }
             state.connectFuture = null;
             state.activeTopics.clear();
         }
@@ -440,7 +398,7 @@ public class BybitWebSocketApi implements IBybitWebSocketApi {
             try {
                 JsonObject ping = new JsonObject();
                 ping.addProperty("op", "ping");
-                state.webSocket.sendText(ping.toString(), true);
+                state.webSocket.send(ping.toString());
             } catch (Exception e) {
                 logger.debug("Failed to send Bybit ping category={}", state.category, e);
             }
@@ -817,44 +775,32 @@ public class BybitWebSocketApi implements IBybitWebSocketApi {
         };
     }
 
-    protected class BybitListener implements WebSocket.Listener {
-
+    protected class BybitSocketClient extends ProxyAwareWebSocketClient {
         protected final ConnectionState state;
-        protected final StringBuilder messageBuffer = new StringBuilder();
 
-        protected BybitListener(ConnectionState state) {
+        protected BybitSocketClient(ConnectionState state) {
+            super(state.uri);
             this.state = state;
         }
 
         @Override
-        public void onOpen(WebSocket webSocket) {
-            onConnected(state, webSocket);
-            webSocket.request(1);
+        public void onOpen(ServerHandshake handshakedata) {
+            onConnected(state, this);
         }
 
         @Override
-        public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
-            if (data != null) {
-                messageBuffer.append(data);
-            }
-            if (last) {
-                String message = messageBuffer.toString();
-                messageBuffer.setLength(0);
-                handleMessage(state, message);
-            }
-            webSocket.request(1);
-            return CompletableFuture.completedFuture(null);
+        public void onMessage(String message) {
+            handleMessage(state, message);
         }
 
         @Override
-        public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
+        public void onClose(int statusCode, String reason, boolean remote) {
             onDisconnected(state, null);
-            return CompletableFuture.completedFuture(null);
         }
 
         @Override
-        public void onError(WebSocket webSocket, Throwable error) {
-            onDisconnected(state, error);
+        public void onError(Exception ex) {
+            onDisconnected(state, ex);
         }
     }
 
@@ -863,8 +809,8 @@ public class BybitWebSocketApi implements IBybitWebSocketApi {
         protected final URI uri;
         protected final Object connectLock = new Object();
 
-        protected volatile WebSocket webSocket;
-        protected volatile CompletableFuture<WebSocket> connectFuture;
+        protected volatile BybitSocketClient webSocket;
+        protected volatile CompletableFuture<BybitSocketClient> connectFuture;
         protected volatile ScheduledFuture<?> reconnectFuture;
         protected volatile boolean connected;
 

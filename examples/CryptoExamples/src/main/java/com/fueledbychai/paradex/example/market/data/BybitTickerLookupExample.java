@@ -34,11 +34,9 @@ public class BybitTickerLookupExample {
     }
 
     public static void main(String[] args) {
-        System.setProperty("socksProxyHost", "127.0.0.1");
-        System.setProperty("socksProxyPort", "1080");
-        System.setProperty("bybit.proxy.host", "127.0.0.1");
-        System.setProperty("bybit.proxy.port", "1080");
-        System.setProperty("bybit.run.proxy", "true");
+        System.setProperty("fueledbychai.run.proxy", "true");
+        System.setProperty("fueledbychai.proxy.host", "127.0.0.1");
+        System.setProperty("fueledbychai.proxy.port", "1080");
         new BybitTickerLookupExample().start();
     }
 }

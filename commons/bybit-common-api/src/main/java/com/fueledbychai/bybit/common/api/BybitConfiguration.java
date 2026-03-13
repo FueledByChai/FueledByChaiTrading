@@ -123,6 +123,13 @@ public class BybitConfiguration {
     }
 
     protected void configureProxySetting() {
+        if (ProxyConfig.getInstance().isGlobalProxyEnabled()) {
+            ProxyConfig.getInstance().getProxy();
+            logger.info("Bybit proxy enabled via global settings: {}:{}", ProxyConfig.getInstance().getGlobalProxyHost(),
+                    ProxyConfig.getInstance().getGlobalProxyPort());
+            return;
+        }
+
         String runProxyText = System.getProperty(BYBIT_RUN_PROXY);
         if (isBlank(runProxyText)) {
             return;

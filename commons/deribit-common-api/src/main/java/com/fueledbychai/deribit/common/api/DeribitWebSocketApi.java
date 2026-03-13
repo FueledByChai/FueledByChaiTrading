@@ -2,8 +2,6 @@ package com.fueledbychai.deribit.common.api;
 
 import java.math.BigDecimal;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.WebSocket;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -12,7 +10,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -24,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.java_websocket.handshake.ServerHandshake;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,6 +36,7 @@ import com.fueledbychai.deribit.common.api.ws.model.DeribitBookLevel;
 import com.fueledbychai.deribit.common.api.ws.model.DeribitBookUpdate;
 import com.fueledbychai.deribit.common.api.ws.model.DeribitTickerUpdate;
 import com.fueledbychai.deribit.common.api.ws.model.DeribitTrade;
+import com.fueledbychai.websocket.ProxyAwareWebSocketClient;
 
 /**
  * Shared public websocket API for Deribit market data streams.
@@ -53,7 +52,6 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
     protected static final int DEFAULT_MAX_SUBSCRIBE_RETRIES = 3;
 
     protected final String webSocketUrl;
-    protected final HttpClient httpClient;
     protected final URI webSocketUri;
     protected final AtomicLong requestId = new AtomicLong(1L);
     protected final AtomicInteger reconnectAttempts = new AtomicInteger();
@@ -87,8 +85,8 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
     protected final Map<String, Integer> subscribeRetryCounts = new ConcurrentHashMap<>();
     protected final Object connectLock = new Object();
 
-    protected volatile WebSocket webSocket;
-    protected volatile CompletableFuture<WebSocket> connectFuture;
+    protected volatile DeribitSocketClient webSocket;
+    protected volatile CompletableFuture<DeribitSocketClient> connectFuture;
     protected volatile ScheduledFuture<?> reconnectFuture;
     protected volatile ScheduledFuture<?> subscribeFuture;
     protected volatile boolean connected;
@@ -99,7 +97,6 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
             throw new IllegalArgumentException("webSocketUrl is required");
         }
         this.webSocketUrl = webSocketUrl.trim();
-        this.httpClient = createHttpClient();
         this.webSocketUri = URI.create(this.webSocketUrl);
     }
 
@@ -140,27 +137,21 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
         cancelReconnect();
         cancelSubscribeDrain();
 
-        CompletableFuture<WebSocket> pendingConnect = connectFuture;
+        CompletableFuture<DeribitSocketClient> pendingConnect = connectFuture;
         connectFuture = null;
         if (pendingConnect != null && !pendingConnect.isDone()) {
             pendingConnect.cancel(true);
         }
 
-        WebSocket current = webSocket;
+        DeribitSocketClient current = webSocket;
         webSocket = null;
         if (current != null) {
             try {
-                current.sendClose(WebSocket.NORMAL_CLOSURE, "shutdown");
+                current.close(1000, "shutdown");
             } catch (Exception e) {
                 logger.debug("Ignoring Deribit websocket close failure", e);
             }
         }
-    }
-
-    protected HttpClient createHttpClient() {
-        return HttpClient.newBuilder()
-                .connectTimeout(CONNECT_TIMEOUT)
-                .build();
     }
 
     protected <T> void subscribe(T listener, Map<String, CopyOnWriteArrayList<T>> listenerMap, String channel) {
@@ -193,18 +184,16 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
                 return;
             }
 
-            connectFuture = httpClient.newWebSocketBuilder()
-                    .connectTimeout(CONNECT_TIMEOUT)
-                    .buildAsync(webSocketUri, new DeribitListener());
-            connectFuture.whenComplete((socket, error) -> {
-                if (error != null) {
-                    logger.warn("Failed to connect Deribit websocket", error);
-                    synchronized (connectLock) {
-                        connectFuture = null;
-                    }
-                    scheduleReconnect();
-                }
-            });
+            connectFuture = new CompletableFuture<>();
+            try {
+                webSocket = new DeribitSocketClient();
+                webSocket.connect();
+            } catch (RuntimeException e) {
+                logger.warn("Failed to start Deribit websocket connection", e);
+                webSocket = null;
+                connectFuture = null;
+                scheduleReconnect();
+            }
         }
     }
 
@@ -321,7 +310,7 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
     }
 
     protected void sendText(String payload) {
-        webSocket.sendText(payload, true);
+        webSocket.send(payload);
     }
 
     protected boolean canSend() {
@@ -675,36 +664,33 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
         }
     }
 
-    protected class DeribitListener implements WebSocket.Listener {
+    protected class DeribitSocketClient extends ProxyAwareWebSocketClient {
 
-        protected final StringBuilder buffer = new StringBuilder();
+        protected DeribitSocketClient() {
+            super(webSocketUri);
+        }
 
         @Override
-        public void onOpen(WebSocket webSocket) {
-            DeribitWebSocketApi.this.webSocket = webSocket;
+        public void onOpen(ServerHandshake handshakedata) {
+            DeribitWebSocketApi.this.webSocket = this;
             connected = true;
             synchronized (connectLock) {
+                if (connectFuture != null && !connectFuture.isDone()) {
+                    connectFuture.complete(this);
+                }
                 connectFuture = null;
             }
             cancelReconnect();
             resubscribeAll();
-            webSocket.request(1L);
         }
 
         @Override
-        public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
-            buffer.append(data);
-            if (last) {
-                String message = buffer.toString();
-                buffer.setLength(0);
-                handleMessage(message);
-            }
-            webSocket.request(1L);
-            return CompletableFuture.completedFuture(null);
+        public void onMessage(String message) {
+            handleMessage(message);
         }
 
         @Override
-        public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
+        public void onClose(int statusCode, String reason, boolean remote) {
             connected = false;
             clearSubscribeState();
             DeribitWebSocketApi.this.webSocket = null;
@@ -714,18 +700,20 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
             if (!manualDisconnect) {
                 scheduleReconnect();
             }
-            return CompletableFuture.completedFuture(null);
         }
 
         @Override
-        public void onError(WebSocket webSocket, Throwable error) {
+        public void onError(Exception ex) {
             connected = false;
             clearSubscribeState();
             DeribitWebSocketApi.this.webSocket = null;
             synchronized (connectLock) {
+                if (connectFuture != null && !connectFuture.isDone()) {
+                    connectFuture.completeExceptionally(ex);
+                }
                 connectFuture = null;
             }
-            logger.warn("Deribit websocket error", error);
+            logger.warn("Deribit websocket error", ex);
             if (!manualDisconnect) {
                 scheduleReconnect();
             }

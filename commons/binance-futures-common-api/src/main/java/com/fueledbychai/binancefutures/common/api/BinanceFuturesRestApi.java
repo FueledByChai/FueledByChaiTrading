@@ -3,6 +3,7 @@ package com.fueledbychai.binancefutures.common.api;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.net.Proxy;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -13,6 +14,7 @@ import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.http.BaseRestApi;
+import com.fueledbychai.websocket.ProxyConfig;
 
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
@@ -62,8 +64,17 @@ public class BinanceFuturesRestApi extends BaseRestApi implements IBinanceFuture
         this.privateKey = privateKey;
         this.publicApiOnly = accountAddress == null || privateKey == null || accountAddress.isBlank()
                 || privateKey.isBlank();
-        this.client = new OkHttpClient();
+        this.client = createHttpClient();
         this.objectMapper = new ObjectMapper();
+    }
+
+    protected OkHttpClient createHttpClient() {
+        Proxy proxy = ProxyConfig.getInstance().getProxy();
+        OkHttpClient.Builder builder = new OkHttpClient.Builder();
+        if (proxy != null && proxy != Proxy.NO_PROXY) {
+            builder.proxy(proxy);
+        }
+        return builder.build();
     }
 
     @Override

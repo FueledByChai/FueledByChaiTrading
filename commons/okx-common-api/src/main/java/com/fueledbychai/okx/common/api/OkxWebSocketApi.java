@@ -2,8 +2,6 @@ package com.fueledbychai.okx.common.api;
 
 import java.math.BigDecimal;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.WebSocket;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -12,7 +10,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -23,6 +20,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.java_websocket.handshake.ServerHandshake;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,6 +37,7 @@ import com.fueledbychai.okx.common.api.ws.model.OkxOrderBookLevel;
 import com.fueledbychai.okx.common.api.ws.model.OkxOrderBookUpdate;
 import com.fueledbychai.okx.common.api.ws.model.OkxTickerUpdate;
 import com.fueledbychai.okx.common.api.ws.model.OkxTrade;
+import com.fueledbychai.websocket.ProxyAwareWebSocketClient;
 
 /**
  * Shared public websocket API for OKX market data streams.
@@ -55,7 +54,6 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
     protected static final long DEFAULT_PING_INTERVAL_SECONDS = 20L;
 
     protected final String webSocketUrl;
-    protected final HttpClient httpClient;
     protected final URI webSocketUri;
     protected final AtomicInteger reconnectAttempts = new AtomicInteger();
     protected final ScheduledExecutorService reconnectExecutor = Executors.newSingleThreadScheduledExecutor(
@@ -78,8 +76,8 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
 
     protected final Object connectLock = new Object();
 
-    protected volatile WebSocket webSocket;
-    protected volatile CompletableFuture<WebSocket> connectFuture;
+    protected volatile OkxSocketClient webSocket;
+    protected volatile CompletableFuture<OkxSocketClient> connectFuture;
     protected volatile ScheduledFuture<?> reconnectFuture;
     protected volatile ScheduledFuture<?> subscribeFuture;
     protected volatile ScheduledFuture<?> heartbeatFuture;
@@ -91,7 +89,6 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
             throw new IllegalArgumentException("webSocketUrl is required");
         }
         this.webSocketUrl = webSocketUrl.trim();
-        this.httpClient = createHttpClient();
         this.webSocketUri = URI.create(this.webSocketUrl);
     }
 
@@ -155,27 +152,21 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
         cancelSubscribeDrain();
         cancelHeartbeat();
 
-        CompletableFuture<WebSocket> pendingConnect = connectFuture;
+        CompletableFuture<OkxSocketClient> pendingConnect = connectFuture;
         connectFuture = null;
         if (pendingConnect != null && !pendingConnect.isDone()) {
             pendingConnect.cancel(true);
         }
 
-        WebSocket current = webSocket;
+        OkxSocketClient current = webSocket;
         webSocket = null;
         if (current != null) {
             try {
-                current.sendClose(WebSocket.NORMAL_CLOSURE, "shutdown");
+                current.close(1000, "shutdown");
             } catch (Exception e) {
                 logger.debug("Ignoring OKX websocket close failure", e);
             }
         }
-    }
-
-    protected HttpClient createHttpClient() {
-        return HttpClient.newBuilder()
-                .connectTimeout(CONNECT_TIMEOUT)
-                .build();
     }
 
     protected static ThreadFactory daemonThreadFactory(String threadName) {
@@ -213,18 +204,16 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
                 return;
             }
 
-            connectFuture = httpClient.newWebSocketBuilder()
-                    .connectTimeout(CONNECT_TIMEOUT)
-                    .buildAsync(webSocketUri, new OkxListener());
-            connectFuture.whenComplete((socket, error) -> {
-                if (error != null) {
-                    logger.warn("Failed to connect OKX websocket", error);
-                    synchronized (connectLock) {
-                        connectFuture = null;
-                    }
-                    scheduleReconnect();
-                }
-            });
+            connectFuture = new CompletableFuture<>();
+            try {
+                webSocket = new OkxSocketClient();
+                webSocket.connect();
+            } catch (RuntimeException e) {
+                logger.warn("Failed to start OKX websocket connection", e);
+                webSocket = null;
+                connectFuture = null;
+                scheduleReconnect();
+            }
         }
     }
 
@@ -321,11 +310,11 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
     }
 
     protected void sendText(String payload) {
-        WebSocket socket = webSocket;
+        OkxSocketClient socket = webSocket;
         if (socket == null) {
             throw new IllegalStateException("websocket is not connected");
         }
-        socket.sendText(payload, true);
+        socket.send(payload);
     }
 
     protected boolean canSend() {
@@ -877,9 +866,12 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
         return third;
     }
 
-    protected void handleConnected(WebSocket socket) {
+    protected void handleConnected(OkxSocketClient socket) {
         this.webSocket = socket;
         this.connected = true;
+        if (this.connectFuture != null && !this.connectFuture.isDone()) {
+            this.connectFuture.complete(socket);
+        }
         this.connectFuture = null;
         cancelReconnect();
         startHeartbeat();
@@ -893,6 +885,10 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
         this.connected = false;
         this.webSocket = null;
         cancelHeartbeat();
+        if (this.connectFuture != null && !this.connectFuture.isDone()) {
+            this.connectFuture.cancel(true);
+        }
+        this.connectFuture = null;
 
         clearSubscriptionState();
         if (!manualDisconnect) {
@@ -903,38 +899,31 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
         }
     }
 
-    protected final class OkxListener implements WebSocket.Listener {
+    protected final class OkxSocketClient extends ProxyAwareWebSocketClient {
 
-        private final StringBuilder messageBuilder = new StringBuilder();
-
-        @Override
-        public void onOpen(WebSocket webSocket) {
-            handleConnected(webSocket);
-            webSocket.request(1L);
+        protected OkxSocketClient() {
+            super(webSocketUri);
         }
 
         @Override
-        public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
-            messageBuilder.append(data);
-            if (last) {
-                String message = messageBuilder.toString();
-                messageBuilder.setLength(0);
-                handleMessage(message);
-            }
-            webSocket.request(1L);
-            return CompletableFuture.completedFuture(null);
+        public void onOpen(ServerHandshake handshakedata) {
+            handleConnected(this);
         }
 
         @Override
-        public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
+        public void onMessage(String message) {
+            handleMessage(message);
+        }
+
+        @Override
+        public void onClose(int statusCode, String reason, boolean remote) {
             logger.info("OKX websocket closed code={} reason={}", statusCode, reason);
             handleDisconnected();
-            return CompletableFuture.completedFuture(null);
         }
 
         @Override
-        public void onError(WebSocket webSocket, Throwable error) {
-            logger.warn("OKX websocket error", error);
+        public void onError(Exception ex) {
+            logger.warn("OKX websocket error", ex);
             handleDisconnected();
         }
     }

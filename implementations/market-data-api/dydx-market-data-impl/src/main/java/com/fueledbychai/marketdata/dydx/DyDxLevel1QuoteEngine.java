@@ -1,6 +1,7 @@
 package com.fueledbychai.marketdata.dydx;
 
 import java.math.BigDecimal;
+import java.net.Proxy;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Date;
@@ -18,6 +19,7 @@ import com.fueledbychai.marketdata.Level1Quote;
 import com.fueledbychai.marketdata.Level1QuoteListener;
 import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.QuoteType;
+import com.fueledbychai.websocket.ProxyConfig;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -46,8 +48,17 @@ public class DyDxLevel1QuoteEngine extends QuoteEngine implements Runnable {
     protected boolean includeFundingRate = false;
 
     public DyDxLevel1QuoteEngine() {
-        this.httpClient = new OkHttpClient();
+        this.httpClient = createHttpClient();
         this.objectMapper = new ObjectMapper();
+    }
+
+    protected OkHttpClient createHttpClient() {
+        Proxy proxy = ProxyConfig.getInstance().getProxy();
+        OkHttpClient.Builder builder = new OkHttpClient.Builder();
+        if (proxy != null && proxy != Proxy.NO_PROXY) {
+            builder.proxy(proxy);
+        }
+        return builder.build();
     }
 
     @Override

@@ -1,12 +1,10 @@
 package com.fueledbychai.hyperliquid.ws;
 
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 
 import com.fueledbychai.hyperliquid.HyperliquidUtil;
+import com.fueledbychai.http.OkHttpClientFactory;
 import com.fueledbychai.hyperliquid.ws.json.HLSigner;
 import com.fueledbychai.hyperliquid.ws.json.LimitType;
 import com.fueledbychai.hyperliquid.ws.json.Mappers;
@@ -18,10 +16,17 @@ import com.fueledbychai.hyperliquid.ws.json.SubmitExchangeRequest;
 import com.fueledbychai.hyperliquid.ws.json.WebServicePostMessage;
 import com.fueledbychai.hyperliquid.ws.json.ws.SubmitPostResponse;
 
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+
 public class HyperliquidClient {
     protected static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(HyperliquidClient.class);
+    protected static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json");
     private final HLSigner signer;
-    private final HttpClient http = HttpClient.newHttpClient();
+    private final OkHttpClient http = createHttpClient();
     private long startMethodMillis;
     private long completedMillis;
     private long presendMillis;
@@ -37,6 +42,10 @@ public class HyperliquidClient {
         this.client = new HyperliquidWebSocketClient(wsUrl, wsProcessor);
         client.connect();
 
+    }
+
+    protected OkHttpClient createHttpClient() {
+        return OkHttpClientFactory.create(Duration.ofSeconds(10));
     }
 
     public SubmitExchangeRequest getJson(SignableExchangeOrderRequest signable) throws Exception {
@@ -71,14 +80,15 @@ public class HyperliquidClient {
 
         String json = Mappers.JSON.writeValueAsString(submit);
 
-        // POST
-        HttpRequest req = HttpRequest.newBuilder().uri(URI.create("https://api.hyperliquid-testnet.xyz/exchange"))
-                .header("Content-Type", "application/json").timeout(Duration.ofSeconds(10))
-                .POST(HttpRequest.BodyPublishers.ofString(json)).build();
-
         presendMillis = System.currentTimeMillis();
-        HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-        return resp.body();
+        Request req = new Request.Builder()
+                .url(URI.create("https://api.hyperliquid-testnet.xyz/exchange").toString())
+                .header("Content-Type", "application/json")
+                .post(RequestBody.create(json, JSON_MEDIA_TYPE))
+                .build();
+        try (Response resp = http.newCall(req).execute()) {
+            return resp.body() == null ? null : resp.body().string();
+        }
     }
 
     public void submitOrder(boolean useWebSocket) throws Exception {
