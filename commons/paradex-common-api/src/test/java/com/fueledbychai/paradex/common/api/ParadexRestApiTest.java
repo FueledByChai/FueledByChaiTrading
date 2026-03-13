@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.math.BigDecimal;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +23,7 @@ import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.FueledByChaiException;
 import com.fueledbychai.data.ResponseException;
 import com.fueledbychai.paradex.common.api.ws.SystemStatus;
+import com.fueledbychai.websocket.ProxyConfig;
 
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -622,6 +625,34 @@ class ParadexRestApiTest {
         assertTrue(api.called);
     }
 
+    @Test
+    void testConstructorUsesGlobalSocksProxyWhenEnabled() {
+        String previousRunProxy = System.getProperty(ProxyConfig.GLOBAL_RUN_PROXY);
+        String previousProxyHost = System.getProperty(ProxyConfig.GLOBAL_PROXY_HOST);
+        String previousProxyPort = System.getProperty(ProxyConfig.GLOBAL_PROXY_PORT);
+
+        try {
+            System.setProperty(ProxyConfig.GLOBAL_RUN_PROXY, "true");
+            System.setProperty(ProxyConfig.GLOBAL_PROXY_HOST, "127.0.0.11");
+            System.setProperty(ProxyConfig.GLOBAL_PROXY_PORT, "1101");
+            ProxyConfig.getInstance().reset();
+
+            ParadexRestApi api = new ParadexRestApi("https://api.testnet.paradex.trade/v1", true);
+            Proxy proxy = api.client.proxy();
+
+            assertNotNull(proxy);
+            assertEquals(Proxy.Type.SOCKS, proxy.type());
+            InetSocketAddress address = (InetSocketAddress) proxy.address();
+            assertEquals("127.0.0.11", address.getHostString());
+            assertEquals(1101, address.getPort());
+        } finally {
+            restoreProperty(ProxyConfig.GLOBAL_RUN_PROXY, previousRunProxy);
+            restoreProperty(ProxyConfig.GLOBAL_PROXY_HOST, previousProxyHost);
+            restoreProperty(ProxyConfig.GLOBAL_PROXY_PORT, previousProxyPort);
+            ProxyConfig.getInstance().reset();
+        }
+    }
+
     private OkHttpClient buildMockClient(int code, String message, String body, AtomicReference<Request> requestRef) {
         MediaType mediaType = MediaType.get("application/json; charset=utf-8");
         return new OkHttpClient.Builder()
@@ -639,6 +670,14 @@ class ParadexRestApiTest {
                             .build();
                 })
                 .build();
+    }
+
+    private static void restoreProperty(String key, String previousValue) {
+        if (previousValue == null) {
+            System.clearProperty(key);
+            return;
+        }
+        System.setProperty(key, previousValue);
     }
 
     /**

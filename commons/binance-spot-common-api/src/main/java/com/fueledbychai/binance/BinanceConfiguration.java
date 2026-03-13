@@ -266,11 +266,18 @@ public class BinanceConfiguration {
     }
 
     protected void setProxySetting() {
-        String runProxyStr = properties.getProperty(RUN_PROXY);
-        boolean runProxy = DEFAULT_RUN_PROXY;
-        if (runProxyStr != null && !runProxyStr.trim().isEmpty()) {
-            runProxy = Boolean.parseBoolean(runProxyStr);
+        if (ProxyConfig.getInstance().isGlobalProxyEnabled()) {
+            ProxyConfig.getInstance().getProxy();
+            logger.info("Binance proxy enabled via global settings: {}:{}",
+                    ProxyConfig.getInstance().getGlobalProxyHost(), ProxyConfig.getInstance().getGlobalProxyPort());
+            return;
         }
+
+        String runProxyStr = properties.getProperty(RUN_PROXY);
+        if (runProxyStr == null || runProxyStr.trim().isEmpty()) {
+            return;
+        }
+        boolean runProxy = Boolean.parseBoolean(runProxyStr);
         ProxyConfig.getInstance().setRunningLocally(runProxy);
         logger.info("Proxy setting - runningLocally: {}", ProxyConfig.getInstance().isRunningLocally());
     }

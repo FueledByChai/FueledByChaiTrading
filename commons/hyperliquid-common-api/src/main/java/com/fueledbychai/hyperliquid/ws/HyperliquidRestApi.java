@@ -2,6 +2,7 @@ package com.fueledbychai.hyperliquid.ws;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.net.Proxy;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -26,6 +27,7 @@ import com.fueledbychai.data.FueledByChaiException;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.http.BaseRestApi;
 import com.fueledbychai.hyperliquid.ws.json.SignableExchangeOrderRequest;
+import com.fueledbychai.websocket.ProxyConfig;
 
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
@@ -67,13 +69,22 @@ public class HyperliquidRestApi extends BaseRestApi implements IHyperliquidRestA
     }
 
     public HyperliquidRestApi(String baseUrl, String accountAddressString, String privateKeyString) {
-        this.client = new OkHttpClient();
+        this.client = createHttpClient();
         this.baseUrl = baseUrl;
         this.accountAddressString = accountAddressString;
         this.privateKeyString = privateKeyString;
         // Register the custom adapter
         this.gson = new GsonBuilder().registerTypeAdapter(ZonedDateTime.class, new ZonedDateTimeAdapter()).create();
         publicApiOnly = accountAddressString == null || privateKeyString == null;
+    }
+
+    protected OkHttpClient createHttpClient() {
+        Proxy proxy = ProxyConfig.getInstance().getProxy();
+        OkHttpClient.Builder builder = new OkHttpClient.Builder();
+        if (proxy != null && proxy != Proxy.NO_PROXY) {
+            builder.proxy(proxy);
+        }
+        return builder.build();
     }
 
     public String placeOrder(SignableExchangeOrderRequest request) {

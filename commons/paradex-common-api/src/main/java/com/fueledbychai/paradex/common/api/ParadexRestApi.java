@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.lang.reflect.Type;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.net.Proxy;
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -33,6 +34,7 @@ import com.fueledbychai.paradex.common.api.order.ParadexOrder;
 import com.fueledbychai.paradex.common.api.ws.SystemStatus;
 import com.fueledbychai.time.Span;
 import com.fueledbychai.util.TickerRegistryFactory;
+import com.fueledbychai.websocket.ProxyConfig;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
@@ -97,7 +99,7 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
     }
 
     public ParadexRestApi(String baseUrl, String accountAddressString, String privateKeyString, boolean isTestnet) {
-        this.client = new OkHttpClient();
+        this.client = createHttpClient();
         this.baseUrl = baseUrl;
         this.accountAddressString = accountAddressString;
         this.privateKeyString = privateKeyString;
@@ -114,6 +116,15 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
                     "0x" + chainID.toString(16).toUpperCase());
             warmup();
         }
+    }
+
+    protected OkHttpClient createHttpClient() {
+        Proxy proxy = ProxyConfig.getInstance().getProxy();
+        OkHttpClient.Builder builder = new OkHttpClient.Builder();
+        if (proxy != null && proxy != Proxy.NO_PROXY) {
+            builder.proxy(proxy);
+        }
+        return builder.build();
     }
 
     @Override

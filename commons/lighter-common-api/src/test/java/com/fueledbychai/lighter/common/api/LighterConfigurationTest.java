@@ -18,6 +18,10 @@ public class LighterConfigurationTest {
 
     private static final List<String> CONFIG_KEYS = List.of(
             "lighter.config.file",
+            ProxyConfig.GLOBAL_CONFIG_FILE,
+            ProxyConfig.GLOBAL_RUN_PROXY,
+            ProxyConfig.GLOBAL_PROXY_HOST,
+            ProxyConfig.GLOBAL_PROXY_PORT,
             LighterConfiguration.LIGHTER_ENVIRONMENT,
             LighterConfiguration.LIGHTER_MAINNET_WS_URL,
             LighterConfiguration.LIGHTER_TESTNET_WS_URL,
@@ -130,6 +134,27 @@ public class LighterConfigurationTest {
 
         assertTrue(configuration.isWebSocketReadonlyEnabled());
         assertEquals("wss://example.test/stream?readonly=true", configuration.getWebSocketUrl());
+    }
+
+    @Test
+    void globalProxyEnabledRoutesThroughConfiguredSocksProxy() {
+        System.setProperty(LighterConfiguration.LIGHTER_ENVIRONMENT, "prod");
+        System.setProperty(ProxyConfig.GLOBAL_RUN_PROXY, "true");
+        System.setProperty(ProxyConfig.GLOBAL_PROXY_HOST, "127.0.0.2");
+        System.setProperty(ProxyConfig.GLOBAL_PROXY_PORT, "1082");
+
+        LighterConfiguration configuration = LighterConfiguration.getInstance();
+
+        assertTrue(configuration.isProxyEnabled());
+        assertEquals("127.0.0.2", configuration.getProxyHost());
+        assertEquals(1082, configuration.getProxyPort());
+        assertTrue(ProxyConfig.getInstance().isRunningLocally());
+
+        Proxy proxy = ProxyConfig.getInstance().getProxy();
+        assertEquals(Proxy.Type.SOCKS, proxy.type());
+        InetSocketAddress address = (InetSocketAddress) proxy.address();
+        assertEquals("127.0.0.2", address.getHostString());
+        assertEquals(1082, address.getPort());
     }
 
     private void clearProperties() {

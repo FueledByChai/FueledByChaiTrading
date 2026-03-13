@@ -2,13 +2,9 @@ package com.fueledbychai.bybit.common.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.net.Proxy;
-import java.net.ProxySelector;
-import java.net.URI;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -120,26 +116,17 @@ class BybitRestApiTest {
     }
 
     @Test
-    void resolvesSocksProxySelectorWhenProxyEnabled() {
+    void resolvesSocksProxyWhenProxyEnabled() {
         try {
             ProxyConfig.getInstance().setSocksProxy("127.0.0.1", 1080);
 
             StubBybitRestApi api = new StubBybitRestApi();
-            ProxySelector selector = api.resolveProxySelector();
-            assertNotNull(selector);
-            List<Proxy> proxies = selector.select(URI.create("https://api.bybit.com"));
-            assertEquals(1, proxies.size());
-            assertEquals(Proxy.Type.SOCKS, proxies.get(0).type());
+            Proxy proxy = api.resolveProxy();
+            assertNotNull(proxy);
+            assertEquals(Proxy.Type.SOCKS, proxy.type());
         } finally {
             ProxyConfig.getInstance().setRunningLocally(false);
         }
-    }
-
-    @Test
-    void returnsNullProxySelectorWhenProxyDisabled() {
-        ProxyConfig.getInstance().setRunningLocally(false);
-        StubBybitRestApi api = new StubBybitRestApi();
-        assertNull(api.resolveProxySelector());
     }
 
     private static Map<String, String> mapOf(String... values) {

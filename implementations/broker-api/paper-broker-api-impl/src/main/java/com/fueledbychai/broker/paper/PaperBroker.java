@@ -914,7 +914,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                     }
 
                     // Prepare the trade details as a CSV line
-                    String csvLine = String.format("%s,%s,%s,%.5f,%s,%s,%s,%.5f,%.5f,%d", asset, order.getOrderId(), // Order
+                    String csvLine = String.format("%s,%s,%s,%.5f,%s,%s,%s,%.5f,%.8f,%d", asset, order.getOrderId(), // Order
                                                                                                                      // ID
                             order.getDirection(), // Side (BUY/SELL)
                             order.getSize(), // Size

@@ -4,9 +4,6 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -34,7 +31,12 @@ import com.google.gson.JsonParser;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
+import com.fueledbychai.http.OkHttpClientFactory;
 import com.fueledbychai.okx.common.api.ws.model.OkxFundingRateUpdate;
+
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 
 /**
  * Public REST implementation for OKX market metadata.
@@ -54,7 +56,7 @@ public class OkxRestApi implements IOkxRestApi {
     protected final String accountAddress;
     protected final String privateKey;
     protected final boolean publicApiOnly;
-    protected final HttpClient httpClient;
+    protected final OkHttpClient httpClient;
     protected final Map<InstrumentType, InstrumentDescriptor[]> descriptorsByType = new EnumMap<>(InstrumentType.class);
     protected final Map<String, InstrumentDescriptor> descriptorBySymbol = new ConcurrentHashMap<>();
     protected final Map<String, InstrumentDescriptor> descriptorByCommonSymbol = new ConcurrentHashMap<>();
@@ -160,10 +162,8 @@ public class OkxRestApi implements IOkxRestApi {
         return null;
     }
 
-    protected HttpClient createHttpClient() {
-        return HttpClient.newBuilder()
-                .connectTimeout(REQUEST_TIMEOUT)
-                .build();
+    protected OkHttpClient createHttpClient() {
+        return OkHttpClientFactory.create(REQUEST_TIMEOUT);
     }
 
     protected String normalizeBaseUrl(String url) {
@@ -491,20 +491,17 @@ public class OkxRestApi implements IOkxRestApi {
     }
 
     protected JsonObject executeGet(String methodPath, Map<String, String> params) {
-        try {
-            URI uri = buildUri(methodPath, params);
-            HttpRequest request = HttpRequest.newBuilder(uri)
-                    .timeout(REQUEST_TIMEOUT)
-                    .GET()
-                    .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+        URI uri = buildUri(methodPath, params);
+        Request request = new Request.Builder().url(uri.toString()).get().build();
+        try (Response response = httpClient.newCall(request).execute()) {
+            String responseBody = response.body() == null ? null : response.body().string();
+            if (response.code() < 200 || response.code() >= 300) {
                 throw new IllegalStateException(
-                        "OKX returned HTTP " + response.statusCode() + " for " + methodPath + " body="
-                                + summarizeBody(response.body()));
+                        "OKX returned HTTP " + response.code() + " for " + methodPath + " body="
+                                + summarizeBody(responseBody));
             }
 
-            JsonObject payload = JsonParser.parseString(response.body()).getAsJsonObject();
+            JsonObject payload = JsonParser.parseString(responseBody).getAsJsonObject();
             String code = getString(payload, "code");
             if (code != null && !"0".equals(code)) {
                 String message = getString(payload, "msg");
@@ -514,9 +511,6 @@ public class OkxRestApi implements IOkxRestApi {
             return payload;
         } catch (IOException e) {
             throw new IllegalStateException("I/O failure calling OKX " + methodPath, e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while calling OKX " + methodPath, e);
         }
     }
 

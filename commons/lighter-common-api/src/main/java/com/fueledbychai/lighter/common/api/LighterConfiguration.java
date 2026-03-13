@@ -248,14 +248,23 @@ public class LighterConfiguration {
     }
 
     public boolean isProxyEnabled() {
+        if (ProxyConfig.getInstance().isGlobalProxyEnabled()) {
+            return true;
+        }
         return Boolean.parseBoolean(properties.getProperty(LIGHTER_RUN_PROXY, Boolean.toString(DEFAULT_RUN_PROXY)));
     }
 
     public String getProxyHost() {
+        if (ProxyConfig.getInstance().isGlobalProxyEnabled()) {
+            return ProxyConfig.getInstance().getGlobalProxyHost();
+        }
         return properties.getProperty(LIGHTER_PROXY_HOST, DEFAULT_PROXY_HOST);
     }
 
     public int getProxyPort() {
+        if (ProxyConfig.getInstance().isGlobalProxyEnabled()) {
+            return ProxyConfig.getInstance().getGlobalProxyPort();
+        }
         String portText = properties.getProperty(LIGHTER_PROXY_PORT);
         return parseProxyPort(portText);
     }
@@ -303,14 +312,24 @@ public class LighterConfiguration {
     }
 
     private void setProxySetting() {
+        if (ProxyConfig.getInstance().isGlobalProxyEnabled()) {
+            ProxyConfig.getInstance().getProxy();
+            logger.info("Lighter proxy enabled via global settings: {}:{}",
+                    ProxyConfig.getInstance().getGlobalProxyHost(), ProxyConfig.getInstance().getGlobalProxyPort());
+            return;
+        }
+
         if (isProxyEnabled()) {
             ProxyConfig.getInstance().setSocksProxy(getProxyHost(), getProxyPort());
             logger.info("Lighter proxy enabled: {}:{}", getProxyHost(), getProxyPort());
             return;
         }
 
-        ProxyConfig.getInstance().setRunningLocally(false);
-        logger.info("Lighter proxy disabled");
+        String explicitRunProxy = properties.getProperty(LIGHTER_RUN_PROXY);
+        if (explicitRunProxy != null && !explicitRunProxy.isBlank()) {
+            ProxyConfig.getInstance().setRunningLocally(false);
+            logger.info("Lighter proxy disabled");
+        }
     }
 
     private String appendReadonlyQueryParam(String url) {

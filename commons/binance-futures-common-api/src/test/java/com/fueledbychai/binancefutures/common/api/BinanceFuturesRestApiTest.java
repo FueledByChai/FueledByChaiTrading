@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.util.Date;
 
 import org.junit.jupiter.api.Test;
@@ -12,8 +14,37 @@ import org.junit.jupiter.api.Test;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
+import com.fueledbychai.websocket.ProxyConfig;
 
 class BinanceFuturesRestApiTest {
+
+    @Test
+    void constructorUsesGlobalSocksProxyWhenEnabled() {
+        String previousRunProxy = System.getProperty(ProxyConfig.GLOBAL_RUN_PROXY);
+        String previousProxyHost = System.getProperty(ProxyConfig.GLOBAL_PROXY_HOST);
+        String previousProxyPort = System.getProperty(ProxyConfig.GLOBAL_PROXY_PORT);
+
+        try {
+            System.setProperty(ProxyConfig.GLOBAL_RUN_PROXY, "true");
+            System.setProperty(ProxyConfig.GLOBAL_PROXY_HOST, "127.0.0.10");
+            System.setProperty(ProxyConfig.GLOBAL_PROXY_PORT, "1100");
+            ProxyConfig.getInstance().reset();
+
+            BinanceFuturesRestApi api = new BinanceFuturesRestApi("https://fapi.binance.com");
+            Proxy proxy = api.client.proxy();
+
+            assertNotNull(proxy);
+            assertEquals(Proxy.Type.SOCKS, proxy.type());
+            InetSocketAddress address = (InetSocketAddress) proxy.address();
+            assertEquals("127.0.0.10", address.getHostString());
+            assertEquals(1100, address.getPort());
+        } finally {
+            restoreProperty(ProxyConfig.GLOBAL_RUN_PROXY, previousRunProxy);
+            restoreProperty(ProxyConfig.GLOBAL_PROXY_HOST, previousProxyHost);
+            restoreProperty(ProxyConfig.GLOBAL_PROXY_PORT, previousProxyPort);
+            ProxyConfig.getInstance().reset();
+        }
+    }
 
     @Test
     void parsesPerpetualExchangeInfoIntoDescriptors() throws Exception {
@@ -158,5 +189,13 @@ class BinanceFuturesRestApiTest {
         assertNotNull(descriptors);
         assertEquals(1, descriptors.length);
         assertEquals("BTC", descriptors[0].getBaseCurrency());
+    }
+
+    private static void restoreProperty(String key, String previousValue) {
+        if (previousValue == null) {
+            System.clearProperty(key);
+            return;
+        }
+        System.setProperty(key, previousValue);
     }
 }
