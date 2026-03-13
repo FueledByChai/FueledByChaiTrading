@@ -86,4 +86,26 @@ public class Level1QuoteTest {
         }
 
     }
+
+    @Test
+    public void testClearedQuoteTypes() {
+        Ticker ticker = new Ticker("ABC").setInstrumentType(InstrumentType.STOCK);
+        ZonedDateTime now = ZonedDateTime.now();
+
+        Level1Quote quote = new Level1Quote(ticker, now);
+        quote.addQuote(QuoteType.BID, new BigDecimal("2.5"));
+        quote.clearQuote(QuoteType.ASK);
+
+        assertTrue(quote.containsType(QuoteType.BID));
+        assertFalse(quote.containsType(QuoteType.ASK));
+        assertFalse(quote.isCleared(QuoteType.BID));
+        assertTrue(quote.isCleared(QuoteType.ASK));
+        assertTrue(quote.hasUpdates());
+        assertEquals(1, quote.getClearedTypes().length);
+        assertEquals(QuoteType.ASK, quote.getClearedTypes()[0]);
+
+        quote.addQuote(QuoteType.ASK, new BigDecimal("3.5"));
+        assertTrue(quote.containsType(QuoteType.ASK));
+        assertFalse(quote.isCleared(QuoteType.ASK));
+    }
 }

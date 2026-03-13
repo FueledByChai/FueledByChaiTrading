@@ -195,7 +195,7 @@ public class LighterQuoteEngine extends QuoteEngine {
                 continue;
             }
             Level1Quote quote = buildMarketStatsQuote(ticker, entry.getValue(), timestamp);
-            if (quote.getTypes().length > 0) {
+            if (quote.hasUpdates()) {
                 fireLevel1Quote(quote);
             }
         }
@@ -225,7 +225,7 @@ public class LighterQuoteEngine extends QuoteEngine {
         }
         if (hasLevel1Listeners(ticker)) {
             Level1Quote topOfBookQuote = buildTopOfBookQuote(ticker, orderBook, timestamp);
-            if (topOfBookQuote.getTypes().length > 0) {
+            if (topOfBookQuote.hasUpdates()) {
                 fireLevel1Quote(topOfBookQuote);
             }
         }
@@ -374,6 +374,9 @@ public class LighterQuoteEngine extends QuoteEngine {
             if (bestBid.size != null) {
                 quote.addQuote(QuoteType.BID_SIZE, BigDecimal.valueOf(bestBid.size));
             }
+        } else {
+            quote.clearQuote(QuoteType.BID);
+            quote.clearQuote(QuoteType.BID_SIZE);
         }
         OrderBook.BidSizePair bestAsk = orderBook.getBestAskWithSize();
         if (bestAsk != null && bestAsk.price != null && bestAsk.price.compareTo(BigDecimal.ZERO) > 0) {
@@ -381,6 +384,9 @@ public class LighterQuoteEngine extends QuoteEngine {
             if (bestAsk.size != null) {
                 quote.addQuote(QuoteType.ASK_SIZE, BigDecimal.valueOf(bestAsk.size));
             }
+        } else {
+            quote.clearQuote(QuoteType.ASK);
+            quote.clearQuote(QuoteType.ASK_SIZE);
         }
         return quote;
     }

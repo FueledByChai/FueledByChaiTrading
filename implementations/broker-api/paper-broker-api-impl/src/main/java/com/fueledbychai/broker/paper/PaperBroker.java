@@ -576,6 +576,36 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     }
 
+    protected void askCleared() {
+        marketDataLock.writeLock().lock();
+        try {
+            bestAskPrice = Double.MAX_VALUE;
+            recalculateMidPrice();
+            updateStatus();
+        } finally {
+            marketDataLock.writeLock().unlock();
+        }
+    }
+
+    protected void bidCleared() {
+        marketDataLock.writeLock().lock();
+        try {
+            bestBidPrice = 0.0;
+            recalculateMidPrice();
+            updateStatus();
+        } finally {
+            marketDataLock.writeLock().unlock();
+        }
+    }
+
+    protected void recalculateMidPrice() {
+        if (bestBidPrice > 0.0 && bestAskPrice < Double.MAX_VALUE) {
+            midPrice = (bestBidPrice + bestAskPrice) / 2.0;
+        } else {
+            midPrice = 0.0;
+        }
+    }
+
     protected List<OrderTicket> checkAsksFills(double bestBid, boolean isTrade) {
         List<OrderTicket> filledOrders = new ArrayList<>();
         // Take write lock on market data for exclusive access during fill processing
@@ -583,7 +613,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         try {
             if (!isTrade) {
                 bestBidPrice = bestBid; // Update the best ask price
-                midPrice = (bestBidPrice + bestAskPrice) / 2.0; // Update the mid price
+                recalculateMidPrice();
             }
 
             for (Iterator<Map.Entry<String, OrderTicket>> it = openAsks.entrySet().iterator(); it.hasNext();) {
@@ -614,7 +644,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         try {
             if (!isTrade) {
                 bestAskPrice = askPrice; // Update the best ask price
-                midPrice = (bestBidPrice + bestAskPrice) / 2.0; // Update the mid price
+                recalculateMidPrice();
             }
 
             for (Iterator<Map.Entry<String, OrderTicket>> it = openBids.entrySet().iterator(); it.hasNext();) {
@@ -1091,6 +1121,14 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
         if (quote.containsType(QuoteType.FUNDING_RATE_APR)) {
             fundingRateUpdated(ticker.getSymbol(), quote.getValue(QuoteType.FUNDING_RATE_APR), quote.getTimeStamp());
+        }
+
+        if (quote.isCleared(QuoteType.BID)) {
+            bidCleared();
+        }
+
+        if (quote.isCleared(QuoteType.ASK)) {
+            askCleared();
         }
 
         if (quote.containsType(QuoteType.BID)) {

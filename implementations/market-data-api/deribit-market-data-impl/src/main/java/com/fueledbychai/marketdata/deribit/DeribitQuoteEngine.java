@@ -179,7 +179,7 @@ public class DeribitQuoteEngine extends QuoteEngine {
         }
 
         Level1Quote quote = buildLevel1Quote(ticker, update);
-        if (quote.getTypes().length > 0) {
+        if (quote.hasUpdates()) {
             fireLevel1Quote(quote);
         }
     }
