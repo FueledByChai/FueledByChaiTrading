@@ -19,10 +19,10 @@ public class BinanceClientTest {
 
         // Configure SOCKS proxy (uncomment and modify as needed)
 
-        System.setProperty("socksProxyHost", "127.0.0.1");
-        System.setProperty("socksProxyPort", "1080");
-        System.setProperty("binance.run.proxy", "true");
-        ProxyConfig.getInstance().setRunningLocally(true);
+        System.setProperty(ProxyConfig.GLOBAL_RUN_PROXY, "true");
+        System.setProperty(ProxyConfig.GLOBAL_PROXY_HOST, "127.0.0.1");
+        System.setProperty(ProxyConfig.GLOBAL_PROXY_PORT, "1080");
+        ProxyConfig.getInstance().getProxy();
 
         // IBinanceRestApi api =
         // BinanceRestApi.getPublicOnlyApi("https://api.binance.com/api/v3");

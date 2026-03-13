@@ -1,6 +1,7 @@
 package com.fueledbychai.binance;
 
 import java.io.IOException;
+import java.net.Proxy;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 
@@ -11,6 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fueledbychai.binance.model.BinanceInstrumentDescriptorResult;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.http.BaseRestApi;
+import com.fueledbychai.websocket.ProxyConfig;
 import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
@@ -54,7 +56,7 @@ public class BinanceRestApi extends BaseRestApi implements IBinanceRestApi {
     }
 
     public BinanceRestApi(String baseUrl, String accountAddressString, String privateKeyString) {
-        this.client = new OkHttpClient();
+        this.client = createHttpClient();
         this.baseUrl = baseUrl;
         this.accountAddressString = accountAddressString;
         this.privateKeyString = privateKeyString;
@@ -64,6 +66,15 @@ public class BinanceRestApi extends BaseRestApi implements IBinanceRestApi {
         // this.gson = new GsonBuilder().registerTypeAdapter(ZonedDateTime.class, new
         // ZonedDateTimeAdapter()).create();
         publicApiOnly = accountAddressString == null || privateKeyString == null;
+    }
+
+    protected OkHttpClient createHttpClient() {
+        Proxy proxy = ProxyConfig.getInstance().getProxy();
+        OkHttpClient.Builder builder = new OkHttpClient.Builder();
+        if (proxy != null && proxy != Proxy.NO_PROXY) {
+            builder.proxy(proxy);
+        }
+        return builder.build();
     }
 
     @Override

@@ -89,6 +89,42 @@ class BybitConfigurationTest {
         }
     }
 
+    @Test
+    void fallsBackToGlobalSocksProxyWhenConfigured() {
+        String globalRunProxyKey = ProxyConfig.GLOBAL_RUN_PROXY;
+        String globalProxyHostKey = ProxyConfig.GLOBAL_PROXY_HOST;
+        String globalProxyPortKey = ProxyConfig.GLOBAL_PROXY_PORT;
+
+        String previousGlobalRunProxy = System.getProperty(globalRunProxyKey);
+        String previousGlobalProxyHost = System.getProperty(globalProxyHostKey);
+        String previousGlobalProxyPort = System.getProperty(globalProxyPortKey);
+
+        try {
+            ProxyConfig.getInstance().reset();
+
+            System.setProperty(globalRunProxyKey, "true");
+            System.setProperty(globalProxyHostKey, "127.0.0.2");
+            System.setProperty(globalProxyPortKey, "1082");
+
+            BybitConfiguration.reset();
+            BybitConfiguration.getInstance();
+
+            assertTrue(ProxyConfig.getInstance().isRunningLocally());
+            Proxy proxy = ProxyConfig.getInstance().getProxy();
+            assertNotNull(proxy);
+            assertEquals(Proxy.Type.SOCKS, proxy.type());
+            InetSocketAddress address = (InetSocketAddress) proxy.address();
+            assertEquals("127.0.0.2", address.getHostString());
+            assertEquals(1082, address.getPort());
+        } finally {
+            restoreProperty(globalRunProxyKey, previousGlobalRunProxy);
+            restoreProperty(globalProxyHostKey, previousGlobalProxyHost);
+            restoreProperty(globalProxyPortKey, previousGlobalProxyPort);
+            ProxyConfig.getInstance().reset();
+            BybitConfiguration.reset();
+        }
+    }
+
     private static void restoreProperty(String key, String previousValue) {
         if (previousValue == null) {
             System.clearProperty(key);

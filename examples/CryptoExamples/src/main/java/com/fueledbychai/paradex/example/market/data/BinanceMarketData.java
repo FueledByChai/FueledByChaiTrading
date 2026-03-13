@@ -36,9 +36,9 @@ public class BinanceMarketData {
     }
 
     public static void main(String[] args) throws Exception {
-        System.setProperty("socksProxyHost", "127.0.0.1");
-        System.setProperty("socksProxyPort", "1080");
-        System.setProperty("binance.run.proxy", "true");
+        System.setProperty("fueledbychai.run.proxy", "true");
+        // System.setProperty("socksProxyPort", "1080");
+        // System.setProperty("binance.run.proxy", "true");
         BinanceMarketData example = new BinanceMarketData();
         example.start();
     }
