@@ -54,9 +54,7 @@ public class Level1Quote extends AbstractQuote implements ILevel1Quote {
 
     @Override
     public int hashCode() {
-        int hash = 7;
-        hash = 29 * hash + Objects.hashCode(this.quoteMap);
-        return hash;
+        return Objects.hash(this.quoteMap, this.clearedQuoteTypes);
     }
 
     @Override
@@ -74,12 +72,13 @@ public class Level1Quote extends AbstractQuote implements ILevel1Quote {
         if (!Objects.equals(this.quoteMap, other.quoteMap)) {
             return false;
         }
-        return true;
+        return Objects.equals(this.clearedQuoteTypes, other.clearedQuoteTypes);
     }
 
     @Override
     public String toString() {
-        return "Level1Quote [ticker=" + ticker + ", timeStamp=" + timeStamp + ", quoteMap=" + quoteMap + "]";
+        return "Level1Quote [ticker=" + ticker + ", timeStamp=" + timeStamp + ", quoteMap=" + quoteMap
+                + ", clearedQuoteTypes=" + clearedQuoteTypes + "]";
     }
 
 }

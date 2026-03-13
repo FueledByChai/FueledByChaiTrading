@@ -21,9 +21,11 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 package com.fueledbychai.marketdata;
 
 import java.math.BigDecimal;
+import java.util.HashSet;
 import java.time.ZonedDateTime;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 import com.fueledbychai.data.FueledByChaiException;
 import com.fueledbychai.data.Ticker;
@@ -37,6 +39,7 @@ public abstract class AbstractQuote implements IQuote {
 
 	protected Ticker ticker;
 	protected Map<QuoteType, BigDecimal> quoteMap = new HashMap<>();
+	protected Set<QuoteType> clearedQuoteTypes = new HashSet<>();
 	protected ZonedDateTime timeStamp;
 
 	/**
@@ -62,7 +65,13 @@ public abstract class AbstractQuote implements IQuote {
 	}
 
 	public void addQuote(QuoteType type, BigDecimal value) {
+		clearedQuoteTypes.remove(type);
 		quoteMap.put(type, value);
+	}
+
+	public void clearQuote(QuoteType type) {
+		quoteMap.remove(type);
+		clearedQuoteTypes.add(type);
 	}
 
 	@Override
@@ -82,6 +91,16 @@ public abstract class AbstractQuote implements IQuote {
 		} else {
 			throw new FueledByChaiException("Quote does not contain type: " + type);
 		}
+	}
+
+	@Override
+	public boolean isCleared(QuoteType type) {
+		return clearedQuoteTypes.contains(type);
+	}
+
+	@Override
+	public QuoteType[] getClearedTypes() {
+		return clearedQuoteTypes.toArray(new QuoteType[] {});
 	}
 
 	/**
