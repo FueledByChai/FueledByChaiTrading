@@ -1,5 +1,7 @@
 package com.fueledbychai.broker.paper;
 
+import java.util.Objects;
+
 public class PaperBrokerCommission {
     public static final PaperBrokerCommission PARADEX_COMMISSION = new PaperBrokerCommission(-0.2, -2.0);
     public static final PaperBrokerCommission HYPERLIQUID_COMMISSION = new PaperBrokerCommission(-1.5, -4.5);
@@ -18,6 +20,10 @@ public class PaperBrokerCommission {
     public PaperBrokerCommission(double makerFeeBps, double takerFeeBps) {
         this.makerFeeBps = makerFeeBps;
         this.takerFeeBps = takerFeeBps;
+    }
+
+    public PaperBrokerCommission(PaperBrokerCommission other) {
+        this(Objects.requireNonNull(other, "other").getMakerFeeBps(), other.getTakerFeeBps());
     }
 
     public double getMakerFeeBps() {
