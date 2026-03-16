@@ -21,6 +21,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.fueledbychai.broker.BrokerRequestResult;
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.broker.order.TradeDirection;
+import com.fueledbychai.data.Exchange;
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.QuoteEngine;
 
@@ -126,5 +128,37 @@ public class PaperBrokerTest {
 
         assertTrue(filename.matches("\\d{8}-\\d{4}-AZTEC_USDC-LIGHTER-Trades\\.csv"));
         assertFalse(filename.contains("/"));
+    }
+
+    @Test
+    public void testAutoResolvesProfilesFromTicker() {
+        Ticker ticker = new Ticker("BTC-USD-PERP").setExchange(Exchange.PARADEX)
+                .setInstrumentType(InstrumentType.PERPETUAL_FUTURES);
+
+        PaperBroker broker = new PaperBroker(quoteEngine, ticker, 1000.0);
+
+        assertEquals(-0.2 / 10000.0, broker.makerFee, 0.0);
+        assertEquals(-2.0 / 10000.0, broker.takerFee, 0.0);
+        assertEquals(350, broker.latencyModel.getRestLatencyMsMin());
+        assertEquals(550, broker.latencyModel.getRestLatencyMsMax());
+        assertEquals(200, broker.latencyModel.getWsLatencyMsMin());
+        assertEquals(300, broker.latencyModel.getWsLatencyMsMax());
+    }
+
+    @Test
+    public void testExplicitProfilesTakePrecedenceOverRegistry() {
+        Ticker ticker = new Ticker("BTC-USD-PERP").setExchange(Exchange.PARADEX)
+                .setInstrumentType(InstrumentType.PERPETUAL_FUTURES);
+        PaperBrokerCommission customCommission = new PaperBrokerCommission(-1.0, -2.0);
+        PaperBrokerLatency customLatency = new PaperBrokerLatency(10, 20, 30, 40);
+
+        PaperBroker broker = new PaperBroker(quoteEngine, ticker, customCommission, customLatency, 1000.0);
+
+        assertEquals(-1.0 / 10000.0, broker.makerFee, 0.0);
+        assertEquals(-2.0 / 10000.0, broker.takerFee, 0.0);
+        assertEquals(10, broker.latencyModel.getRestLatencyMsMin());
+        assertEquals(20, broker.latencyModel.getRestLatencyMsMax());
+        assertEquals(30, broker.latencyModel.getWsLatencyMsMin());
+        assertEquals(40, broker.latencyModel.getWsLatencyMsMax());
     }
 }
