@@ -129,16 +129,31 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     private final long timeWindowMillis = 6000; // 6 seconds
     private final double dislocationMultiplier = 7.5; // Multiplier for dislocation threshold
 
+    public PaperBroker(QuoteEngine quoteEngine, Ticker ticker, double startingBalance) {
+        this(quoteEngine, ticker, null, null, startingBalance);
+    }
+
     public PaperBroker(QuoteEngine quoteEngine, Ticker ticker, PaperBrokerCommission commission,
             PaperBrokerLatency latencyModel, double startingBalance) {
 
-        this.latencyModel = latencyModel;
+        this.latencyModel = resolveLatencyModel(ticker, latencyModel);
         this.quoteEngine = quoteEngine;
         this.ticker = ticker;
-        this.makerFee = commission.getMakerFeeBps() / 10000.0; // Convert bps to decimal
-        this.takerFee = commission.getTakerFeeBps() / 10000.0; // Convert bps to decimal
+        PaperBrokerCommission resolvedCommission = resolveCommissionProfile(ticker, commission);
+        this.makerFee = resolvedCommission.getMakerFeeBps() / 10000.0; // Convert bps to decimal
+        this.takerFee = resolvedCommission.getTakerFeeBps() / 10000.0; // Convert bps to decimal
         this.startingAccountBalance = startingBalance;
         this.currentAccountBalance = startingBalance;
+    }
+
+    private static PaperBrokerCommission resolveCommissionProfile(Ticker ticker, PaperBrokerCommission commission) {
+        return commission == null ? PaperBrokerProfileRegistry.getCommissionProfile(ticker)
+                : new PaperBrokerCommission(commission);
+    }
+
+    private static PaperBrokerLatency resolveLatencyModel(Ticker ticker, PaperBrokerLatency latencyModel) {
+        return latencyModel == null ? PaperBrokerProfileRegistry.getLatencyProfile(ticker)
+                : new PaperBrokerLatency(latencyModel);
     }
 
     private static class SpreadEntry {
