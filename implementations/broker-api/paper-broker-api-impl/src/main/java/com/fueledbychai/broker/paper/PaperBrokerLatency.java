@@ -1,5 +1,7 @@
 package com.fueledbychai.broker.paper;
 
+import java.util.Objects;
+
 public class PaperBrokerLatency {
     public static final PaperBrokerLatency PARDEX_LATENCY = new PaperBrokerLatency(350, 550, 200, 300);
     public static final PaperBrokerLatency HYPERLIQUID_LATENCY = new PaperBrokerLatency(900, 2000, 200, 300);
@@ -14,6 +16,11 @@ public class PaperBrokerLatency {
         this.restLatencyMsMax = restLatencyMsMax;
         this.wsLatencyMsMin = wsLatencyMsMin;
         this.wsLatencyMsMax = wsLatencyMsMax;
+    }
+
+    public PaperBrokerLatency(PaperBrokerLatency other) {
+        this(Objects.requireNonNull(other, "other").getRestLatencyMsMin(), other.getRestLatencyMsMax(),
+                other.getWsLatencyMsMin(), other.getWsLatencyMsMax());
     }
 
     public int getRestLatencyMsMin() {
