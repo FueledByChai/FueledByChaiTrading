@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -33,6 +34,62 @@ public class PaperBrokerTest {
 
     @Mock
     private QuoteEngine quoteEngine;
+
+    private static final class TestablePaperBroker extends PaperBroker {
+
+        private int startAccountUpdateTaskCalls;
+
+        private TestablePaperBroker(QuoteEngine quoteEngine, Ticker ticker) {
+            super(quoteEngine, ticker, PaperBrokerCommission.PARADEX_COMMISSION, ZERO_LATENCY, 1000.0);
+        }
+
+        @Override
+        protected void startAccountUpdateTask() {
+            startAccountUpdateTaskCalls++;
+        }
+    }
+
+    @Test
+    public void testIsConnectedFalseByDefault() {
+        PaperBroker broker = new PaperBroker(quoteEngine, new Ticker("BTCUSDT"),
+                PaperBrokerCommission.PARADEX_COMMISSION, ZERO_LATENCY, 1000.0);
+
+        assertFalse(broker.isConnected());
+    }
+
+    @Test
+    public void testConnectMarksBrokerConnectedAndStartsAccountUpdateTask() {
+        TestablePaperBroker broker = new TestablePaperBroker(quoteEngine, new Ticker("BTCUSDT"));
+
+        broker.connect();
+
+        assertTrue(broker.isConnected());
+        assertEquals(1, broker.startAccountUpdateTaskCalls);
+    }
+
+    @Test
+    public void testConnectWhenAlreadyConnectedDoesNotRestartAccountUpdateTask() {
+        TestablePaperBroker broker = new TestablePaperBroker(quoteEngine, new Ticker("BTCUSDT"));
+
+        broker.connect();
+        broker.connect();
+
+        assertTrue(broker.isConnected());
+        assertEquals(1, broker.startAccountUpdateTaskCalls);
+    }
+
+    @Test
+    public void testDisconnectMarksBrokerDisconnected() {
+        Ticker ticker = new Ticker("BTCUSDT");
+        TestablePaperBroker broker = new TestablePaperBroker(quoteEngine, ticker);
+        broker.connect();
+
+        broker.disconnect();
+
+        assertFalse(broker.isConnected());
+        verify(quoteEngine, times(1)).unsubscribeLevel1(ticker, broker);
+        verify(quoteEngine, times(1)).unsubscribeOrderFlow(ticker, broker);
+    }
 
     @Test
     public void testGetOpenOrdersReturnsAllBidsAndAsks() {
@@ -160,5 +217,20 @@ public class PaperBrokerTest {
         assertEquals(20, broker.latencyModel.getRestLatencyMsMax());
         assertEquals(30, broker.latencyModel.getWsLatencyMsMin());
         assertEquals(40, broker.latencyModel.getWsLatencyMsMax());
+    }
+
+    @Test
+    public void testAutoResolvesAsterProfilesFromTicker() {
+        Ticker ticker = new Ticker("BTCUSDT").setExchange(Exchange.ASTER)
+                .setInstrumentType(InstrumentType.PERPETUAL_FUTURES);
+
+        PaperBroker broker = new PaperBroker(quoteEngine, ticker, 1000.0);
+
+        assertEquals(0.0, broker.makerFee, 0.0);
+        assertEquals(-4.0 / 10000.0, broker.takerFee, 0.0);
+        assertEquals(250, broker.latencyModel.getRestLatencyMsMin());
+        assertEquals(450, broker.latencyModel.getRestLatencyMsMax());
+        assertEquals(120, broker.latencyModel.getWsLatencyMsMin());
+        assertEquals(220, broker.latencyModel.getWsLatencyMsMax());
     }
 }

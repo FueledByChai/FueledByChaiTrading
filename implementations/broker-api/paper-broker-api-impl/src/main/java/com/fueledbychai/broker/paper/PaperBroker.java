@@ -83,6 +83,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     protected double fundingRate = 0.0; // Funding rate for the asset
     protected double fundingAccruedOrPaid = 0.0; // Total funding accrued or paid
     protected long lastFundingTimestamp = 0; // Last funding timestamp
+    protected boolean isConnected = false; // Connection status of the broker
 
     // Separate locks to prevent deadlock and ensure proper order of operations
     private final ReadWriteLock marketDataLock = new ReentrantReadWriteLock();
@@ -256,8 +257,11 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     protected void onDisconnect() {
-        // TODO Auto-generated method stub
-
+        isConnected = false;
+        accountUpdateTimer.cancel();
+        accountUpdateTimer = new Timer(true);
+        quoteEngine.unsubscribeLevel1(ticker, this);
+        quoteEngine.unsubscribeOrderFlow(ticker, this);
     }
 
     @Override
@@ -1057,6 +1061,12 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         // e.getMessage(), e);
         // }
         // }
+        if (isConnected) {
+            logger.warn("Already connected to PaperBroker. Ignoring connect call.");
+            return;
+        }
+        logger.info("Connecting to PaperBroker...");
+        isConnected = true;
         startAccountUpdateTask();
 
     }
@@ -1103,7 +1113,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     public boolean isConnected() {
-        throw new UnsupportedOperationException("isConnected not supported in PaperBroker");
+        return isConnected;
     }
 
     @Override
