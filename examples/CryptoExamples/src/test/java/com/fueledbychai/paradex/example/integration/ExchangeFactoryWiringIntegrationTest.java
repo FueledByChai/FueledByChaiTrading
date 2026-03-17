@@ -17,6 +17,7 @@ public class ExchangeFactoryWiringIntegrationTest {
     @Test
     public void serviceLoaderFactoriesResolveConfiguredProviders() {
         assertTrue(QuoteEngine.isRegistered(Exchange.HYPERLIQUID));
+        assertTrue(QuoteEngine.isRegistered(Exchange.ASTER));
         QuoteEngine quoteEngine1 = QuoteEngine.getInstance(Exchange.HYPERLIQUID);
         QuoteEngine quoteEngine2 = QuoteEngine.getInstance(Exchange.HYPERLIQUID);
         assertNotNull(quoteEngine1);
@@ -25,6 +26,7 @@ public class ExchangeFactoryWiringIntegrationTest {
         // Broker providers can require authenticated websocket initialization.
         // Validate ServiceLoader registration without forcing live broker construction.
         assertTrue(BrokerFactory.isRegistered(Exchange.HYPERLIQUID));
+        assertTrue(BrokerFactory.isRegistered(Exchange.ASTER));
 
         assertTrue(HistoricalDataProviderFactory.isRegistered(Exchange.PARADEX));
         IHistoricalDataProvider historical1 = HistoricalDataProviderFactory.getInstance(Exchange.PARADEX);

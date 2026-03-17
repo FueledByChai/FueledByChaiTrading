@@ -51,6 +51,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     <module>deribit-common-api</module>
     <module>okx-common-api</module>
     <module>bybit-common-api</module>
+    <module>aster-common-api</module>
   </modules>
   
 </project>
