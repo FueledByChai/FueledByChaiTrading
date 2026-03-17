@@ -13,7 +13,7 @@ public class PaperBrokerProfileRegistryTest {
 
     private static final Set<Exchange> EXPECTED_CRYPTO_EXCHANGES = Set.of(Exchange.DYDX, Exchange.HYPERLIQUID,
             Exchange.PARADEX, Exchange.LIGHTER, Exchange.BINANCE_SPOT, Exchange.BINANCE_FUTURES, Exchange.DERIBIT,
-            Exchange.OKX, Exchange.BYBIT);
+            Exchange.OKX, Exchange.BYBIT, Exchange.ASTER);
 
     private static final Set<InstrumentType> EXPECTED_COMMISSION_TYPES = Set.of(InstrumentType.PERPETUAL_FUTURES,
             InstrumentType.CRYPTO_SPOT, InstrumentType.OPTION);
@@ -35,6 +35,14 @@ public class PaperBrokerProfileRegistryTest {
             if (exchange == Exchange.HYPERLIQUID) {
                 assertLatency(exchange, 900, 2000, 200, 300);
                 assertCommission(exchange, InstrumentType.PERPETUAL_FUTURES, -1.5, -4.5);
+                assertCommission(exchange, InstrumentType.CRYPTO_SPOT, 0.0, 0.0);
+                assertCommission(exchange, InstrumentType.OPTION, 0.0, 0.0);
+                continue;
+            }
+
+            if (exchange == Exchange.ASTER) {
+                assertLatency(exchange, 250, 450, 120, 220);
+                assertCommission(exchange, InstrumentType.PERPETUAL_FUTURES, 0.0, -4.0);
                 assertCommission(exchange, InstrumentType.CRYPTO_SPOT, 0.0, 0.0);
                 assertCommission(exchange, InstrumentType.OPTION, 0.0, 0.0);
                 continue;
