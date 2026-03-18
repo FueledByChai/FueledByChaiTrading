@@ -1214,12 +1214,9 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     public void orderflowReceived(OrderFlow orderflow) {
-        if (orderflow.getSide() == OrderFlow.Side.BUY) {
-            bidUpdated(orderflow.getPrice(), true);
-        } else if (orderflow.getSide() == OrderFlow.Side.SELL) {
-            askUpdated(orderflow.getPrice(), true);
-        }
-
+        // Passive fills are driven by top-of-book updates only. Thin-market trade prints can
+        // arrive sparsely or out of order, which makes orderflow a poor trigger for realistic
+        // resting-order fills in the paper broker.
     }
 
     @Override
