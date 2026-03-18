@@ -23,7 +23,7 @@ public class ParadexInstrumentLookup implements IInstrumentLookup {
     private final Retry retry;
 
     public ParadexInstrumentLookup() {
-        this.api = ExchangeRestApiFactory.getPublicApi(Exchange.PARADEX, IParadexRestApi.class);
+        this.api = resolveApi();
         this.retry = createRetryConfig(ParadexLookupRetryConfig.defaultConfig());
     }
 
@@ -33,6 +33,10 @@ public class ParadexInstrumentLookup implements IInstrumentLookup {
     public ParadexInstrumentLookup(IParadexRestApi api) {
         this.api = api;
         this.retry = createRetryConfig(ParadexLookupRetryConfig.defaultConfig());
+    }
+
+    protected IParadexRestApi resolveApi() {
+        return ExchangeRestApiFactory.getPublicApi(Exchange.PARADEX, IParadexRestApi.class);
     }
 
     /**

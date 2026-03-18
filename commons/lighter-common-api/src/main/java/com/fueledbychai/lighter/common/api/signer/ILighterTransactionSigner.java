@@ -11,4 +11,6 @@ public interface ILighterTransactionSigner {
     LighterSignedTransaction signCancelOrder(LighterCancelOrderRequest cancelRequest);
 
     LighterSignedTransaction signModifyOrder(LighterModifyOrderRequest modifyRequest);
+
+    String createAuthTokenWithExpiry(long timestamp, long expiry, int apiKeyIndex, long accountIndex);
 }
