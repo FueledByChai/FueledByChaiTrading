@@ -42,12 +42,13 @@ public class HyperliquidTickerRegistry extends AbstractTickerRegistry implements
 
     @Override
     public String commonSymbolToExchangeSymbol(InstrumentType instrumentType, String commonSymbol) {
-        // common symbol is like BTC/USDT, exchange symbol is BTC-USDT
+        // Hyperliquid uses plain base currency names (e.g. "BTC", "PAXG"), not "BTC/USDT" or "BTC-USDT"
         requireSupportedInstrumentType(instrumentType);
         if (commonSymbol == null) {
             return null;
         }
-        String exchangeSymbol = commonSymbol.replace("/", "-");
-        return exchangeSymbol;
+        // Strip quote currency if present (e.g. "BTC/USDT" -> "BTC", "PAXG/USDC" -> "PAXG")
+        int slashIndex = commonSymbol.indexOf('/');
+        return slashIndex >= 0 ? commonSymbol.substring(0, slashIndex) : commonSymbol;
     }
 }

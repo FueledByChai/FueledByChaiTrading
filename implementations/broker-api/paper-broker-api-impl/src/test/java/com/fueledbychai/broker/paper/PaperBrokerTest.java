@@ -12,6 +12,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 
 import java.math.BigDecimal;
+import java.time.ZonedDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -35,6 +36,9 @@ import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.marketdata.Level1Quote;
+import com.fueledbychai.marketdata.OrderFlow;
+import com.fueledbychai.marketdata.QuoteType;
 import com.fueledbychai.marketdata.QuoteEngine;
 
 @ExtendWith(MockitoExtension.class)
@@ -352,5 +356,35 @@ public class PaperBrokerTest {
         assertFalse(broker.openAsks.containsKey(order.getOrderId()));
         assertEquals(1, broker.executedOrders.size());
         assertEquals(1, order.getFills().size());
+    }
+
+    @Test
+    public void testPassiveLimitOrderIgnoresOrderFlowButFillsFromTopOfBookQuote() {
+        Ticker ticker = new Ticker("BTCUSDT");
+        TestablePaperBroker broker = new TestablePaperBroker(quoteEngine, ticker);
+        OrderTicket order = new OrderTicket("order-1", ticker, new BigDecimal("2.0"), TradeDirection.BUY);
+        order.setType(OrderTicket.Type.LIMIT);
+        order.setLimitPrice(new BigDecimal("101.25"));
+        order.setClientOrderId("client-1");
+        order.setOrderEntryTime(broker.getCurrentTime());
+
+        broker.openOrders.put(order.getOrderId(), order);
+        broker.openBids.put(order.getOrderId(), order);
+
+        broker.orderflowReceived(new OrderFlow(ticker, new BigDecimal("101.20"), new BigDecimal("5.0"),
+                OrderFlow.Side.SELL, ZonedDateTime.now()));
+
+        assertEquals(OrderStatus.Status.NEW, order.getCurrentStatus());
+        assertEquals(0, broker.getEmittedFillEvents());
+        assertTrue(broker.openOrders.containsKey(order.getOrderId()));
+
+        Level1Quote quote = new Level1Quote(ticker, ZonedDateTime.now());
+        quote.addQuote(QuoteType.ASK, new BigDecimal("101.20"));
+        broker.quoteRecieved(quote);
+
+        assertEquals(OrderStatus.Status.FILLED, order.getCurrentStatus());
+        assertEquals(1, broker.getEmittedFillEvents());
+        assertEquals(1, broker.getEmittedFilledOrderEvents());
+        assertFalse(broker.openOrders.containsKey(order.getOrderId()));
     }
 }
