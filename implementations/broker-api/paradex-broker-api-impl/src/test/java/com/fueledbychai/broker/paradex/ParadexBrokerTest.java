@@ -352,21 +352,19 @@ public class ParadexBrokerTest {
         // Arrange
         CountDownLatch latch = new CountDownLatch(1);
         OrderEventListener asyncListener = new ComparableOrderEventListener(latch::countDown);
-        OrderTicket mockTradeOrder = mock(OrderTicket.class);
+        OrderTicket asyncOrderTicket = new OrderTicket();
 
         // Register listener using public API
         broker.addOrderEventListener(asyncListener);
-        when(mockOrderRegistry.getOpenOrderById("testOrderId")).thenReturn(mockTradeOrder);
+        when(mockOrderRegistry.getOpenOrderById("testOrderId")).thenReturn(asyncOrderTicket);
 
         // Mock the order status update
         when(mockOrderStatusUpdate.getOrderId()).thenReturn("testOrderId");
 
         // Mock broker.translator.translateOrderStatus to return a valid OrderStatus
-        IParadexTranslator mockTranslator = mock(IParadexTranslator.class);
-        broker.translator = mockTranslator;
-        OrderStatus mockOrderStatus = mock(OrderStatus.class);
-        when(mockOrderStatus.getStatus()).thenReturn(OrderStatus.Status.NEW);
-        when(mockTranslator.translateOrderStatus(mockOrderStatusUpdate)).thenReturn(mockOrderStatus);
+        OrderStatus asyncOrderStatus = mock(OrderStatus.class);
+        when(asyncOrderStatus.getStatus()).thenReturn(OrderStatus.Status.NEW);
+        when(mockTranslator.translateOrderStatus(mockOrderStatusUpdate)).thenReturn(asyncOrderStatus);
 
         // Act
         broker.onParadexOrderStatusEvent(mockOrderStatusUpdate);
@@ -463,66 +461,63 @@ public class ParadexBrokerTest {
         // ...existing code...
         // Cleaned up broken and duplicate test methods for unsupported operations
         String orderId = "filledOrder";
-        OrderTicket mockTradeOrder = mock(OrderTicket.class);
-        when(mockOrderRegistry.getOpenOrderById(orderId)).thenReturn(mockTradeOrder);
+        OrderTicket filledOrderTicket = new OrderTicket();
+        when(mockOrderRegistry.getOpenOrderById(orderId)).thenReturn(filledOrderTicket);
 
         when(mockOrderStatusUpdate.getOrderId()).thenReturn(orderId);
 
-        IParadexTranslator mockTranslator = mock(IParadexTranslator.class);
         broker.translator = mockTranslator;
-        OrderStatus mockOrderStatus = mock(OrderStatus.class);
-        when(mockOrderStatus.getStatus()).thenReturn(OrderStatus.Status.FILLED);
-        when(mockTranslator.translateOrderStatus(mockOrderStatusUpdate)).thenReturn(mockOrderStatus);
+        OrderStatus filledOrderStatus = mock(OrderStatus.class);
+        when(filledOrderStatus.getStatus()).thenReturn(OrderStatus.Status.FILLED);
+        when(mockTranslator.translateOrderStatus(mockOrderStatusUpdate)).thenReturn(filledOrderStatus);
 
         // Act
         broker.onParadexOrderStatusEvent(mockOrderStatusUpdate);
 
         // Assert - Order should be removed from map for FILLED status
-        verify(mockOrderRegistry).addCompletedOrder(mockTradeOrder);
+        verify(mockOrderRegistry).addCompletedOrder(filledOrderTicket);
     }
 
     @Test
     public void testOrderStatusUpdated_CanceledOrderRemoval() {
         // Arrange
         String orderId = "canceledOrder";
-        OrderTicket mockTradeOrder = mock(OrderTicket.class);
-        when(mockOrderRegistry.getOpenOrderById(orderId)).thenReturn(mockTradeOrder);
+        OrderTicket canceledOrderTicket = new OrderTicket();
+        when(mockOrderRegistry.getOpenOrderById(orderId)).thenReturn(canceledOrderTicket);
 
         when(mockOrderStatusUpdate.getOrderId()).thenReturn(orderId);
 
-        IParadexTranslator mockTranslator = mock(IParadexTranslator.class);
         broker.translator = mockTranslator;
-        OrderStatus mockOrderStatus = mock(OrderStatus.class);
-        when(mockOrderStatus.getStatus()).thenReturn(OrderStatus.Status.CANCELED);
-        when(mockTranslator.translateOrderStatus(mockOrderStatusUpdate)).thenReturn(mockOrderStatus);
+        OrderStatus canceledOrderStatus = mock(OrderStatus.class);
+        when(canceledOrderStatus.getStatus()).thenReturn(OrderStatus.Status.CANCELED);
+        when(mockTranslator.translateOrderStatus(mockOrderStatusUpdate)).thenReturn(canceledOrderStatus);
 
         // Act
         broker.onParadexOrderStatusEvent(mockOrderStatusUpdate);
 
         // Assert - Order should be removed from map for CANCELED status
-        verify(mockOrderRegistry).addCompletedOrder(mockTradeOrder);
+        verify(mockOrderRegistry).addCompletedOrder(canceledOrderTicket);
     }
 
     @Test
     public void testOrderStatusUpdated_NewOrderNotRemoved() {
         // Arrange
         String orderId = "newOrder";
-        OrderTicket mockTradeOrder = mock(OrderTicket.class);
-        when(mockOrderRegistry.getOpenOrderById(orderId)).thenReturn(mockTradeOrder);
+        OrderTicket newOrderTicket = new OrderTicket();
+        when(mockOrderRegistry.getOpenOrderById(orderId)).thenReturn(newOrderTicket);
 
         when(mockOrderStatusUpdate.getOrderId()).thenReturn(orderId);
 
-        IParadexTranslator mockTranslator = mock(IParadexTranslator.class);
         broker.translator = mockTranslator;
-        OrderStatus mockOrderStatus = mock(OrderStatus.class);
-        when(mockOrderStatus.getStatus()).thenReturn(OrderStatus.Status.NEW);
-        when(mockTranslator.translateOrderStatus(mockOrderStatusUpdate)).thenReturn(mockOrderStatus);
+        OrderStatus newOrderStatus = mock(OrderStatus.class);
+        when(newOrderStatus.getStatus()).thenReturn(OrderStatus.Status.NEW);
+        when(mockTranslator.translateOrderStatus(mockOrderStatusUpdate)).thenReturn(newOrderStatus);
 
         // Act
         broker.onParadexOrderStatusEvent(mockOrderStatusUpdate);
 
         // Assert - Order should remain in map for NEW status
-        verify(mockOrderRegistry, never()).addCompletedOrder(mockTradeOrder);
+        verify(mockOrderRegistry, never()).addCompletedOrder(newOrderTicket);
     }
 
     // ==================== Authentication Scheduler Tests ====================
@@ -638,17 +633,16 @@ public class ParadexBrokerTest {
         CountDownLatch startLatch = new CountDownLatch(1);
         CountDownLatch completionLatch = new CountDownLatch(numThreads);
 
-        IParadexTranslator mockTranslator = mock(IParadexTranslator.class);
         broker.translator = mockTranslator;
-        OrderStatus mockOrderStatus = mock(OrderStatus.class);
-        lenient().when(mockOrderStatus.getStatus()).thenReturn(OrderStatus.Status.NEW);
-        lenient().when(mockTranslator.translateOrderStatus(any())).thenReturn(mockOrderStatus);
+        OrderStatus concurrentOrderStatus = mock(OrderStatus.class);
+        lenient().when(concurrentOrderStatus.getStatus()).thenReturn(OrderStatus.Status.NEW);
+        lenient().when(mockTranslator.translateOrderStatus(any())).thenReturn(concurrentOrderStatus);
 
         // Create multiple order status updates with valid status
         for (int i = 0; i < numThreads; i++) {
             final int orderId = i;
-            OrderTicket order = mock(OrderTicket.class);
-            when(mockOrderRegistry.getOpenOrderById(String.valueOf(orderId))).thenReturn(order);
+            OrderTicket concurrentOrderTicket = new OrderTicket();
+            when(mockOrderRegistry.getOpenOrderById(String.valueOf(orderId))).thenReturn(concurrentOrderTicket);
 
             IParadexOrderStatusUpdate update = mock(IParadexOrderStatusUpdate.class);
             lenient().when(update.getOrderId()).thenReturn(String.valueOf(orderId));

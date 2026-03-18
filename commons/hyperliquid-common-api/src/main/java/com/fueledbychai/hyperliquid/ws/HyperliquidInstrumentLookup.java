@@ -12,7 +12,7 @@ public class HyperliquidInstrumentLookup implements IInstrumentLookup {
     private final IHyperliquidRestApi api;
 
     public HyperliquidInstrumentLookup() {
-        this(ExchangeRestApiFactory.getPublicApi(Exchange.HYPERLIQUID, IHyperliquidRestApi.class));
+        this.api = resolveApi();
     }
 
     public HyperliquidInstrumentLookup(IHyperliquidRestApi api) {
@@ -20,6 +20,10 @@ public class HyperliquidInstrumentLookup implements IInstrumentLookup {
             throw new IllegalArgumentException("api is required");
         }
         this.api = api;
+    }
+
+    protected IHyperliquidRestApi resolveApi() {
+        return ExchangeRestApiFactory.getPublicApi(Exchange.HYPERLIQUID, IHyperliquidRestApi.class);
     }
 
     @Override

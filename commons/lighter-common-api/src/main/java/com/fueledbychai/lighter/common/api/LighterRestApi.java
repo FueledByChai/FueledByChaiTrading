@@ -31,6 +31,7 @@ import com.fueledbychai.lighter.common.api.auth.LighterApiTokenResponse;
 import com.fueledbychai.lighter.common.api.auth.LighterChangeAccountTierRequest;
 import com.fueledbychai.lighter.common.api.auth.LighterChangeAccountTierResponse;
 import com.fueledbychai.lighter.common.api.auth.LighterCreateApiTokenRequest;
+import com.fueledbychai.lighter.common.api.signer.ILighterTransactionSigner;
 import com.fueledbychai.lighter.common.api.signer.LighterNativeTransactionSigner;
 import com.fueledbychai.lighter.common.api.ws.model.LighterOrder;
 import com.fueledbychai.time.Span;
@@ -79,7 +80,7 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
     protected String accountAddressString;
     protected String privateKeyString;
     protected boolean publicApiOnly = true;
-    protected volatile LighterNativeTransactionSigner authSigner;
+    protected volatile ILighterTransactionSigner authSigner;
     protected volatile int authSignerApiKeyIndex = Integer.MIN_VALUE;
     protected volatile long authSignerAccountIndex = Long.MIN_VALUE;
 
@@ -980,13 +981,13 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
         }
     }
 
-    protected LighterNativeTransactionSigner getOrCreateAuthSigner() {
+    protected ILighterTransactionSigner getOrCreateAuthSigner() {
         LighterConfiguration configuration = LighterConfiguration.getInstance();
         return getOrCreateAuthSigner(configuration.getApiKeyIndex(), configuration.getAccountIndex());
     }
 
-    protected LighterNativeTransactionSigner getOrCreateAuthSigner(int apiKeyIndex, long accountIndex) {
-        LighterNativeTransactionSigner signer = authSigner;
+    protected ILighterTransactionSigner getOrCreateAuthSigner(int apiKeyIndex, long accountIndex) {
+        ILighterTransactionSigner signer = authSigner;
         if (signer != null && authSignerApiKeyIndex == apiKeyIndex && authSignerAccountIndex == accountIndex) {
             return signer;
         }
@@ -1004,7 +1005,7 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
         }
     }
 
-    protected LighterNativeTransactionSigner createAuthSigner(String privateKey, int apiKeyIndex, long accountIndex) {
+    protected ILighterTransactionSigner createAuthSigner(String privateKey, int apiKeyIndex, long accountIndex) {
         return new LighterNativeTransactionSigner(baseUrl, privateKey, apiKeyIndex, accountIndex);
     }
 

@@ -10,9 +10,6 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
-import org.mockito.Mockito;
-
 import com.fueledbychai.binance.model.BinanceInstrumentDescriptorResult;
 import com.fueledbychai.binance.model.BinanceSymbol;
 import com.fueledbychai.binance.model.BinanceSymbol.LotSizeFilterInfo;
@@ -20,7 +17,6 @@ import com.fueledbychai.binance.model.BinanceSymbol.PriceFilterInfo;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
-import com.fueledbychai.util.ExchangeRestApiFactory;
 
 class BinanceInstrumentLookupTest {
 
@@ -73,22 +69,22 @@ class BinanceInstrumentLookupTest {
     }
 
     @Test
-    void defaultConstructorUsesExchangeRestApiFactory() {
-        IBinanceRestApi api = mock(IBinanceRestApi.class);
+    void defaultConstructorUsesResolvedApi() {
+        IBinanceRestApi mockApi = mock(IBinanceRestApi.class);
         BinanceInstrumentDescriptorResult result = mock(BinanceInstrumentDescriptorResult.class);
 
-        try (MockedStatic<ExchangeRestApiFactory> mockedFactory = Mockito.mockStatic(ExchangeRestApiFactory.class)) {
-            mockedFactory.when(() -> ExchangeRestApiFactory.getApi(Exchange.BINANCE_SPOT, IBinanceRestApi.class))
-                    .thenReturn(api);
-            when(api.getAllInstrumentsForType(InstrumentType.CRYPTO_SPOT)).thenReturn(result);
-            when(result.getTradingSymbols()).thenReturn(List.of());
+        when(mockApi.getAllInstrumentsForType(InstrumentType.CRYPTO_SPOT)).thenReturn(result);
+        when(result.getTradingSymbols()).thenReturn(List.of());
 
-            BinanceInstrumentLookup lookup = new BinanceInstrumentLookup();
-            InstrumentDescriptor[] descriptors = lookup.getAllInstrumentsForType(InstrumentType.CRYPTO_SPOT);
+        BinanceInstrumentLookup lookup = new BinanceInstrumentLookup() {
+            @Override
+            protected IBinanceRestApi resolveApi() {
+                return mockApi;
+            }
+        };
+        InstrumentDescriptor[] descriptors = lookup.getAllInstrumentsForType(InstrumentType.CRYPTO_SPOT);
 
-            assertEquals(0, descriptors.length);
-            mockedFactory.verify(() -> ExchangeRestApiFactory.getApi(Exchange.BINANCE_SPOT, IBinanceRestApi.class));
-            verify(api).getAllInstrumentsForType(InstrumentType.CRYPTO_SPOT);
-        }
+        assertEquals(0, descriptors.length);
+        verify(mockApi).getAllInstrumentsForType(InstrumentType.CRYPTO_SPOT);
     }
 }

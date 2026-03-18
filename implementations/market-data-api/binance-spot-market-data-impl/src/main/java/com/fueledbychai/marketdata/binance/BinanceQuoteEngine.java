@@ -156,7 +156,7 @@ public class BinanceQuoteEngine extends QuoteEngine {
             quote.addQuote(QuoteType.ASK, bestAsk);
             quote.addQuote(QuoteType.ASK_SIZE, askSize);
         }
-        super.fireLevel1Quote(quote);
+        fireLevel1Quote(quote);
     }
 
     public void onOrderBookUpdate(Ticker ticker, OrderBookSnapshot orderBookSnapshot, ZonedDateTime timeStamp) {
@@ -166,7 +166,7 @@ public class BinanceQuoteEngine extends QuoteEngine {
                 convertPriceLevels(orderBookSnapshot.getAsks()), timeStamp);
 
         Level2Quote quote = new Level2Quote(ticker, orderBook, timeStamp);
-        super.fireMarketDepthQuote(quote);
+        fireMarketDepthQuote(quote);
     }
 
     public void onTradeRecordUpdate(Ticker ticker, TradeRecord tradeRecord) {
@@ -176,7 +176,7 @@ public class BinanceQuoteEngine extends QuoteEngine {
                 new BigDecimal(tradeRecord.getQuantity()),
                 tradeRecord.isBuyerMarketMaker() ? OrderFlow.Side.SELL : OrderFlow.Side.BUY, eventTime);
 
-        super.fireOrderFlow(orderFlow);
+        fireOrderFlow(orderFlow);
     }
 
     protected List<OrderBook.PriceLevel> convertPriceLevels(

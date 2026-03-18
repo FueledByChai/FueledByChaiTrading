@@ -3,25 +3,24 @@
 
 Copyright (c) 2015  FueledByChai Contributors
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software 
-and associated documentation files (the "Software"), to deal in the Software without restriction, 
-including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, 
-and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, 
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+and associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so,
 subject to the following conditions:
 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING 
-BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
-IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, 
-WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE 
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
 OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
 package com.fueledbychai.paradex.historical;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
 import java.math.BigDecimal;
 import java.time.ZonedDateTime;
@@ -56,13 +55,7 @@ class HistoricalDataUtilsTest {
     @Test
     void testConvertToBarData_SingleBar_Success() {
         // Arrange
-        OHLCBar mockOHLCBar = mock(OHLCBar.class);
-        when(mockOHLCBar.getTime()).thenReturn(1640995200000L); // Jan 1, 2022 00:00:00 UTC
-        when(mockOHLCBar.getOpen()).thenReturn(50000.00);
-        when(mockOHLCBar.getHigh()).thenReturn(51000.00);
-        when(mockOHLCBar.getLow()).thenReturn(49000.00);
-        when(mockOHLCBar.getClose()).thenReturn(50500.00);
-        when(mockOHLCBar.getVolume()).thenReturn(1000.5);
+        OHLCBar mockOHLCBar = new OHLCBar(1640995200000L, 50000.00, 51000.00, 49000.00, 50500.00, 1000.5);
 
         List<OHLCBar> ohlcBars = Arrays.asList(mockOHLCBar);
 
@@ -96,21 +89,8 @@ class HistoricalDataUtilsTest {
     @Test
     void testConvertToBarData_MultipleBars_Success() {
         // Arrange
-        OHLCBar mockOHLCBar1 = mock(OHLCBar.class);
-        when(mockOHLCBar1.getTime()).thenReturn(1640995200000L); // Jan 1, 2022 00:00:00 UTC
-        when(mockOHLCBar1.getOpen()).thenReturn(50000.00);
-        when(mockOHLCBar1.getHigh()).thenReturn(51000.00);
-        when(mockOHLCBar1.getLow()).thenReturn(49000.00);
-        when(mockOHLCBar1.getClose()).thenReturn(50500.00);
-        when(mockOHLCBar1.getVolume()).thenReturn(1000.5);
-
-        OHLCBar mockOHLCBar2 = mock(OHLCBar.class);
-        when(mockOHLCBar2.getTime()).thenReturn(1640998800000L); // Jan 1, 2022 01:00:00 UTC
-        when(mockOHLCBar2.getOpen()).thenReturn(50500.00);
-        when(mockOHLCBar2.getHigh()).thenReturn(52000.00);
-        when(mockOHLCBar2.getLow()).thenReturn(50000.00);
-        when(mockOHLCBar2.getClose()).thenReturn(51500.00);
-        when(mockOHLCBar2.getVolume()).thenReturn(1500.25);
+        OHLCBar mockOHLCBar1 = new OHLCBar(1640995200000L, 50000.00, 51000.00, 49000.00, 50500.00, 1000.5);
+        OHLCBar mockOHLCBar2 = new OHLCBar(1640998800000L, 50500.00, 52000.00, 50000.00, 51500.00, 1500.25);
 
         List<OHLCBar> ohlcBars = Arrays.asList(mockOHLCBar1, mockOHLCBar2);
 
@@ -156,13 +136,7 @@ class HistoricalDataUtilsTest {
     @Test
     void testConvertToBarData_SingletonList_Success() {
         // Arrange
-        OHLCBar mockOHLCBar = mock(OHLCBar.class);
-        when(mockOHLCBar.getTime()).thenReturn(1640995200000L);
-        when(mockOHLCBar.getOpen()).thenReturn(50000.00);
-        when(mockOHLCBar.getHigh()).thenReturn(51000.00);
-        when(mockOHLCBar.getLow()).thenReturn(49000.00);
-        when(mockOHLCBar.getClose()).thenReturn(50500.00);
-        when(mockOHLCBar.getVolume()).thenReturn(1000.5);
+        OHLCBar mockOHLCBar = new OHLCBar(1640995200000L, 50000.00, 51000.00, 49000.00, 50500.00, 1000.5);
 
         List<OHLCBar> singletonList = Collections.singletonList(mockOHLCBar);
 
@@ -180,13 +154,7 @@ class HistoricalDataUtilsTest {
     @Test
     void testConvertToBarData_DifferentBarSizeAndUnit_Success() {
         // Arrange
-        OHLCBar mockOHLCBar = mock(OHLCBar.class);
-        when(mockOHLCBar.getTime()).thenReturn(1640995200000L);
-        when(mockOHLCBar.getOpen()).thenReturn(50000.00);
-        when(mockOHLCBar.getHigh()).thenReturn(51000.00);
-        when(mockOHLCBar.getLow()).thenReturn(49000.00);
-        when(mockOHLCBar.getClose()).thenReturn(50500.00);
-        when(mockOHLCBar.getVolume()).thenReturn(1000.5);
+        OHLCBar mockOHLCBar = new OHLCBar(1640995200000L, 50000.00, 51000.00, 49000.00, 50500.00, 1000.5);
 
         List<OHLCBar> ohlcBars = Arrays.asList(mockOHLCBar);
         int customBarSize = 1;
@@ -211,13 +179,7 @@ class HistoricalDataUtilsTest {
     @Test
     void testConvertToBarData_ZeroValues_Success() {
         // Arrange
-        OHLCBar zeroBar = mock(OHLCBar.class);
-        when(zeroBar.getTime()).thenReturn(0L);
-        when(zeroBar.getOpen()).thenReturn(0.0);
-        when(zeroBar.getHigh()).thenReturn(0.0);
-        when(zeroBar.getLow()).thenReturn(0.0);
-        when(zeroBar.getClose()).thenReturn(0.0);
-        when(zeroBar.getVolume()).thenReturn(0.0);
+        OHLCBar zeroBar = new OHLCBar(0L, 0.0, 0.0, 0.0, 0.0, 0.0);
 
         List<OHLCBar> ohlcBars = Arrays.asList(zeroBar);
 
@@ -240,13 +202,7 @@ class HistoricalDataUtilsTest {
     @Test
     void testConvertToBarData_NegativeValues_Success() {
         // Arrange
-        OHLCBar negativeBar = mock(OHLCBar.class);
-        when(negativeBar.getTime()).thenReturn(1640995200000L);
-        when(negativeBar.getOpen()).thenReturn(-100.0);
-        when(negativeBar.getHigh()).thenReturn(-50.0);
-        when(negativeBar.getLow()).thenReturn(-150.0);
-        when(negativeBar.getClose()).thenReturn(-75.0);
-        when(negativeBar.getVolume()).thenReturn(-10.0);
+        OHLCBar negativeBar = new OHLCBar(1640995200000L, -100.0, -50.0, -150.0, -75.0, -10.0);
 
         List<OHLCBar> ohlcBars = Arrays.asList(negativeBar);
 
@@ -269,13 +225,8 @@ class HistoricalDataUtilsTest {
     @Test
     void testConvertToBarData_VeryLargeValues_Success() {
         // Arrange
-        OHLCBar largeValuesBar = mock(OHLCBar.class);
-        when(largeValuesBar.getTime()).thenReturn(Long.MAX_VALUE);
-        when(largeValuesBar.getOpen()).thenReturn(Double.MAX_VALUE);
-        when(largeValuesBar.getHigh()).thenReturn(Double.MAX_VALUE);
-        when(largeValuesBar.getLow()).thenReturn(Double.MAX_VALUE);
-        when(largeValuesBar.getClose()).thenReturn(Double.MAX_VALUE);
-        when(largeValuesBar.getVolume()).thenReturn(Double.MAX_VALUE);
+        OHLCBar largeValuesBar = new OHLCBar(Long.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE,
+                Double.MAX_VALUE, Double.MAX_VALUE);
 
         List<OHLCBar> ohlcBars = Arrays.asList(largeValuesBar);
 
@@ -298,13 +249,7 @@ class HistoricalDataUtilsTest {
     @Test
     void testConvertToBarData_NullTicker_Success() {
         // Arrange
-        OHLCBar mockOHLCBar = mock(OHLCBar.class);
-        when(mockOHLCBar.getTime()).thenReturn(1640995200000L);
-        when(mockOHLCBar.getOpen()).thenReturn(50000.00);
-        when(mockOHLCBar.getHigh()).thenReturn(51000.00);
-        when(mockOHLCBar.getLow()).thenReturn(49000.00);
-        when(mockOHLCBar.getClose()).thenReturn(50500.00);
-        when(mockOHLCBar.getVolume()).thenReturn(1000.5);
+        OHLCBar mockOHLCBar = new OHLCBar(1640995200000L, 50000.00, 51000.00, 49000.00, 50500.00, 1000.5);
 
         List<OHLCBar> ohlcBars = Arrays.asList(mockOHLCBar);
 
@@ -329,13 +274,7 @@ class HistoricalDataUtilsTest {
 
         for (BarData.LengthUnit unit : allUnits) {
             // Arrange
-            OHLCBar mockOHLCBar = mock(OHLCBar.class);
-            when(mockOHLCBar.getTime()).thenReturn(1640995200000L);
-            when(mockOHLCBar.getOpen()).thenReturn(50000.00);
-            when(mockOHLCBar.getHigh()).thenReturn(51000.00);
-            when(mockOHLCBar.getLow()).thenReturn(49000.00);
-            when(mockOHLCBar.getClose()).thenReturn(50500.00);
-            when(mockOHLCBar.getVolume()).thenReturn(1000.5);
+            OHLCBar mockOHLCBar = new OHLCBar(1640995200000L, 50000.00, 51000.00, 49000.00, 50500.00, 1000.5);
 
             List<OHLCBar> ohlcBars = Arrays.asList(mockOHLCBar);
 
@@ -353,13 +292,8 @@ class HistoricalDataUtilsTest {
     @Test
     void testConvertToBarData_PrecisionCheck_WithDecimals() {
         // Arrange
-        OHLCBar precisionBar = mock(OHLCBar.class);
-        when(precisionBar.getTime()).thenReturn(1640995200000L);
-        when(precisionBar.getOpen()).thenReturn(123.456789);
-        when(precisionBar.getHigh()).thenReturn(124.987654);
-        when(precisionBar.getLow()).thenReturn(122.123456);
-        when(precisionBar.getClose()).thenReturn(123.789012);
-        when(precisionBar.getVolume()).thenReturn(999.999999);
+        OHLCBar precisionBar = new OHLCBar(1640995200000L, 123.456789, 124.987654, 122.123456, 123.789012,
+                999.999999);
 
         List<OHLCBar> ohlcBars = Arrays.asList(precisionBar);
 
@@ -383,13 +317,7 @@ class HistoricalDataUtilsTest {
     void testConvertToBarData_TimeZoneConversion_SystemDefault() {
         // Arrange
         long epochMillis = 1640995200000L; // Jan 1, 2022 00:00:00 UTC
-        OHLCBar timeTestBar = mock(OHLCBar.class);
-        when(timeTestBar.getTime()).thenReturn(epochMillis);
-        when(timeTestBar.getOpen()).thenReturn(100.0);
-        when(timeTestBar.getHigh()).thenReturn(100.0);
-        when(timeTestBar.getLow()).thenReturn(100.0);
-        when(timeTestBar.getClose()).thenReturn(100.0);
-        when(timeTestBar.getVolume()).thenReturn(100.0);
+        OHLCBar timeTestBar = new OHLCBar(epochMillis, 100.0, 100.0, 100.0, 100.0, 100.0);
 
         List<OHLCBar> ohlcBars = Arrays.asList(timeTestBar);
 
@@ -409,57 +337,31 @@ class HistoricalDataUtilsTest {
     @Test
     void testConvertToBarData_VerifyAllMethodsCalled() {
         // Arrange
-        OHLCBar mockOHLCBar = mock(OHLCBar.class);
-        when(mockOHLCBar.getTime()).thenReturn(1640995200000L);
-        when(mockOHLCBar.getOpen()).thenReturn(50000.00);
-        when(mockOHLCBar.getHigh()).thenReturn(51000.00);
-        when(mockOHLCBar.getLow()).thenReturn(49000.00);
-        when(mockOHLCBar.getClose()).thenReturn(50500.00);
-        when(mockOHLCBar.getVolume()).thenReturn(1000.5);
+        OHLCBar mockOHLCBar = new OHLCBar(1640995200000L, 50000.00, 51000.00, 49000.00, 50500.00, 1000.5);
 
         List<OHLCBar> ohlcBars = Arrays.asList(mockOHLCBar);
 
         // Act
-        HistoricalDataUtils.convertToBarData(mockTicker, DEFAULT_BAR_SIZE, DEFAULT_BAR_SIZE_UNIT, ohlcBars);
+        List<BarData> result = HistoricalDataUtils.convertToBarData(mockTicker, DEFAULT_BAR_SIZE, DEFAULT_BAR_SIZE_UNIT,
+                ohlcBars);
 
-        // Assert - Verify all OHLCBar methods were called
-        verify(mockOHLCBar, times(1)).getTime();
-        verify(mockOHLCBar, times(1)).getOpen();
-        verify(mockOHLCBar, times(1)).getHigh();
-        verify(mockOHLCBar, times(1)).getLow();
-        verify(mockOHLCBar, times(1)).getClose();
-        verify(mockOHLCBar, times(1)).getVolume();
-
-        // Verify no unexpected interactions
-        verifyNoMoreInteractions(mockOHLCBar);
+        // Assert - Verify the conversion used all fields correctly
+        assertNotNull(result);
+        assertEquals(1, result.size());
+        BarData barData = result.get(0);
+        assertEquals(BigDecimal.valueOf(50000.00), barData.getOpen());
+        assertEquals(BigDecimal.valueOf(51000.00), barData.getHigh());
+        assertEquals(BigDecimal.valueOf(49000.00), barData.getLow());
+        assertEquals(BigDecimal.valueOf(50500.00), barData.getClose());
+        assertEquals(BigDecimal.valueOf(1000.5), barData.getVolume());
     }
 
     @Test
     void testConvertToBarData_IterationOrder_PreservesOrder() {
         // Arrange - Create multiple bars to test order preservation
-        OHLCBar bar1 = mock(OHLCBar.class);
-        when(bar1.getTime()).thenReturn(1640995200000L); // Jan 1, 2022 00:00:00 UTC
-        when(bar1.getOpen()).thenReturn(50000.00);
-        when(bar1.getHigh()).thenReturn(51000.00);
-        when(bar1.getLow()).thenReturn(49000.00);
-        when(bar1.getClose()).thenReturn(50500.00);
-        when(bar1.getVolume()).thenReturn(1000.5);
-
-        OHLCBar bar2 = mock(OHLCBar.class);
-        when(bar2.getTime()).thenReturn(1640998800000L); // Jan 1, 2022 01:00:00 UTC
-        when(bar2.getOpen()).thenReturn(50500.00);
-        when(bar2.getHigh()).thenReturn(52000.00);
-        when(bar2.getLow()).thenReturn(50000.00);
-        when(bar2.getClose()).thenReturn(51500.00);
-        when(bar2.getVolume()).thenReturn(1500.25);
-
-        OHLCBar bar3 = mock(OHLCBar.class);
-        when(bar3.getTime()).thenReturn(1641002400000L); // Jan 1, 2022 02:00:00 UTC
-        when(bar3.getOpen()).thenReturn(51500.00);
-        when(bar3.getHigh()).thenReturn(52500.00);
-        when(bar3.getLow()).thenReturn(51000.00);
-        when(bar3.getClose()).thenReturn(52000.00);
-        when(bar3.getVolume()).thenReturn(2000.0);
+        OHLCBar bar1 = new OHLCBar(1640995200000L, 50000.00, 51000.00, 49000.00, 50500.00, 1000.5);
+        OHLCBar bar2 = new OHLCBar(1640998800000L, 50500.00, 52000.00, 50000.00, 51500.00, 1500.25);
+        OHLCBar bar3 = new OHLCBar(1641002400000L, 51500.00, 52500.00, 51000.00, 52000.00, 2000.0);
 
         List<OHLCBar> ohlcBars = Arrays.asList(bar1, bar2, bar3);
 
