@@ -130,6 +130,20 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     private final Deque<SpreadEntry> spreadHistory = new ArrayDeque<>();
     private final long timeWindowMillis = 6000; // 6 seconds
     private final double dislocationMultiplier = 7.5; // Multiplier for dislocation threshold
+    protected double passiveFillBaseThreshold = 6.0;
+    protected double passiveFillInsideSpreadWeight = 2.0;
+    protected double passiveFillTradeEvidenceBonus = 1.0;
+    protected double passiveFillWideSpreadPenaltyPer100Bps = 0.25;
+    protected final Map<String, PassiveFillState> passiveFillStates = new ConcurrentHashMap<>();
+
+    protected static final double PASSIVE_FILL_BASE_QUOTE_SCORE = 1.0;
+    protected static final double PASSIVE_FILL_SCORE_DECAY = 0.5;
+    protected static final double PASSIVE_FILL_TRADE_EVIDENCE_DECAY = 0.5;
+
+    protected static class PassiveFillState {
+        double score;
+        double tradeEvidence;
+    }
 
     public PaperBroker(QuoteEngine quoteEngine, Ticker ticker, double startingBalance) {
         this(quoteEngine, ticker, null, null, startingBalance);
@@ -166,6 +180,22 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
             this.spread = spread;
             this.timestamp = timestamp;
         }
+    }
+
+    public void setPassiveFillBaseThreshold(double passiveFillBaseThreshold) {
+        this.passiveFillBaseThreshold = Math.max(0.0, passiveFillBaseThreshold);
+    }
+
+    public void setPassiveFillInsideSpreadWeight(double passiveFillInsideSpreadWeight) {
+        this.passiveFillInsideSpreadWeight = Math.max(0.0, passiveFillInsideSpreadWeight);
+    }
+
+    public void setPassiveFillTradeEvidenceBonus(double passiveFillTradeEvidenceBonus) {
+        this.passiveFillTradeEvidenceBonus = Math.max(0.0, passiveFillTradeEvidenceBonus);
+    }
+
+    public void setPassiveFillWideSpreadPenaltyPer100Bps(double passiveFillWideSpreadPenaltyPer100Bps) {
+        this.passiveFillWideSpreadPenaltyPer100Bps = Math.max(0.0, passiveFillWideSpreadPenaltyPer100Bps);
     }
 
     @Override
@@ -419,6 +449,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                                 && order.getLimitPrice().doubleValue() >= bestAskPrice) {
                             logger.warn("Limit buy order would cross the best ask price. Cancelling order.");
                             openBids.remove(orderId);
+                            passiveFillStates.remove(orderId);
                             cancelOrder(orderId, order.getClientOrderId(), CancelReason.POST_ONLY_WOULD_CROSS);
                             return new BrokerRequestResult(false, true,
                                     "Post-only buy would cross best ask; order canceled");
@@ -429,6 +460,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                             return new BrokerRequestResult(false, true, "404 Order not found: " + orderId);
                         }
                         logger.info("Limit buy order modified: {}", order);
+                        passiveFillStates.remove(orderId);
                         openBids.put(orderId, order);
                         OrderStatus status = new OrderStatus(Status.REPLACED, orderId, orderId, ticker,
                                 getCurrentTime());
@@ -439,6 +471,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                                 && order.getLimitPrice().doubleValue() <= bestBidPrice) {
                             logger.warn("Limit sell order would cross the best bid price. Cancelling order.");
                             openAsks.remove(orderId);
+                            passiveFillStates.remove(orderId);
                             cancelOrder(orderId, order.getClientOrderId(), CancelReason.POST_ONLY_WOULD_CROSS);
                             return new BrokerRequestResult(false, true,
                                     "Post-only sell would cross best bid; order canceled");
@@ -449,6 +482,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                             return new BrokerRequestResult(false, true, "404Order not found: " + orderId);
                         }
                         logger.info("Limit sell order modified: {}", order);
+                        passiveFillStates.remove(orderId);
                         openAsks.put(orderId, order);
                         OrderStatus status = new OrderStatus(Status.REPLACED, orderId, orderId, ticker,
                                 getCurrentTime());
@@ -474,6 +508,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         order.setOrderId(orderId); // Set the generated order ID
         orderOperationsLock.writeLock().lock();
         try {
+            passiveFillStates.remove(orderId);
             openOrders.put(orderId, order); // Add the order to open orders
         } finally {
             orderOperationsLock.writeLock().unlock();
@@ -597,41 +632,33 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     public void askUpdated(BigDecimal newAsk, boolean isTrade) {
-        if (!isTrade) {
-            bestAskPrice = newAsk.doubleValue();
+        if (newAsk == null) {
+            return;
         }
-        checkBidsFills(newAsk.doubleValue(), isTrade); // Check for filled orders based on the new ask price
-
+        if (isTrade) {
+            addPassiveTradeEvidence(OrderFlow.Side.SELL, newAsk.doubleValue());
+            return;
+        }
+        applyTopOfBookUpdate(null, newAsk, false, false);
     }
 
     public void bidUpdated(BigDecimal newBid, boolean isTrade) {
-        if (!isTrade) {
-            bestBidPrice = newBid.doubleValue();
+        if (newBid == null) {
+            return;
         }
-        checkAsksFills(newBid.doubleValue(), isTrade); // Check for filled orders based on the new bid price
-
+        if (isTrade) {
+            addPassiveTradeEvidence(OrderFlow.Side.BUY, newBid.doubleValue());
+            return;
+        }
+        applyTopOfBookUpdate(newBid, null, false, false);
     }
 
     protected void askCleared() {
-        marketDataLock.writeLock().lock();
-        try {
-            bestAskPrice = Double.MAX_VALUE;
-            recalculateMidPrice();
-            updateStatus();
-        } finally {
-            marketDataLock.writeLock().unlock();
-        }
+        applyTopOfBookUpdate(null, null, false, true);
     }
 
     protected void bidCleared() {
-        marketDataLock.writeLock().lock();
-        try {
-            bestBidPrice = 0.0;
-            recalculateMidPrice();
-            updateStatus();
-        } finally {
-            marketDataLock.writeLock().unlock();
-        }
+        applyTopOfBookUpdate(null, null, true, false);
     }
 
     protected void recalculateMidPrice() {
@@ -642,58 +669,169 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         }
     }
 
-    protected List<OrderTicket> checkAsksFills(double bestBid, boolean isTrade) {
-        List<OrderTicket> filledOrders = new ArrayList<>();
-        // Take write lock on market data for exclusive access during fill processing
+    protected void applyTopOfBookUpdate(BigDecimal newBid, BigDecimal newAsk, boolean clearBid, boolean clearAsk) {
+        boolean quoteChanged = clearBid || clearAsk || newBid != null || newAsk != null;
+        if (!quoteChanged) {
+            return;
+        }
+
         marketDataLock.writeLock().lock();
         try {
-            if (!isTrade) {
-                bestBidPrice = bestBid; // Update the best ask price
-                recalculateMidPrice();
+            if (clearBid) {
+                bestBidPrice = 0.0;
             }
-
-            for (OrderTicket order : new ArrayList<>(openAsks.values())) {
-
-                boolean filled = order.getLimitPrice().doubleValue() <= bestBid; // Check if the order can be filled
-                                                                                 // at
-                                                                                 // the best bid price
-
-                if (filled && fillOrder(order, order.getLimitPrice().doubleValue())) {
-                    filledOrders.add(order);
-                }
+            if (clearAsk) {
+                bestAskPrice = Double.MAX_VALUE;
             }
+            if (newBid != null) {
+                bestBidPrice = newBid.doubleValue();
+            }
+            if (newAsk != null) {
+                bestAskPrice = newAsk.doubleValue();
+            }
+            recalculateMidPrice();
+            evaluatePassiveFillCandidatesLocked();
+            updateStatus();
         } finally {
-            marketDataLock.writeLock().unlock(); // Ensure the lock is released after processing
+            marketDataLock.writeLock().unlock();
+        }
+    }
+
+    protected List<OrderTicket> evaluatePassiveFillCandidatesLocked() {
+        List<OrderTicket> filledOrders = new ArrayList<>();
+
+        for (OrderTicket order : new ArrayList<>(openBids.values())) {
+            if (order == null || order.getType() != Type.LIMIT || order.getLimitPrice() == null) {
+                continue;
+            }
+            if (evaluatePassiveBidFill(order)) {
+                filledOrders.add(order);
+            }
+        }
+
+        for (OrderTicket order : new ArrayList<>(openAsks.values())) {
+            if (order == null || order.getType() != Type.LIMIT || order.getLimitPrice() == null) {
+                continue;
+            }
+            if (evaluatePassiveAskFill(order)) {
+                filledOrders.add(order);
+            }
         }
 
         return filledOrders;
     }
 
-    protected List<OrderTicket> checkBidsFills(double askPrice, boolean isTrade) {
-        List<OrderTicket> filledOrders = new ArrayList<>();
-        // Take write lock on market data for exclusive access during fill processing
-        marketDataLock.writeLock().lock();
-        try {
-            if (!isTrade) {
-                bestAskPrice = askPrice; // Update the best ask price
-                recalculateMidPrice();
-            }
+    protected boolean evaluatePassiveBidFill(OrderTicket order) {
+        String orderId = order.getOrderId();
+        double limitPrice = order.getLimitPrice().doubleValue();
 
-            for (OrderTicket order : new ArrayList<>(openBids.values())) {
-
-                boolean filled = order.getLimitPrice().doubleValue() >= askPrice; // Check if the order can be filled at
-                                                                                  // the
-                                                                                  // best ask price
-
-                if (filled && fillOrder(order, order.getLimitPrice().doubleValue())) {
-                    filledOrders.add(order);
-                }
-            }
-        } finally {
-            marketDataLock.writeLock().unlock(); // Ensure the lock is released after processing
+        if (bestAskPrice < Double.MAX_VALUE && limitPrice >= bestAskPrice) {
+            passiveFillStates.remove(orderId);
+            return fillOrder(order, limitPrice);
         }
 
-        return filledOrders;
+        if (!hasUsableTopOfBook() || limitPrice < bestBidPrice) {
+            decayPassiveFillState(orderId);
+            return false;
+        }
+
+        double spread = bestAskPrice - bestBidPrice;
+        double progress = clamp((limitPrice - bestBidPrice) / spread, 0.0, 1.0);
+        return accumulatePassiveFillScore(order, orderId, progress);
+    }
+
+    protected boolean evaluatePassiveAskFill(OrderTicket order) {
+        String orderId = order.getOrderId();
+        double limitPrice = order.getLimitPrice().doubleValue();
+
+        if (bestBidPrice > 0.0 && limitPrice <= bestBidPrice) {
+            passiveFillStates.remove(orderId);
+            return fillOrder(order, limitPrice);
+        }
+
+        if (!hasUsableTopOfBook() || limitPrice > bestAskPrice) {
+            decayPassiveFillState(orderId);
+            return false;
+        }
+
+        double spread = bestAskPrice - bestBidPrice;
+        double progress = clamp((bestAskPrice - limitPrice) / spread, 0.0, 1.0);
+        return accumulatePassiveFillScore(order, orderId, progress);
+    }
+
+    protected boolean accumulatePassiveFillScore(OrderTicket order, String orderId, double progress) {
+        PassiveFillState state = passiveFillStates.computeIfAbsent(orderId, ignored -> new PassiveFillState());
+        double tradeEvidenceBonus = Math.min(state.tradeEvidence, passiveFillTradeEvidenceBonus);
+        state.score += PASSIVE_FILL_BASE_QUOTE_SCORE + (progress * passiveFillInsideSpreadWeight)
+                + tradeEvidenceBonus;
+        state.tradeEvidence *= PASSIVE_FILL_TRADE_EVIDENCE_DECAY;
+
+        if (state.score >= getPassiveFillThreshold()) {
+            passiveFillStates.remove(orderId);
+            return fillOrder(order, order.getLimitPrice().doubleValue());
+        }
+        return false;
+    }
+
+    protected boolean hasUsableTopOfBook() {
+        return bestBidPrice > 0.0 && bestAskPrice < Double.MAX_VALUE && bestAskPrice > bestBidPrice;
+    }
+
+    protected double getPassiveFillThreshold() {
+        if (!hasUsableTopOfBook() || midPrice <= 0.0) {
+            return passiveFillBaseThreshold;
+        }
+        double spreadBps = ((bestAskPrice - bestBidPrice) / midPrice) * 10000.0;
+        double wideSpreadPenalty = (spreadBps / 100.0) * passiveFillWideSpreadPenaltyPer100Bps;
+        return passiveFillBaseThreshold + Math.min(passiveFillBaseThreshold, wideSpreadPenalty);
+    }
+
+    protected void addPassiveTradeEvidence(OrderFlow.Side side, double tradePrice) {
+        if (side == null) {
+            return;
+        }
+
+        if (side == OrderFlow.Side.SELL) {
+            for (OrderTicket order : new ArrayList<>(openBids.values())) {
+                addPassiveTradeEvidence(order, tradePrice, true);
+            }
+        } else if (side == OrderFlow.Side.BUY) {
+            for (OrderTicket order : new ArrayList<>(openAsks.values())) {
+                addPassiveTradeEvidence(order, tradePrice, false);
+            }
+        }
+    }
+
+    protected void addPassiveTradeEvidence(OrderTicket order, double tradePrice, boolean buyOrder) {
+        if (order == null || order.getType() != Type.LIMIT || order.getLimitPrice() == null) {
+            return;
+        }
+
+        double limitPrice = order.getLimitPrice().doubleValue();
+        boolean supportiveTrade = buyOrder ? tradePrice <= limitPrice : tradePrice >= limitPrice;
+        if (!supportiveTrade) {
+            return;
+        }
+
+        PassiveFillState state = passiveFillStates.computeIfAbsent(order.getOrderId(), ignored -> new PassiveFillState());
+        state.tradeEvidence = Math.min(passiveFillTradeEvidenceBonus, state.tradeEvidence + passiveFillTradeEvidenceBonus);
+    }
+
+    protected void decayPassiveFillState(String orderId) {
+        PassiveFillState state = passiveFillStates.get(orderId);
+        if (state == null) {
+            return;
+        }
+
+        state.score *= PASSIVE_FILL_SCORE_DECAY;
+        state.tradeEvidence *= PASSIVE_FILL_TRADE_EVIDENCE_DECAY;
+        if (state.score < 0.0001 && state.tradeEvidence < 0.0001) {
+            passiveFillStates.remove(orderId);
+        }
+    }
+
+    protected double clamp(double value, double minValue, double maxValue) {
+        return Math.max(minValue, Math.min(maxValue, value));
     }
 
     protected void updateStatus() {
@@ -724,8 +862,8 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
             brokerStatus.setFundingAccruedOrPaid(fundingAccruedOrPaid); // Update total funding paid or collected
             brokerStatus.setFundingRateAnnualized(((fundingRate / 8.0) * 24.0 * 365.0) * 100.0);
 
-            logger.info("Broker status updated: {}", brokerStatus); // Log the updated
-            // status
+            logger.info("Broker status updated: position={}, bid={}, ask={}, mid={}, openOrders={}",
+                    currentPosition.doubleValue(), bestBidPrice, bestAskPrice, midPrice, openBids.size() + openAsks.size());
         }
     }
 
@@ -756,6 +894,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
                 return false;
             }
 
+            passiveFillStates.remove(orderId);
             openBids.remove(orderId);
             openAsks.remove(orderId);
 
@@ -824,6 +963,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
         try {
             logger.debug("Attempting to remove order with ID: {} from openOrders", orderId);
             OrderTicket order = openOrders.remove(orderId);
+            passiveFillStates.remove(orderId);
             openBids.remove(orderId);
             openAsks.remove(orderId);
             BigDecimal remainingSize = BigDecimal.ZERO;
@@ -1186,6 +1326,9 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     public void quoteRecieved(ILevel1Quote quote) {
+        if (quote == null) {
+            return;
+        }
 
         if (quote.containsType(QuoteType.MARK_PRICE)) {
             markPriceUpdated(ticker.getSymbol(), quote.getValue(QuoteType.MARK_PRICE), quote.getTimeStamp());
@@ -1195,28 +1338,17 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
             fundingRateUpdated(ticker.getSymbol(), quote.getValue(QuoteType.FUNDING_RATE_APR), quote.getTimeStamp());
         }
 
-        if (quote.isCleared(QuoteType.BID)) {
-            bidCleared();
-        }
-
-        if (quote.isCleared(QuoteType.ASK)) {
-            askCleared();
-        }
-
-        if (quote.containsType(QuoteType.BID)) {
-            bidUpdated(quote.getValue(QuoteType.BID), false);
-        }
-
-        if (quote.containsType(QuoteType.ASK)) {
-            askUpdated(quote.getValue(QuoteType.ASK), false);
-        }
+        applyTopOfBookUpdate(quote.containsType(QuoteType.BID) ? quote.getValue(QuoteType.BID) : null,
+                quote.containsType(QuoteType.ASK) ? quote.getValue(QuoteType.ASK) : null,
+                quote.isCleared(QuoteType.BID), quote.isCleared(QuoteType.ASK));
     }
 
     @Override
     public void orderflowReceived(OrderFlow orderflow) {
-        // Passive fills are driven by top-of-book updates only. Thin-market trade prints can
-        // arrive sparsely or out of order, which makes orderflow a poor trigger for realistic
-        // resting-order fills in the paper broker.
+        if (orderflow == null || orderflow.getSide() == null || orderflow.getPrice() == null) {
+            return;
+        }
+        addPassiveTradeEvidence(orderflow.getSide(), orderflow.getPrice().doubleValue());
     }
 
     @Override
