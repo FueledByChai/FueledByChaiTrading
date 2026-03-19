@@ -5,6 +5,7 @@ import java.util.Objects;
 public class PaperBrokerLatency {
     public static final PaperBrokerLatency PARDEX_LATENCY = new PaperBrokerLatency(350, 550, 200, 300);
     public static final PaperBrokerLatency HYPERLIQUID_LATENCY = new PaperBrokerLatency(900, 2000, 200, 300);
+    public static final PaperBrokerLatency DRIFT_LATENCY = new PaperBrokerLatency(650, 1200, 200, 350);
     public static final PaperBrokerLatency ASTER_LATENCY = new PaperBrokerLatency(250, 450, 120, 220);
 
     protected int restLatencyMsMin = 0;

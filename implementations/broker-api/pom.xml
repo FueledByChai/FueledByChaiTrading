@@ -44,6 +44,6 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
         <module>hyperliquid-broker-api-impl</module>
     <module>okx-broker-api-impl</module>
     <module>bybit-broker-api-impl</module>
-    <module>aster-broker-api-impl</module>
+    <module>drift-broker-api-impl</module>
     </modules>
 </project>
