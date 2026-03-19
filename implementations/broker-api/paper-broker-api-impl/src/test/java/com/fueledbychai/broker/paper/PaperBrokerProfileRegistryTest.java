@@ -1,9 +1,8 @@
 package com.fueledbychai.broker.paper;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import org.junit.jupiter.api.Test;
 
 import com.fueledbychai.data.Exchange;
@@ -40,15 +39,16 @@ public class PaperBrokerProfileRegistryTest {
                 continue;
             }
 
-<<<<<<< HEAD
             if (exchange == Exchange.DRIFT) {
                 assertLatency(exchange, 650, 1200, 200, 350);
                 assertCommission(exchange, InstrumentType.PERPETUAL_FUTURES, 0.25, -3.5);
-=======
+                continue;
+            }
+
+
             if (exchange == Exchange.ASTER) {
                 assertLatency(exchange, 250, 450, 120, 220);
                 assertCommission(exchange, InstrumentType.PERPETUAL_FUTURES, 0.0, -4.0);
->>>>>>> origin/main
                 assertCommission(exchange, InstrumentType.CRYPTO_SPOT, 0.0, 0.0);
                 assertCommission(exchange, InstrumentType.OPTION, 0.0, 0.0);
                 continue;
