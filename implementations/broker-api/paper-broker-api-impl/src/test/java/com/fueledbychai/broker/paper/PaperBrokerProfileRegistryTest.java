@@ -12,8 +12,8 @@ import com.fueledbychai.data.InstrumentType;
 public class PaperBrokerProfileRegistryTest {
 
     private static final Set<Exchange> EXPECTED_CRYPTO_EXCHANGES = Set.of(Exchange.DYDX, Exchange.HYPERLIQUID,
-            Exchange.PARADEX, Exchange.DRIFT, Exchange.LIGHTER, Exchange.BINANCE_SPOT, Exchange.BINANCE_FUTURES,
-            Exchange.DERIBIT, Exchange.OKX, Exchange.BYBIT);
+            Exchange.PARADEX, Exchange.DRIFT, Exchange.LIGHTER, Exchange.BINANCE_SPOT, Exchange.BINANCE_FUTURES, Exchange.DERIBIT,
+            Exchange.OKX, Exchange.BYBIT, Exchange.ASTER);
 
     private static final Set<InstrumentType> EXPECTED_COMMISSION_TYPES = Set.of(InstrumentType.PERPETUAL_FUTURES,
             InstrumentType.CRYPTO_SPOT, InstrumentType.OPTION);
@@ -40,9 +40,15 @@ public class PaperBrokerProfileRegistryTest {
                 continue;
             }
 
+<<<<<<< HEAD
             if (exchange == Exchange.DRIFT) {
                 assertLatency(exchange, 650, 1200, 200, 350);
                 assertCommission(exchange, InstrumentType.PERPETUAL_FUTURES, 0.25, -3.5);
+=======
+            if (exchange == Exchange.ASTER) {
+                assertLatency(exchange, 250, 450, 120, 220);
+                assertCommission(exchange, InstrumentType.PERPETUAL_FUTURES, 0.0, -4.0);
+>>>>>>> origin/main
                 assertCommission(exchange, InstrumentType.CRYPTO_SPOT, 0.0, 0.0);
                 assertCommission(exchange, InstrumentType.OPTION, 0.0, 0.0);
                 continue;

@@ -6,12 +6,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 
 import java.math.BigDecimal;
+import java.time.ZonedDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,11 +28,17 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.fueledbychai.broker.BrokerRequestResult;
+import com.fueledbychai.broker.order.Fill;
+import com.fueledbychai.broker.order.OrderEvent;
+import com.fueledbychai.broker.order.OrderStatus;
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.marketdata.Level1Quote;
+import com.fueledbychai.marketdata.OrderFlow;
+import com.fueledbychai.marketdata.QuoteType;
 import com.fueledbychai.marketdata.QuoteEngine;
 
 @ExtendWith(MockitoExtension.class)
@@ -31,8 +46,116 @@ public class PaperBrokerTest {
 
     private static final PaperBrokerLatency ZERO_LATENCY = new PaperBrokerLatency(0, 0, 0, 0);
 
+    private static final class CountingOpenOrdersMap extends LinkedHashMap<String, OrderTicket> {
+
+        private static final long serialVersionUID = 1L;
+
+        private int successfulRemovals;
+
+        @Override
+        public OrderTicket remove(Object key) {
+            OrderTicket removed = super.remove(key);
+            if (removed != null) {
+                successfulRemovals++;
+            }
+            return removed;
+        }
+
+        private int getSuccessfulRemovals() {
+            return successfulRemovals;
+        }
+    }
+
     @Mock
     private QuoteEngine quoteEngine;
+
+    private static final class TestablePaperBroker extends PaperBroker {
+
+        private int startAccountUpdateTaskCalls;
+        private final CountingOpenOrdersMap trackedOpenOrders = new CountingOpenOrdersMap();
+        private final AtomicInteger emittedFillEvents = new AtomicInteger();
+        private final AtomicInteger emittedFilledOrderEvents = new AtomicInteger();
+
+        private TestablePaperBroker(QuoteEngine quoteEngine, Ticker ticker) {
+            super(quoteEngine, ticker, PaperBrokerCommission.PARADEX_COMMISSION, ZERO_LATENCY, 1000.0);
+            this.openOrders = trackedOpenOrders;
+        }
+
+        @Override
+        protected void startAccountUpdateTask() {
+            startAccountUpdateTaskCalls++;
+        }
+
+        @Override
+        protected void fireOrderStatusUpdate(OrderEvent orderEvent) {
+            if (orderEvent.getOrderStatus().getStatus() == OrderStatus.Status.FILLED) {
+                emittedFilledOrderEvents.incrementAndGet();
+            }
+        }
+
+        @Override
+        protected void fireFillUpdate(Fill fill) {
+            emittedFillEvents.incrementAndGet();
+        }
+
+        @Override
+        protected void writeTradeToCsv(OrderTicket order, double price, double fee) {
+        }
+
+        private int getEmittedFillEvents() {
+            return emittedFillEvents.get();
+        }
+
+        private int getEmittedFilledOrderEvents() {
+            return emittedFilledOrderEvents.get();
+        }
+
+        private int getSuccessfulOpenOrderRemovals() {
+            return trackedOpenOrders.getSuccessfulRemovals();
+        }
+    }
+
+    @Test
+    public void testIsConnectedFalseByDefault() {
+        PaperBroker broker = new PaperBroker(quoteEngine, new Ticker("BTCUSDT"),
+                PaperBrokerCommission.PARADEX_COMMISSION, ZERO_LATENCY, 1000.0);
+
+        assertFalse(broker.isConnected());
+    }
+
+    @Test
+    public void testConnectMarksBrokerConnectedAndStartsAccountUpdateTask() {
+        TestablePaperBroker broker = new TestablePaperBroker(quoteEngine, new Ticker("BTCUSDT"));
+
+        broker.connect();
+
+        assertTrue(broker.isConnected());
+        assertEquals(1, broker.startAccountUpdateTaskCalls);
+    }
+
+    @Test
+    public void testConnectWhenAlreadyConnectedDoesNotRestartAccountUpdateTask() {
+        TestablePaperBroker broker = new TestablePaperBroker(quoteEngine, new Ticker("BTCUSDT"));
+
+        broker.connect();
+        broker.connect();
+
+        assertTrue(broker.isConnected());
+        assertEquals(1, broker.startAccountUpdateTaskCalls);
+    }
+
+    @Test
+    public void testDisconnectMarksBrokerDisconnected() {
+        Ticker ticker = new Ticker("BTCUSDT");
+        TestablePaperBroker broker = new TestablePaperBroker(quoteEngine, ticker);
+        broker.connect();
+
+        broker.disconnect();
+
+        assertFalse(broker.isConnected());
+        verify(quoteEngine, times(1)).unsubscribeLevel1(ticker, broker);
+        verify(quoteEngine, times(1)).unsubscribeOrderFlow(ticker, broker);
+    }
 
     @Test
     public void testGetOpenOrdersReturnsAllBidsAndAsks() {
@@ -160,5 +283,108 @@ public class PaperBrokerTest {
         assertEquals(20, broker.latencyModel.getRestLatencyMsMax());
         assertEquals(30, broker.latencyModel.getWsLatencyMsMin());
         assertEquals(40, broker.latencyModel.getWsLatencyMsMax());
+    }
+
+    @Test
+    public void testAutoResolvesAsterProfilesFromTicker() {
+        Ticker ticker = new Ticker("BTCUSDT").setExchange(Exchange.ASTER)
+                .setInstrumentType(InstrumentType.PERPETUAL_FUTURES);
+
+        PaperBroker broker = new PaperBroker(quoteEngine, ticker, 1000.0);
+
+        assertEquals(0.0, broker.makerFee, 0.0);
+        assertEquals(-4.0 / 10000.0, broker.takerFee, 0.0);
+        assertEquals(250, broker.latencyModel.getRestLatencyMsMin());
+        assertEquals(450, broker.latencyModel.getRestLatencyMsMax());
+        assertEquals(120, broker.latencyModel.getWsLatencyMsMin());
+        assertEquals(220, broker.latencyModel.getWsLatencyMsMax());
+    }
+
+    @Test
+    public void testConcurrentFillAttemptsOnlyEmitOneFillAndOneFilledEvent() throws Exception {
+        Ticker ticker = new Ticker("BTCUSDT");
+        TestablePaperBroker broker = new TestablePaperBroker(quoteEngine, ticker);
+        OrderTicket order = new OrderTicket("order-1", ticker, new BigDecimal("2.0"), TradeDirection.BUY);
+        order.setType(OrderTicket.Type.LIMIT);
+        order.setLimitPrice(new BigDecimal("101.25"));
+        order.setClientOrderId("client-1");
+        order.setOrderEntryTime(broker.getCurrentTime());
+
+        broker.openOrders.put(order.getOrderId(), order);
+        broker.openBids.put(order.getOrderId(), order);
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try {
+            Future<Boolean> firstAttempt = executor.submit(() -> {
+                ready.countDown();
+                if (!start.await(1, TimeUnit.SECONDS)) {
+                    throw new AssertionError("Timed out waiting for concurrent fill start");
+                }
+                return broker.fillOrder(order, 101.25);
+            });
+            Future<Boolean> secondAttempt = executor.submit(() -> {
+                ready.countDown();
+                if (!start.await(1, TimeUnit.SECONDS)) {
+                    throw new AssertionError("Timed out waiting for concurrent fill start");
+                }
+                return broker.fillOrder(order, 101.25);
+            });
+
+            assertTrue(ready.await(1, TimeUnit.SECONDS));
+            start.countDown();
+
+            boolean firstResult = firstAttempt.get(1, TimeUnit.SECONDS);
+            boolean secondResult = secondAttempt.get(1, TimeUnit.SECONDS);
+
+            assertEquals(1, (firstResult ? 1 : 0) + (secondResult ? 1 : 0));
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertEquals(OrderStatus.Status.FILLED, order.getCurrentStatus());
+        assertEquals(1, broker.getEmittedFilledOrderEvents());
+        assertEquals(1, broker.getEmittedFillEvents());
+        assertEquals(1, broker.totalOrdersPlaced);
+        assertEquals(0, broker.currentPosition.compareTo(new BigDecimal("2.0")));
+        assertEquals(202.5, broker.dollarVolume, 0.0);
+        assertEquals(1, broker.getSuccessfulOpenOrderRemovals());
+        assertTrue(broker.openOrders.isEmpty());
+        assertFalse(broker.openBids.containsKey(order.getOrderId()));
+        assertFalse(broker.openAsks.containsKey(order.getOrderId()));
+        assertEquals(1, broker.executedOrders.size());
+        assertEquals(1, order.getFills().size());
+    }
+
+    @Test
+    public void testPassiveLimitOrderIgnoresOrderFlowButFillsFromTopOfBookQuote() {
+        Ticker ticker = new Ticker("BTCUSDT");
+        TestablePaperBroker broker = new TestablePaperBroker(quoteEngine, ticker);
+        OrderTicket order = new OrderTicket("order-1", ticker, new BigDecimal("2.0"), TradeDirection.BUY);
+        order.setType(OrderTicket.Type.LIMIT);
+        order.setLimitPrice(new BigDecimal("101.25"));
+        order.setClientOrderId("client-1");
+        order.setOrderEntryTime(broker.getCurrentTime());
+
+        broker.openOrders.put(order.getOrderId(), order);
+        broker.openBids.put(order.getOrderId(), order);
+
+        broker.orderflowReceived(new OrderFlow(ticker, new BigDecimal("101.20"), new BigDecimal("5.0"),
+                OrderFlow.Side.SELL, ZonedDateTime.now()));
+
+        assertEquals(OrderStatus.Status.NEW, order.getCurrentStatus());
+        assertEquals(0, broker.getEmittedFillEvents());
+        assertTrue(broker.openOrders.containsKey(order.getOrderId()));
+
+        Level1Quote quote = new Level1Quote(ticker, ZonedDateTime.now());
+        quote.addQuote(QuoteType.ASK, new BigDecimal("101.20"));
+        broker.quoteRecieved(quote);
+
+        assertEquals(OrderStatus.Status.FILLED, order.getCurrentStatus());
+        assertEquals(1, broker.getEmittedFillEvents());
+        assertEquals(1, broker.getEmittedFilledOrderEvents());
+        assertFalse(broker.openOrders.containsKey(order.getOrderId()));
     }
 }

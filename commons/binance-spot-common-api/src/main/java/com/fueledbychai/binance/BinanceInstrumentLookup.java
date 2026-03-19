@@ -20,7 +20,7 @@ public class BinanceInstrumentLookup implements IInstrumentLookup {
     protected final IBinanceRestApi api;
 
     public BinanceInstrumentLookup() {
-        this(ExchangeRestApiFactory.getApi(Exchange.BINANCE_SPOT, IBinanceRestApi.class));
+        this.api = resolveApi();
     }
 
     public BinanceInstrumentLookup(IBinanceRestApi api) {
@@ -28,6 +28,10 @@ public class BinanceInstrumentLookup implements IInstrumentLookup {
             throw new IllegalArgumentException("api is required");
         }
         this.api = api;
+    }
+
+    protected IBinanceRestApi resolveApi() {
+        return ExchangeRestApiFactory.getApi(Exchange.BINANCE_SPOT, IBinanceRestApi.class);
     }
 
     @Override

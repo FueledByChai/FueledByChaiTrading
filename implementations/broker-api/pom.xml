@@ -40,10 +40,14 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
         <module>dydx-broker-api-impl</module>
         <module>paper-broker-api-impl</module>
         <module>paradex-broker-api-impl</module>
-
+        <module>lighter-broker-api-impl</module>
         <module>hyperliquid-broker-api-impl</module>
     <module>okx-broker-api-impl</module>
     <module>bybit-broker-api-impl</module>
+<<<<<<< HEAD
     <module>drift-broker-api-impl</module>
+=======
+    <module>aster-broker-api-impl</module>
+>>>>>>> origin/main
     </modules>
 </project>

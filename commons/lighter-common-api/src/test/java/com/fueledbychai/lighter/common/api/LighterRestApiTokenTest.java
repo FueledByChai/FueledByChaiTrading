@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Test;
 import com.fueledbychai.data.ResponseException;
 import com.fueledbychai.lighter.common.api.auth.LighterApiTokenResponse;
 import com.fueledbychai.lighter.common.api.auth.LighterCreateApiTokenRequest;
-import com.fueledbychai.lighter.common.api.signer.LighterNativeTransactionSigner;
+import com.fueledbychai.lighter.common.api.signer.ILighterTransactionSigner;
 
 class LighterRestApiTokenTest {
 
@@ -119,9 +119,9 @@ class LighterRestApiTokenTest {
         }
 
         @Override
-        protected LighterNativeTransactionSigner createAuthSigner(String privateKey, int apiKeyIndex, long accountIndex) {
+        protected ILighterTransactionSigner createAuthSigner(String privateKey, int apiKeyIndex, long accountIndex) {
             createdSignerAccountIndexes.add(Long.valueOf(accountIndex));
-            LighterNativeTransactionSigner signer = mock(LighterNativeTransactionSigner.class);
+            ILighterTransactionSigner signer = mock(ILighterTransactionSigner.class);
             when(signer.createAuthTokenWithExpiry(anyLong(), anyLong(), anyInt(), anyLong()))
                     .thenAnswer(invocation -> "auth-" + invocation.getArgument(3, Long.class).longValue());
             return signer;

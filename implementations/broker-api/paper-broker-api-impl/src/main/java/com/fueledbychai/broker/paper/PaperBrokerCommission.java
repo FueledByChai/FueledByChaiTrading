@@ -6,6 +6,7 @@ public class PaperBrokerCommission {
     public static final PaperBrokerCommission PARADEX_COMMISSION = new PaperBrokerCommission(-0.2, -2.0);
     public static final PaperBrokerCommission HYPERLIQUID_COMMISSION = new PaperBrokerCommission(-1.5, -4.5);
     public static final PaperBrokerCommission DRIFT_PERP_COMMISSION = new PaperBrokerCommission(0.25, -3.5);
+    public static final PaperBrokerCommission ASTER_COMMISSION = new PaperBrokerCommission(0.0, -4.0);
 
     protected double makerFeeBps = 0.0;
     protected double takerFeeBps = 0.0;
