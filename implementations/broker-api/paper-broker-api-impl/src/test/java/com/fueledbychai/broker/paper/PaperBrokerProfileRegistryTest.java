@@ -1,9 +1,8 @@
 package com.fueledbychai.broker.paper;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import org.junit.jupiter.api.Test;
 
 import com.fueledbychai.data.Exchange;
@@ -12,7 +11,7 @@ import com.fueledbychai.data.InstrumentType;
 public class PaperBrokerProfileRegistryTest {
 
     private static final Set<Exchange> EXPECTED_CRYPTO_EXCHANGES = Set.of(Exchange.DYDX, Exchange.HYPERLIQUID,
-            Exchange.PARADEX, Exchange.LIGHTER, Exchange.BINANCE_SPOT, Exchange.BINANCE_FUTURES, Exchange.DERIBIT,
+            Exchange.PARADEX, Exchange.DRIFT, Exchange.LIGHTER, Exchange.BINANCE_SPOT, Exchange.BINANCE_FUTURES, Exchange.DERIBIT,
             Exchange.OKX, Exchange.BYBIT, Exchange.ASTER);
 
     private static final Set<InstrumentType> EXPECTED_COMMISSION_TYPES = Set.of(InstrumentType.PERPETUAL_FUTURES,
@@ -39,6 +38,13 @@ public class PaperBrokerProfileRegistryTest {
                 assertCommission(exchange, InstrumentType.OPTION, 0.0, 0.0);
                 continue;
             }
+
+            if (exchange == Exchange.DRIFT) {
+                assertLatency(exchange, 650, 1200, 200, 350);
+                assertCommission(exchange, InstrumentType.PERPETUAL_FUTURES, 0.25, -3.5);
+                continue;
+            }
+
 
             if (exchange == Exchange.ASTER) {
                 assertLatency(exchange, 250, 450, 120, 220);
