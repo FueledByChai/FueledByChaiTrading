@@ -649,6 +649,11 @@ public class LighterWebSocketApiTest {
                 txInfo.put("price", modifyRequest.getPrice());
                 return new LighterSignedTransaction(13, txInfo, "0xhash", "0xmessage");
             }
+
+            @Override
+            public String createAuthTokenWithExpiry(long timestamp, long expiry, int apiKeyIndex, long accountIndex) {
+                throw new UnsupportedOperationException("not needed in this test");
+            }
         };
     }
 

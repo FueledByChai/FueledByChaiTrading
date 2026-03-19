@@ -3,7 +3,6 @@ package com.fueledbychai.paradex.common.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -16,6 +15,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
+
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.FueledByChaiException;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
@@ -27,10 +29,16 @@ class ResilientParadexInstrumentLookupTest {
     @Mock
     private IParadexRestApi mockApi;
 
+    private InstrumentDescriptor createDescriptor(String commonSymbol, String exchangeSymbol) {
+        return new InstrumentDescriptor(InstrumentType.PERPETUAL_FUTURES, Exchange.PARADEX, commonSymbol,
+                exchangeSymbol, commonSymbol, "USD", BigDecimal.ONE, new BigDecimal("0.1"),
+                1, BigDecimal.ONE, 8, BigDecimal.ONE, 1, "");
+    }
+
     @Test
     void testSuccessfulLookupWithoutRetry() throws IOException {
         // Setup
-        InstrumentDescriptor expectedDescriptor = mock(InstrumentDescriptor.class);
+        InstrumentDescriptor expectedDescriptor = createDescriptor("BTC", "BTC-USD-PERP");
         when(mockApi.getInstrumentDescriptor("BTC-USD-PERP")).thenReturn(expectedDescriptor);
 
         ParadexInstrumentLookup lookup = new ParadexInstrumentLookup(mockApi);
@@ -47,7 +55,7 @@ class ResilientParadexInstrumentLookupTest {
     @Test
     void testRetryOnTemporaryFailure() {
         // Setup - fail twice with retryable exception, then succeed
-        InstrumentDescriptor expectedDescriptor = mock(InstrumentDescriptor.class);
+        InstrumentDescriptor expectedDescriptor = createDescriptor("BTC", "BTC-USD-PERP");
         when(mockApi.getInstrumentDescriptor("BTC-USD-PERP"))
                 .thenThrow(new ResponseException("HTTP 503 Service Unavailable", 503))
                 .thenThrow(new ResponseException("Connection timeout", new IOException()))
@@ -104,7 +112,7 @@ class ResilientParadexInstrumentLookupTest {
     void testGetAllInstrumentsWithRetry() {
         // Setup
         InstrumentDescriptor[] expectedInstruments = new InstrumentDescriptor[1];
-        expectedInstruments[0] = mock(InstrumentDescriptor.class);
+        expectedInstruments[0] = createDescriptor("BTC", "BTC-USD-PERP");
 
         when(mockApi.getAllInstrumentsForType(InstrumentType.PERPETUAL_FUTURES))
                 .thenThrow(new ResponseException("Connection timeout", new IOException()))
@@ -124,7 +132,7 @@ class ResilientParadexInstrumentLookupTest {
     @Test
     void testGetAllSpotInstrumentsWithRetry() {
         InstrumentDescriptor[] expectedInstruments = new InstrumentDescriptor[1];
-        expectedInstruments[0] = mock(InstrumentDescriptor.class);
+        expectedInstruments[0] = createDescriptor("ETH", "ETH-USD-PERP");
 
         when(mockApi.getAllInstrumentsForType(InstrumentType.CRYPTO_SPOT))
                 .thenThrow(new ResponseException("Connection timeout", new IOException()))

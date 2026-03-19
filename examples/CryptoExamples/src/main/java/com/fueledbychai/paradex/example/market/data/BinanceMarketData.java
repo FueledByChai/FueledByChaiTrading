@@ -1,6 +1,6 @@
 package com.fueledbychai.paradex.example.market.data;
 
-import com.fueledbychai.binance.BinanceTickerRegistry;
+
 import com.fueledbychai.binancefutures.common.BinanceFuturesTickerRegistry;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;

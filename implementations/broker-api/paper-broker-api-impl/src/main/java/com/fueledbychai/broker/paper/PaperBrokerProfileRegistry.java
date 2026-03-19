@@ -14,10 +14,7 @@ import com.fueledbychai.data.Ticker;
 
 public final class PaperBrokerProfileRegistry {
 
-    private static final Set<Exchange> CONFIGURED_EXCHANGES = Collections.unmodifiableSet(new LinkedHashSet<>(
-            List.of(Exchange.DYDX, Exchange.HYPERLIQUID, Exchange.PARADEX, Exchange.DRIFT, Exchange.LIGHTER,
-                    Exchange.BINANCE_SPOT, Exchange.BINANCE_FUTURES, Exchange.DERIBIT, Exchange.OKX,
-                    Exchange.BYBIT)));
+    private static final Set<Exchange> CONFIGURED_EXCHANGES = Collections.unmodifiableSet(new LinkedHashSet<>(List.of(Exchange.DYDX, Exchange.HYPERLIQUID, Exchange.PARADEX, Exchange.DRIFT, Exchange.LIGHTER, Exchange.BINANCE_SPOT,Exchange.BINANCE_FUTURES, Exchange.DERIBIT, Exchange.OKX, Exchange.BYBIT, Exchange.ASTER)));
 
     private static final Set<InstrumentType> COMMISSION_INSTRUMENT_TYPES = Collections.unmodifiableSet(
             Set.of(InstrumentType.PERPETUAL_FUTURES, InstrumentType.CRYPTO_SPOT, InstrumentType.OPTION));
@@ -120,6 +117,9 @@ public final class PaperBrokerProfileRegistry {
 
         registerExchangeDefaults(Exchange.BYBIT, DEFAULT_LATENCY_PROFILE, DEFAULT_COMMISSION_PROFILE,
                 DEFAULT_COMMISSION_PROFILE, DEFAULT_COMMISSION_PROFILE);
+
+        registerExchangeDefaults(Exchange.ASTER, PaperBrokerLatency.ASTER_LATENCY,
+                PaperBrokerCommission.ASTER_COMMISSION, DEFAULT_COMMISSION_PROFILE, DEFAULT_COMMISSION_PROFILE);
     }
 
     private static void registerExchangeDefaults(Exchange exchange, PaperBrokerLatency latencyProfile,

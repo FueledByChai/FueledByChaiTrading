@@ -60,9 +60,11 @@ public class Exchange implements Serializable {
     public static final Exchange OKX = new Exchange("OKX");
     public static final Exchange BYBIT = new Exchange("BYBIT");
     public static final Exchange DRIFT = new Exchange("DRIFT");
+    public static final Exchange ASTER = new Exchange("ASTER");
     public static final Exchange[] ALL_EXCHANGES = { ARCA, GLOBEX, NYMEX, CBOE, ECBOT, NYBOT, CFE, NYSE_LIFFE, IDEALPRO,
             PSE, INTERACTIVE_BROKERS_SMART, NASDAQ, TSEJ, SEHKNTL, SEHK, HKFE, OSE, SGX, BOX, DYDX, HYPERLIQUID,
-            PARADEX, LIGHTER, BINANCE_SPOT, BINANCE_FUTURES, DERIBIT, OKX, BYBIT, DRIFT };
+            PARADEX, LIGHTER, BINANCE_SPOT, BINANCE_FUTURES, DERIBIT, OKX, BYBIT, DRIFT, ASTER };
+
 
     protected String exchangeName;
 

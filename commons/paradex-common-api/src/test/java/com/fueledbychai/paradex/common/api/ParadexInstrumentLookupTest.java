@@ -17,24 +17,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
-import org.mockito.MockedStatic;
-import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
-import com.fueledbychai.util.ExchangeRestApiFactory;
 
 @ExtendWith(MockitoExtension.class)
 class ParadexInstrumentLookupTest {
 
     @Mock
     private IParadexRestApi mockApi;
-
-    @Mock
-    private InstrumentDescriptor mockInstrumentDescriptor;
 
     private ParadexInstrumentLookup instrumentLookup;
 
@@ -171,7 +165,9 @@ class ParadexInstrumentLookupTest {
         // Given
         Ticker ticker = new Ticker("AAPL").setExchange(Exchange.INTERACTIVE_BROKERS_SMART)
                 .setInstrumentType(InstrumentType.STOCK);
-        InstrumentDescriptor expectedDescriptor = mock(InstrumentDescriptor.class);
+        InstrumentDescriptor expectedDescriptor = new InstrumentDescriptor(InstrumentType.STOCK,
+                Exchange.INTERACTIVE_BROKERS_SMART, "AAPL", "AAPL", "AAPL", "USD",
+                BigDecimal.ONE, new BigDecimal("0.01"), 1, BigDecimal.ONE, 8, BigDecimal.ONE, 1, "");
 
         when(mockApi.getInstrumentDescriptor("AAPL")).thenReturn(expectedDescriptor);
 
@@ -247,45 +243,12 @@ class ParadexInstrumentLookupTest {
 
     @Test
     void testCommonSymbolToParadexSymbolConversion() throws IOException {
-        // Test that the conversion method is being called correctly
-        try (MockedStatic<ParadexUtil> mockedUtil = Mockito.mockStatic(ParadexUtil.class)) {
-            // Given
-            String commonSymbol = "BTC";
-            String expectedParadexSymbol = "BTC-USD-PERP";
+        // Test that lookupByCommonSymbol converts "BTC" → "BTC-USD-PERP" and calls the API
+        when(mockApi.getInstrumentDescriptor("BTC-USD-PERP")).thenReturn(createBitcoinDescriptor());
 
-            mockedUtil.when(() -> ParadexUtil.commonSymbolToParadexSymbol(commonSymbol))
-                    .thenReturn(expectedParadexSymbol);
+        instrumentLookup.lookupByCommonSymbol("BTC");
 
-            when(mockApi.getInstrumentDescriptor(expectedParadexSymbol)).thenReturn(mockInstrumentDescriptor);
-
-            // When
-            instrumentLookup.lookupByCommonSymbol(commonSymbol);
-
-            // Then
-            mockedUtil.verify(() -> ParadexUtil.commonSymbolToParadexSymbol(commonSymbol));
-            verify(mockApi).getInstrumentDescriptor(expectedParadexSymbol);
-        }
-    }
-
-    @Test
-    void testApiIntegration_UsesCorrectApiInstance() throws IOException {
-        // Test that the class uses the API factory correctly
-        try (MockedStatic<ExchangeRestApiFactory> mockedFactory = Mockito.mockStatic(ExchangeRestApiFactory.class)) {
-            // Given
-            IParadexRestApi factoryApi = mock(IParadexRestApi.class);
-            mockedFactory.when(() -> ExchangeRestApiFactory.getPublicApi(Exchange.PARADEX, IParadexRestApi.class))
-                    .thenReturn(factoryApi);
-
-            when(factoryApi.getInstrumentDescriptor("BTC-USD-PERP")).thenReturn(mockInstrumentDescriptor);
-
-            // When
-            ParadexInstrumentLookup newLookup = new ParadexInstrumentLookup();
-            newLookup.lookupByExchangeSymbol("BTC-USD-PERP");
-
-            // Then
-            mockedFactory.verify(() -> ExchangeRestApiFactory.getPublicApi(Exchange.PARADEX, IParadexRestApi.class));
-            verify(factoryApi).getInstrumentDescriptor("BTC-USD-PERP");
-        }
+        verify(mockApi).getInstrumentDescriptor("BTC-USD-PERP");
     }
 
     // Helper methods to create test data
@@ -305,6 +268,22 @@ class ParadexInstrumentLookupTest {
         return new InstrumentDescriptor(InstrumentType.PERPETUAL_FUTURES, Exchange.PARADEX, "DOGE", "DOGE-USD-PERP",
                 "DOGE", "USD", new BigDecimal("1.0"), new BigDecimal("0.00001"), 10, BigDecimal.ONE, 4, BigDecimal.ONE,
                 1, "");
+    }
+
+    @Test
+    void testApiIntegration_UsesCorrectApiInstance() throws IOException {
+        IParadexRestApi mockFactoryApi = mock(IParadexRestApi.class);
+        when(mockFactoryApi.getInstrumentDescriptor("BTC-USD-PERP")).thenReturn(createBitcoinDescriptor());
+
+        ParadexInstrumentLookup newLookup = new ParadexInstrumentLookup() {
+            @Override
+            protected IParadexRestApi resolveApi() {
+                return mockFactoryApi;
+            }
+        };
+        newLookup.lookupByExchangeSymbol("BTC-USD-PERP");
+
+        verify(mockFactoryApi).getInstrumentDescriptor("BTC-USD-PERP");
     }
 
     /**

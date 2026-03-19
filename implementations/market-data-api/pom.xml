@@ -56,6 +56,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     <module>deribit-market-data-impl</module>
     <module>okx-market-data-impl</module>
     <module>bybit-market-data-impl</module>
+    <module>aster-market-data-impl</module>
     <module>drift-market-data-impl</module>
   </modules>
   

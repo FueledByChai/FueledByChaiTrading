@@ -40,7 +40,6 @@ public class HyperliquidWebSocketClient extends BaseCryptoWebSocketClient {
             return null;
         }
         JsonObject subscribeJson = new JsonObject();
-        subscribeJson.addProperty("jsonrpc", "2.0");
         subscribeJson.addProperty("method", "subscribe");
         JsonObject subscription = new JsonObject();
         subscription.addProperty("type", channel);

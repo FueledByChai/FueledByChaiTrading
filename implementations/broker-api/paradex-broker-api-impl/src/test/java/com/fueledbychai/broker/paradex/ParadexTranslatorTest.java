@@ -295,16 +295,14 @@ class ParadexTranslatorTest {
         when(mockTradeOrder.getTradeDirection()).thenReturn(TradeDirection.BUY);
         when(mockTradeOrder.getSize()).thenReturn(new BigDecimal("100.0"));
 
-        // Create a mock for an unsupported order type
-        OrderTicket.Type unsupportedType = mock(OrderTicket.Type.class);
-        when(unsupportedType.toString()).thenReturn("UNSUPPORTED_TYPE");
-        when(mockTradeOrder.getType()).thenReturn(unsupportedType);
+        // Use a real enum value not handled by the Paradex translator
+        when(mockTradeOrder.getType()).thenReturn(OrderTicket.Type.MARKET_ON_OPEN);
 
         // Execute & Verify
         UnsupportedOperationException exception = assertThrows(UnsupportedOperationException.class,
                 () -> translator.translateOrder(mockTradeOrder));
 
-        assertTrue(exception.getMessage().contains("UNSUPPORTED_TYPE"));
+        assertTrue(exception.getMessage().contains("MARKET_ON_OPEN"));
         assertTrue(exception.getMessage().contains("is not supported"));
     }
 
@@ -321,10 +319,10 @@ class ParadexTranslatorTest {
     @Test
     void testTranslateOrdersList_MultipleOrders() {
         // Setup
-        ParadexOrder order1 = mock(ParadexOrder.class);
-        ParadexOrder order2 = mock(ParadexOrder.class);
-        when(order1.getOrderType()).thenReturn(OrderType.MARKET);
-        when(order2.getOrderType()).thenReturn(OrderType.MARKET);
+        ParadexOrder order1 = new ParadexOrder();
+        order1.setOrderType(OrderType.MARKET);
+        ParadexOrder order2 = new ParadexOrder();
+        order2.setOrderType(OrderType.MARKET);
         List<ParadexOrder> paradexOrders = Arrays.asList(order1, order2);
 
         // Execute

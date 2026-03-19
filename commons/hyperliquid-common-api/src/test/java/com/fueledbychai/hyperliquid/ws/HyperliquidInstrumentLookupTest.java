@@ -6,16 +6,21 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.math.BigDecimal;
+
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
-import org.mockito.Mockito;
 
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
-import com.fueledbychai.util.ExchangeRestApiFactory;
 
 class HyperliquidInstrumentLookupTest {
+
+    private static InstrumentDescriptor createDescriptor(String commonSymbol, String exchangeSymbol) {
+        return new InstrumentDescriptor(InstrumentType.PERPETUAL_FUTURES, Exchange.HYPERLIQUID, commonSymbol,
+                exchangeSymbol, commonSymbol, "USD", BigDecimal.ONE, new BigDecimal("0.1"),
+                1, BigDecimal.ONE, 8, BigDecimal.ONE, 1, "");
+    }
 
     @Test
     void constructorRejectsNullApi() {
@@ -25,7 +30,7 @@ class HyperliquidInstrumentLookupTest {
     @Test
     void lookupByExchangeSymbolDelegatesToApi() {
         IHyperliquidRestApi api = mock(IHyperliquidRestApi.class);
-        InstrumentDescriptor descriptor = mock(InstrumentDescriptor.class);
+        InstrumentDescriptor descriptor = createDescriptor("BTC", "BTC");
         when(api.getInstrumentDescriptor("BTC")).thenReturn(descriptor);
 
         HyperliquidInstrumentLookup lookup = new HyperliquidInstrumentLookup(api);
@@ -45,7 +50,7 @@ class HyperliquidInstrumentLookupTest {
     @Test
     void getAllInstrumentsForTypeDelegatesForPerp() {
         IHyperliquidRestApi api = mock(IHyperliquidRestApi.class);
-        InstrumentDescriptor[] descriptors = { mock(InstrumentDescriptor.class) };
+        InstrumentDescriptor[] descriptors = { createDescriptor("BTC", "BTC") };
         when(api.getAllInstrumentsForType(InstrumentType.PERPETUAL_FUTURES)).thenReturn(descriptors);
 
         HyperliquidInstrumentLookup lookup = new HyperliquidInstrumentLookup(api);
@@ -56,22 +61,21 @@ class HyperliquidInstrumentLookupTest {
     }
 
     @Test
-    void defaultConstructorUsesExchangeRestApiFactory() {
-        IHyperliquidRestApi api = mock(IHyperliquidRestApi.class);
-        InstrumentDescriptor descriptor = mock(InstrumentDescriptor.class);
+    void defaultConstructorUsesResolvedApi() {
+        IHyperliquidRestApi mockApi = mock(IHyperliquidRestApi.class);
+        InstrumentDescriptor descriptor = createDescriptor("ETH", "ETH");
+        when(mockApi.getInstrumentDescriptor("ETH")).thenReturn(descriptor);
 
-        try (MockedStatic<ExchangeRestApiFactory> mockedFactory = Mockito.mockStatic(ExchangeRestApiFactory.class)) {
-            mockedFactory.when(() -> ExchangeRestApiFactory.getPublicApi(Exchange.HYPERLIQUID,
-                    IHyperliquidRestApi.class)).thenReturn(api);
-            when(api.getInstrumentDescriptor("ETH")).thenReturn(descriptor);
+        HyperliquidInstrumentLookup lookup = new HyperliquidInstrumentLookup() {
+            @Override
+            protected IHyperliquidRestApi resolveApi() {
+                return mockApi;
+            }
+        };
 
-            HyperliquidInstrumentLookup lookup = new HyperliquidInstrumentLookup();
-            InstrumentDescriptor result = lookup.lookupByExchangeSymbol("ETH");
+        InstrumentDescriptor result = lookup.lookupByExchangeSymbol("ETH");
 
-            assertSame(descriptor, result);
-            mockedFactory.verify(
-                    () -> ExchangeRestApiFactory.getPublicApi(Exchange.HYPERLIQUID, IHyperliquidRestApi.class));
-            verify(api).getInstrumentDescriptor("ETH");
-        }
+        assertSame(descriptor, result);
+        verify(mockApi).getInstrumentDescriptor("ETH");
     }
 }
