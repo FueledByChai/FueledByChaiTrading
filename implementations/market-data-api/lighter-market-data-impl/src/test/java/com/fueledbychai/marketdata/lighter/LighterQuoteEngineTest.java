@@ -14,6 +14,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -165,6 +168,8 @@ public class LighterQuoteEngineTest {
         LighterQuoteEngine engine = spy(new LighterQuoteEngine(webSocketApi, tickerRegistry));
         AtomicReference<ILevel1Quote> capturedQuote = new AtomicReference<>();
         Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES).setFundingRateInterval(8);
+        ZonedDateTime expectedTimestamp = ZonedDateTime.ofInstant(Instant.ofEpochMilli(1700000000123L),
+            ZoneId.of("UTC"));
 
         doAnswer(invocation -> {
             capturedQuote.set(invocation.getArgument(0));
@@ -184,11 +189,13 @@ public class LighterQuoteEngineTest {
         stats.setCurrentFundingRate(new BigDecimal("0.0008"));
         stats.setLastFundingRate(new BigDecimal("0.0004"));
 
-        engine.handleMarketStatsUpdate(new LighterMarketStatsUpdate("market_stats/1", Map.of("1", stats)));
+        engine.handleMarketStatsUpdate(new LighterMarketStatsUpdate("market_stats/1", 1700000000123L,
+            Map.of("1", stats)));
 
         ILevel1Quote quote = capturedQuote.get();
         assertNotNull(quote);
         assertEquals(ticker, quote.getTicker());
+        assertEquals(expectedTimestamp, quote.getTimeStamp());
         assertEquals(new BigDecimal("101.25"), quote.getValue(QuoteType.MARK_PRICE));
         assertEquals(new BigDecimal("101.00"), quote.getValue(QuoteType.LAST));
         assertEquals(new BigDecimal("100.95"), quote.getValue(QuoteType.UNDERLYING_PRICE));
@@ -233,6 +240,8 @@ public class LighterQuoteEngineTest {
         AtomicReference<ILevel1Quote> capturedLevel1Quote = new AtomicReference<>();
         AtomicReference<ILevel2Quote> capturedLevel2Quote = new AtomicReference<>();
         Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES);
+        ZonedDateTime expectedTimestamp = ZonedDateTime.ofInstant(Instant.ofEpochMilli(1700000000000L),
+            ZoneId.of("UTC"));
 
         doAnswer(invocation -> {
             capturedLevel1Quote.set(invocation.getArgument(0));
@@ -262,6 +271,7 @@ public class LighterQuoteEngineTest {
 
         ILevel1Quote level1Quote = capturedLevel1Quote.get();
         assertNotNull(level1Quote);
+        assertEquals(expectedTimestamp, level1Quote.getTimeStamp());
         assertEquals(new BigDecimal("100.50"), level1Quote.getValue(QuoteType.BID));
         assertEquals(new BigDecimal("3.0"), level1Quote.getValue(QuoteType.BID_SIZE));
         assertEquals(new BigDecimal("101.00"), level1Quote.getValue(QuoteType.ASK));
@@ -269,6 +279,7 @@ public class LighterQuoteEngineTest {
 
         ILevel2Quote level2Quote = capturedLevel2Quote.get();
         assertNotNull(level2Quote);
+        assertEquals(expectedTimestamp, level2Quote.getTimeStamp());
         IOrderBook.BidSizePair bestBid = level2Quote.getOrderBook().getBestBidWithSize();
         IOrderBook.BidSizePair bestAsk = level2Quote.getOrderBook().getBestAskWithSize();
         assertEquals(0, bestBid.getPrice().compareTo(new BigDecimal("100.50")));

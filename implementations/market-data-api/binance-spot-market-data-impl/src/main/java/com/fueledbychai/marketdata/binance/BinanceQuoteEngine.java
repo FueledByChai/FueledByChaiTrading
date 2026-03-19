@@ -18,6 +18,8 @@ import com.fueledbychai.binance.ws.BinanceWebSocketClient;
 import com.fueledbychai.binance.ws.BinanceWebSocketClientBuilder;
 import com.fueledbychai.binance.ws.aggtrade.AggTradeRecordProcessor;
 import com.fueledbychai.binance.ws.aggtrade.TradeRecord;
+import com.fueledbychai.binance.ws.bookticker.BookTickerRecord;
+import com.fueledbychai.binance.ws.bookticker.BookTickerRecordProcessor;
 import com.fueledbychai.binance.ws.partialbook.OrderBookSnapshot;
 import com.fueledbychai.binance.ws.partialbook.PartialOrderBookProcessor;
 import com.fueledbychai.data.Ticker;
@@ -107,8 +109,8 @@ public class BinanceQuoteEngine extends QuoteEngine {
 
     @Override
     public void subscribeLevel1(Ticker ticker, Level1QuoteListener listener) {
-        if (!super.level1ListenerMap.containsKey(ticker) && !super.level2ListenerMap.containsKey(ticker)) {
-            startPartialOrderBookClient(ticker);
+        if (!super.level1ListenerMap.containsKey(ticker)) {
+            startBookTickerWSClient(ticker);
         }
         super.subscribeLevel1(ticker, listener);
     }
@@ -179,6 +181,19 @@ public class BinanceQuoteEngine extends QuoteEngine {
         fireOrderFlow(orderFlow);
     }
 
+    public void onBookTickerUpdate(Ticker ticker, BookTickerRecord record) {
+        if (record == null) {
+            return;
+        }
+        ZonedDateTime eventTime = toTimestamp(record.getEventTime());
+        BigDecimal bestBid = parsePrice(record.getBestBidPrice());
+        BigDecimal bestAsk = parsePrice(record.getBestAskPrice());
+        BigDecimal bidSize = parseQuantity(record.getBestBidQty());
+        BigDecimal askSize = parseQuantity(record.getBestAskQty());
+
+        onBBOUpdate(ticker, bestBid, bidSize, bestAsk, askSize, eventTime);
+    }
+
     protected List<OrderBook.PriceLevel> convertPriceLevels(
             List<com.fueledbychai.binance.ws.partialbook.PriceLevel> binanceLevels) {
         List<OrderBook.PriceLevel> priceLevels = new ArrayList<>();
@@ -202,13 +217,7 @@ public class BinanceQuoteEngine extends QuoteEngine {
                 startPartialOrderBookClient(ticker);
             });
             processor.addEventListener((OrderBookSnapshot obs) -> {
-                ZonedDateTime eventTime = ZonedDateTime.now(ZoneId.of("UTC"));
-                try {
-                    onBBOUpdate(ticker, obs.getBestBid().getPriceAsDecimal(), obs.getBestBid().getQuantityAsDecimal(),
-                            obs.getBestAsk().getPriceAsDecimal(), obs.getBestAsk().getQuantityAsDecimal(), eventTime);
-                } catch (Exception e) {
-                    logger.error("Error processing BBO update", e);
-                }
+                ZonedDateTime eventTime = resolveSnapshotEventTime(obs);
                 try {
                     onOrderBookUpdate(ticker, obs, eventTime);
                 } catch (Exception e) {
@@ -224,6 +233,58 @@ public class BinanceQuoteEngine extends QuoteEngine {
             throw new IllegalStateException(e);
         }
 
+    }
+
+    protected ZonedDateTime resolveSnapshotEventTime(OrderBookSnapshot snapshot) {
+        if (snapshot != null && snapshot.getEventTime() != null) {
+            return Instant.ofEpochMilli(snapshot.getEventTime()).atZone(ZoneId.of("UTC"));
+        }
+        return ZonedDateTime.now(ZoneId.of("UTC"));
+    }
+
+    protected ZonedDateTime toTimestamp(long epochMillis) {
+        if (epochMillis > 0L) {
+            return Instant.ofEpochMilli(epochMillis).atZone(ZoneId.of("UTC"));
+        }
+        return ZonedDateTime.now(ZoneId.of("UTC"));
+    }
+
+    protected BigDecimal parsePrice(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return new BigDecimal(value);
+    }
+
+    protected BigDecimal parseQuantity(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return new BigDecimal(value);
+    }
+
+    protected void startBookTickerWSClient(final Ticker ticker) {
+        try {
+            logger.info("Starting Book Ticker WebSocket client");
+            BookTickerRecordProcessor processor = new BookTickerRecordProcessor(() -> {
+                logger.info("Book Ticker WebSocket closed, trying to restart...");
+                startBookTickerWSClient(ticker);
+            });
+            processor.addEventListener((BookTickerRecord obs) -> {
+                try {
+                    onBookTickerUpdate(ticker, obs);
+                } catch (Exception e) {
+                    logger.error("Error processing book ticker update", e);
+                }
+            });
+
+            BinanceWebSocketClient bookTickerClient = BinanceWebSocketClientBuilder.buildBookTickerClient(wsUrl,
+                    ticker, processor);
+            bookTickerClient.connect();
+
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     protected void startTradesWSClient(final Ticker ticker) {

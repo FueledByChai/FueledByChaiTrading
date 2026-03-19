@@ -184,7 +184,7 @@ public class LighterQuoteEngine extends QuoteEngine {
         if (update == null || update.getMarketStatsByMarketId() == null || update.getMarketStatsByMarketId().isEmpty()) {
             return;
         }
-        ZonedDateTime timestamp = ZonedDateTime.now(UTC);
+        ZonedDateTime timestamp = toZonedDateTime(update.getTimestamp());
         for (Map.Entry<String, LighterMarketStats> entry : update.getMarketStatsByMarketId().entrySet()) {
             Integer marketId = getMarketId(entry.getKey(), entry.getValue());
             if (marketId == null) {
@@ -214,7 +214,7 @@ public class LighterQuoteEngine extends QuoteEngine {
             return;
         }
 
-        ZonedDateTime timestamp = ZonedDateTime.now(UTC);
+        ZonedDateTime timestamp = toZonedDateTime(update.getTimestamp());
         OrderBook orderBook = applyAndBuildOrderBook(ticker, update, timestamp);
         if (orderBook == null) {
             return;

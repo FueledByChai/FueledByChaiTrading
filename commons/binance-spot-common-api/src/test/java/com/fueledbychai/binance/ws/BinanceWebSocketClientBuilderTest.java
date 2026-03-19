@@ -42,6 +42,18 @@ public class BinanceWebSocketClientBuilderTest {
         assertSame(processor, getFieldValue(client, "processor", IWebSocketProcessor.class));
     }
 
+    @Test
+    public void testBuildBookTickerClient() throws Exception {
+        Ticker ticker = new Ticker("ETHUSDT");
+        BinanceWebSocketClient client = BinanceWebSocketClientBuilder
+                .buildBookTickerClient("wss://example.test/stream", ticker, processor);
+
+        assertNotNull(client);
+        assertEquals("wss://example.test/stream", client.getURI().toString());
+        assertEquals("ethusdt@bookTicker", getFieldValue(client, "channel", String.class));
+        assertSame(processor, getFieldValue(client, "processor", IWebSocketProcessor.class));
+    }
+
     private static <T> T getFieldValue(Object target, String fieldName, Class<T> type) {
         Class<?> current = target.getClass();
         while (current != null) {

@@ -29,6 +29,7 @@ public class LighterMarketStatsWebSocketProcessor extends AbstractWebSocketProce
         if (!isMarketStatsChannel(channel)) {
             return null;
         }
+        Long timestamp = parseLong(root.opt("timestamp"));
 
         Object marketStatsObject = root.opt("market_stats");
         if (!(marketStatsObject instanceof JSONObject)) {
@@ -40,7 +41,7 @@ public class LighterMarketStatsWebSocketProcessor extends AbstractWebSocketProce
             String marketId = marketStatsJson.opt("market_id").toString();
             Map<String, LighterMarketStats> payload = new LinkedHashMap<>();
             payload.put(marketId, parseMarketStats(marketStatsJson, marketId));
-            return new LighterMarketStatsUpdate(channel, payload);
+            return new LighterMarketStatsUpdate(channel, timestamp, payload);
         }
 
         Map<String, LighterMarketStats> payload = new LinkedHashMap<>();
@@ -50,7 +51,7 @@ public class LighterMarketStatsWebSocketProcessor extends AbstractWebSocketProce
                 payload.put(key, parseMarketStats((JSONObject) statObj, key));
             }
         }
-        return new LighterMarketStatsUpdate(channel, payload);
+        return new LighterMarketStatsUpdate(channel, timestamp, payload);
     }
 
     private boolean isMarketStatsChannel(String channel) {
