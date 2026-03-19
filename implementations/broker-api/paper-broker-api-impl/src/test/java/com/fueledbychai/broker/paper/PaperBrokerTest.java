@@ -387,4 +387,71 @@ public class PaperBrokerTest {
         assertEquals(1, broker.getEmittedFilledOrderEvents());
         assertFalse(broker.openOrders.containsKey(order.getOrderId()));
     }
+
+    @Test
+    public void testInsideSpreadQuoteEvidenceCanFillPassiveOrderWithoutCross() {
+        Ticker ticker = new Ticker("BTCUSDT");
+        TestablePaperBroker broker = new TestablePaperBroker(quoteEngine, ticker);
+        broker.setPassiveFillBaseThreshold(3.0);
+        broker.setPassiveFillInsideSpreadWeight(2.0);
+        broker.setPassiveFillTradeEvidenceBonus(0.0);
+        broker.setPassiveFillWideSpreadPenaltyPer100Bps(0.0);
+
+        OrderTicket order = new OrderTicket("order-2", ticker, new BigDecimal("2.0"), TradeDirection.BUY);
+        order.setType(OrderTicket.Type.LIMIT);
+        order.setLimitPrice(new BigDecimal("100.50"));
+        order.setClientOrderId("client-2");
+        order.setOrderEntryTime(broker.getCurrentTime());
+
+        broker.openOrders.put(order.getOrderId(), order);
+        broker.openBids.put(order.getOrderId(), order);
+
+        Level1Quote quote = new Level1Quote(ticker, ZonedDateTime.now());
+        quote.addQuote(QuoteType.BID, new BigDecimal("100.00"));
+        quote.addQuote(QuoteType.ASK, new BigDecimal("101.00"));
+
+        broker.quoteRecieved(quote);
+        assertEquals(OrderStatus.Status.NEW, order.getCurrentStatus());
+        assertEquals(0, broker.getEmittedFillEvents());
+
+        broker.quoteRecieved(quote);
+        assertEquals(OrderStatus.Status.FILLED, order.getCurrentStatus());
+        assertEquals(1, broker.getEmittedFillEvents());
+    }
+
+    @Test
+    public void testSupportiveTradeAddsEvidenceButDoesNotFillUntilNextQuote() {
+        Ticker ticker = new Ticker("BTCUSDT");
+        TestablePaperBroker broker = new TestablePaperBroker(quoteEngine, ticker);
+        broker.setPassiveFillBaseThreshold(4.0);
+        broker.setPassiveFillInsideSpreadWeight(1.0);
+        broker.setPassiveFillTradeEvidenceBonus(1.0);
+        broker.setPassiveFillWideSpreadPenaltyPer100Bps(0.0);
+
+        OrderTicket order = new OrderTicket("order-3", ticker, new BigDecimal("2.0"), TradeDirection.BUY);
+        order.setType(OrderTicket.Type.LIMIT);
+        order.setLimitPrice(new BigDecimal("100.50"));
+        order.setClientOrderId("client-3");
+        order.setOrderEntryTime(broker.getCurrentTime());
+
+        broker.openOrders.put(order.getOrderId(), order);
+        broker.openBids.put(order.getOrderId(), order);
+
+        Level1Quote quote = new Level1Quote(ticker, ZonedDateTime.now());
+        quote.addQuote(QuoteType.BID, new BigDecimal("100.00"));
+        quote.addQuote(QuoteType.ASK, new BigDecimal("101.00"));
+
+        broker.quoteRecieved(quote);
+        assertEquals(OrderStatus.Status.NEW, order.getCurrentStatus());
+        assertEquals(0, broker.getEmittedFillEvents());
+
+        broker.orderflowReceived(new OrderFlow(ticker, new BigDecimal("100.50"), new BigDecimal("1.0"),
+                OrderFlow.Side.SELL, ZonedDateTime.now()));
+        assertEquals(OrderStatus.Status.NEW, order.getCurrentStatus());
+        assertEquals(0, broker.getEmittedFillEvents());
+
+        broker.quoteRecieved(quote);
+        assertEquals(OrderStatus.Status.FILLED, order.getCurrentStatus());
+        assertEquals(1, broker.getEmittedFillEvents());
+    }
 }
