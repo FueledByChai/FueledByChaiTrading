@@ -23,6 +23,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.fueledbychai.binance.ws.aggtrade.TradeRecord;
+import com.fueledbychai.binance.ws.bookticker.BookTickerRecord;
 import com.fueledbychai.binance.ws.partialbook.OrderBookSnapshot;
 import com.fueledbychai.binance.ws.partialbook.PriceLevel;
 import com.fueledbychai.data.Ticker;
@@ -65,15 +66,15 @@ public class BinanceQuoteEngineTest {
     }
 
     @Test
-    public void testSubscribeLevel1StartsPartialBookClient() {
+    public void testSubscribeLevel1StartsBookTickerClient() {
         BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry));
         Ticker ticker = new Ticker("BTCUSDT");
 
-        doNothing().when(engine).startPartialOrderBookClient(ticker);
+        doNothing().when(engine).startBookTickerWSClient(ticker);
 
         engine.subscribeLevel1(ticker, level1Listener);
 
-        verify(engine).startPartialOrderBookClient(ticker);
+        verify(engine).startBookTickerWSClient(ticker);
     }
 
     @Test
@@ -188,5 +189,59 @@ public class BinanceQuoteEngineTest {
         assertEquals(OrderFlow.Side.SELL, orderFlow.getSide());
         assertEquals(ZonedDateTime.ofInstant(Instant.ofEpochMilli(1710000000L), ZoneId.of("UTC")),
                 orderFlow.getTimestamp());
+    }
+
+    @Test
+    public void testResolveSnapshotEventTimeUsesExchangeEventTime() {
+        BinanceQuoteEngine engine = new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry);
+        OrderBookSnapshot snapshot = new OrderBookSnapshot();
+        snapshot.setEventTime(1700000000123L);
+
+        ZonedDateTime timestamp = engine.resolveSnapshotEventTime(snapshot);
+
+        assertEquals(ZonedDateTime.ofInstant(Instant.ofEpochMilli(1700000000123L), ZoneId.of("UTC")), timestamp);
+    }
+
+    @Test
+    public void testResolveSnapshotEventTimeFallsBackToNowWhenMissing() {
+        BinanceQuoteEngine engine = new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry);
+        OrderBookSnapshot snapshot = new OrderBookSnapshot();
+
+        ZonedDateTime before = ZonedDateTime.now(ZoneId.of("UTC")).minusSeconds(1);
+        ZonedDateTime timestamp = engine.resolveSnapshotEventTime(snapshot);
+        ZonedDateTime after = ZonedDateTime.now(ZoneId.of("UTC")).plusSeconds(1);
+
+        assertTrue(!timestamp.isBefore(before));
+        assertTrue(!timestamp.isAfter(after));
+    }
+
+    @Test
+    public void testOnBookTickerUpdateUsesExchangeTimestamp() {
+        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry));
+        AtomicReference<ILevel1Quote> captured = new AtomicReference<>();
+        Ticker ticker = new Ticker("BTCUSDT");
+
+        doAnswer(invocation -> {
+            captured.set(invocation.getArgument(0));
+            return null;
+        }).when(engine).fireLevel1Quote(any(ILevel1Quote.class));
+
+        BookTickerRecord record = new BookTickerRecord();
+        record.setEventTime(1710001234567L);
+        record.setBestBidPrice("100.10");
+        record.setBestBidQty("1.1");
+        record.setBestAskPrice("100.20");
+        record.setBestAskQty("2.2");
+
+        engine.onBookTickerUpdate(ticker, record);
+
+        ILevel1Quote quote = captured.get();
+        assertNotNull(quote);
+        assertEquals(ZonedDateTime.ofInstant(Instant.ofEpochMilli(1710001234567L), ZoneId.of("UTC")),
+                quote.getTimeStamp());
+        assertEquals(new BigDecimal("100.10"), quote.getValue(QuoteType.BID));
+        assertEquals(new BigDecimal("1.1"), quote.getValue(QuoteType.BID_SIZE));
+        assertEquals(new BigDecimal("100.20"), quote.getValue(QuoteType.ASK));
+        assertEquals(new BigDecimal("2.2"), quote.getValue(QuoteType.ASK_SIZE));
     }
 }

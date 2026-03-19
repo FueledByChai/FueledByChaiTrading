@@ -6,16 +6,27 @@ import java.util.Map;
 public class LighterMarketStatsUpdate {
 
     private final String channel;
+    private final Long timestamp;
     private final Map<String, LighterMarketStats> marketStatsByMarketId;
 
     public LighterMarketStatsUpdate(String channel, Map<String, LighterMarketStats> marketStatsByMarketId) {
+        this(channel, null, marketStatsByMarketId);
+    }
+
+    public LighterMarketStatsUpdate(String channel, Long timestamp,
+            Map<String, LighterMarketStats> marketStatsByMarketId) {
         this.channel = channel;
+        this.timestamp = timestamp;
         this.marketStatsByMarketId = marketStatsByMarketId == null ? Collections.emptyMap()
                 : Collections.unmodifiableMap(marketStatsByMarketId);
     }
 
     public String getChannel() {
         return channel;
+    }
+
+    public Long getTimestamp() {
+        return timestamp;
     }
 
     public Map<String, LighterMarketStats> getMarketStatsByMarketId() {
