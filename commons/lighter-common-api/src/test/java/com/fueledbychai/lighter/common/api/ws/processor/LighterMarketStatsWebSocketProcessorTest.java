@@ -1,11 +1,10 @@
 package com.fueledbychai.lighter.common.api.ws.processor;
 
+import java.math.BigDecimal;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-
-import java.math.BigDecimal;
-
 import org.junit.jupiter.api.Test;
 
 import com.fueledbychai.lighter.common.api.ws.model.LighterMarketStats;

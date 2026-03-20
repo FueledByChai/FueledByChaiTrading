@@ -1,7 +1,5 @@
 package com.fueledbychai.marketdata.hyperliquid;
 
-import static org.junit.Assert.*;
-
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -12,6 +10,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.After;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import org.junit.Before;
 import org.junit.Test;
 

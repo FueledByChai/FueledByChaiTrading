@@ -20,6 +20,7 @@ import com.fueledbychai.aster.common.api.AsterConfiguration;
 import com.fueledbychai.aster.common.api.IAsterRestApi;
 import com.fueledbychai.aster.common.api.IAsterWebSocketApi;
 import com.fueledbychai.data.Exchange;
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.Level1Quote;
 import com.fueledbychai.marketdata.Level1QuoteListener;
@@ -121,7 +122,9 @@ public class AsterQuoteEngine extends QuoteEngine {
         if (startStreams) {
             startBookTickerStream(ticker);
             startSymbolTickerStream(ticker);
-            startMarkPriceStream(ticker);
+            if (supportsMarkPrice(ticker)) {
+                startMarkPriceStream(ticker);
+            }
         }
     }
 
@@ -208,6 +211,18 @@ public class AsterQuoteEngine extends QuoteEngine {
         Level1Quote quote = new Level1Quote(ticker, toTimestamp(message, "E"));
         boolean hasValues = false;
 
+        BigDecimal lastPrice = decimalValue(message, "c");
+        if (lastPrice != null) {
+            quote.addQuote(QuoteType.LAST, lastPrice);
+            hasValues = true;
+        }
+
+        BigDecimal lastSize = decimalValue(message, "Q");
+        if (lastSize != null) {
+            quote.addQuote(QuoteType.LAST_SIZE, lastSize);
+            hasValues = true;
+        }
+
         BigDecimal volume = decimalValue(message, "v");
         if (volume != null) {
             quote.addQuote(QuoteType.VOLUME, volume);
@@ -226,8 +241,8 @@ public class AsterQuoteEngine extends QuoteEngine {
     }
 
     void onOrderBookUpdate(Ticker ticker, JsonNode message) {
-        List<OrderBook.PriceLevel> bids = toPriceLevels(message.path("b"));
-        List<OrderBook.PriceLevel> asks = toPriceLevels(message.path("a"));
+        List<OrderBook.PriceLevel> bids = toPriceLevels(firstNonMissingArray(message, "b", "bids"));
+        List<OrderBook.PriceLevel> asks = toPriceLevels(firstNonMissingArray(message, "a", "asks"));
         if (bids.isEmpty() && asks.isEmpty()) {
             return;
         }
@@ -290,6 +305,10 @@ public class AsterQuoteEngine extends QuoteEngine {
         }
     }
 
+    protected boolean supportsMarkPrice(Ticker ticker) {
+        return ticker == null || ticker.getInstrumentType() != InstrumentType.CRYPTO_SPOT;
+    }
+
     protected BigDecimal decimalValue(JsonNode message, String field) {
         if (message == null || field == null) {
             return null;
@@ -307,6 +326,23 @@ public class AsterQuoteEngine extends QuoteEngine {
             return ZonedDateTime.now(ZoneId.of("UTC"));
         }
         return ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneId.of("UTC"));
+    }
+
+    protected JsonNode firstNonMissingArray(JsonNode message, String primaryField, String secondaryField) {
+        if (message == null) {
+            return null;
+        }
+
+        JsonNode primary = message.path(primaryField);
+        if (primary.isArray()) {
+            return primary;
+        }
+
+        JsonNode secondary = message.path(secondaryField);
+        if (secondary.isArray()) {
+            return secondary;
+        }
+        return primary;
     }
 
     protected BigDecimal toHourlyFundingRate(Ticker ticker, BigDecimal fundingRate) {

@@ -1,12 +1,11 @@
 package com.fueledbychai.lighter.common.api;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 import java.math.BigDecimal;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import com.fueledbychai.lighter.common.api.ws.model.LighterOrder;
@@ -99,6 +98,8 @@ class LighterRestApiActiveOrdersTest {
     void getAccountActiveOrdersValidatesInputs() {
         TestableLighterRestApi api = new TestableLighterRestApi();
 
+        assertThrows(IllegalArgumentException.class, () -> api.getAccountActiveOrders("", 1L));
+        assertThrows(IllegalArgumentException.class, () -> api.getAccountActiveOrders("token", -1L));
         assertThrows(IllegalArgumentException.class, () -> api.getAccountActiveOrders("", 1L, 1));
         assertThrows(IllegalArgumentException.class, () -> api.getAccountActiveOrders("token", -1L, 1));
         assertThrows(IllegalArgumentException.class, () -> api.getAccountActiveOrders("token", 1L, -1));

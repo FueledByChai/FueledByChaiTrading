@@ -12,6 +12,8 @@ class AsterConfigurationTest {
         String environmentKey = AsterConfiguration.ASTER_ENVIRONMENT;
         String restUrlKey = AsterConfiguration.ASTER_TESTNET_REST_URL;
         String wsUrlKey = AsterConfiguration.ASTER_TESTNET_WS_URL;
+        String spotRestUrlKey = AsterConfiguration.ASTER_SPOT_TESTNET_REST_URL;
+        String spotWsUrlKey = AsterConfiguration.ASTER_SPOT_TESTNET_WS_URL;
         String apiKey = AsterConfiguration.ASTER_API_KEY;
         String apiSecret = AsterConfiguration.ASTER_API_SECRET;
         String recvWindowKey = AsterConfiguration.ASTER_RECV_WINDOW;
@@ -19,6 +21,8 @@ class AsterConfigurationTest {
         String previousEnvironment = System.getProperty(environmentKey);
         String previousRestUrl = System.getProperty(restUrlKey);
         String previousWsUrl = System.getProperty(wsUrlKey);
+        String previousSpotRestUrl = System.getProperty(spotRestUrlKey);
+        String previousSpotWsUrl = System.getProperty(spotWsUrlKey);
         String previousApiKey = System.getProperty(apiKey);
         String previousApiSecret = System.getProperty(apiSecret);
         String previousRecvWindow = System.getProperty(recvWindowKey);
@@ -27,6 +31,8 @@ class AsterConfigurationTest {
             System.setProperty(environmentKey, "testnet");
             System.setProperty(restUrlKey, "https://api.unit.test");
             System.setProperty(wsUrlKey, "wss://ws.unit.test");
+            System.setProperty(spotRestUrlKey, "https://spot-api.unit.test");
+            System.setProperty(spotWsUrlKey, "wss://spot-ws.unit.test");
             System.setProperty(apiKey, "unit-api-key");
             System.setProperty(apiSecret, "unit-api-secret");
             System.setProperty(recvWindowKey, "12345");
@@ -37,6 +43,8 @@ class AsterConfigurationTest {
             assertEquals("testnet", config.getEnvironment());
             assertEquals("https://api.unit.test", config.getRestUrl());
             assertEquals("wss://ws.unit.test", config.getWebSocketUrl());
+            assertEquals("https://spot-api.unit.test", config.getSpotRestUrl());
+            assertEquals("wss://spot-ws.unit.test", config.getSpotWebSocketUrl());
             assertEquals("unit-api-key", config.getApiKey());
             assertEquals("unit-api-secret", config.getApiSecret());
             assertEquals(12345L, config.getRecvWindow());
@@ -45,6 +53,8 @@ class AsterConfigurationTest {
             restoreProperty(environmentKey, previousEnvironment);
             restoreProperty(restUrlKey, previousRestUrl);
             restoreProperty(wsUrlKey, previousWsUrl);
+            restoreProperty(spotRestUrlKey, previousSpotRestUrl);
+            restoreProperty(spotWsUrlKey, previousSpotWsUrl);
             restoreProperty(apiKey, previousApiKey);
             restoreProperty(apiSecret, previousApiSecret);
             restoreProperty(recvWindowKey, previousRecvWindow);
@@ -58,6 +68,8 @@ class AsterConfigurationTest {
         AsterConfiguration config = AsterConfiguration.getInstance();
         assertEquals("https://fapi.asterdex.com", config.getRestUrl());
         assertEquals("wss://fstream.asterdex.com/ws", config.getWebSocketUrl());
+        assertEquals("https://sapi.asterdex.com", config.getSpotRestUrl());
+        assertEquals("wss://sstream.asterdex.com/ws", config.getSpotWebSocketUrl());
     }
 
     private static void restoreProperty(String key, String previousValue) {

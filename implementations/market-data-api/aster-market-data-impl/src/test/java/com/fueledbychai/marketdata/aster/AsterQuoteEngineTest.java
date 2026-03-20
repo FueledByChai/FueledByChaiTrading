@@ -51,7 +51,7 @@ class AsterQuoteEngineTest {
     void subscribeLevel1StartsStreamsOnce() {
         StubWebSocketApi webSocketApi = new StubWebSocketApi();
         CapturingQuoteEngine engine = new CapturingQuoteEngine(new StubRestApi(), webSocketApi, new NoOpTickerRegistry());
-        Ticker ticker = ticker();
+        Ticker ticker = perpTicker();
         Level1QuoteListener listener = quote -> {
         };
 
@@ -64,11 +64,24 @@ class AsterQuoteEngineTest {
     }
 
     @Test
+    void subscribeLevel1ForSpotSkipsMarkPriceStream() {
+        StubWebSocketApi webSocketApi = new StubWebSocketApi();
+        CapturingQuoteEngine engine = new CapturingQuoteEngine(new StubRestApi(), webSocketApi, new NoOpTickerRegistry());
+
+        engine.subscribeLevel1(spotTicker(), quote -> {
+        });
+
+        assertEquals(1, webSocketApi.bookTickerSubscriptions.get());
+        assertEquals(1, webSocketApi.symbolTickerSubscriptions.get());
+        assertEquals(0, webSocketApi.markPriceSubscriptions.get());
+    }
+
+    @Test
     void bookTickerUpdatesProduceLevel1Quote() throws Exception {
         CapturingQuoteEngine engine = new CapturingQuoteEngine(new StubRestApi(), new StubWebSocketApi(),
                 new NoOpTickerRegistry());
 
-        engine.onBookTickerUpdate(ticker(), json("""
+        engine.onBookTickerUpdate(perpTicker(), json("""
                 {"E":1710000000123,"b":"100.1","B":"2.5","a":"100.2","A":"3.0"}
                 """));
 
@@ -85,7 +98,7 @@ class AsterQuoteEngineTest {
         CapturingQuoteEngine engine = new CapturingQuoteEngine(new StubRestApi(), new StubWebSocketApi(),
                 new NoOpTickerRegistry());
 
-        engine.onMarkPriceUpdate(ticker(), json("""
+        engine.onMarkPriceUpdate(perpTicker(), json("""
                 {"E":1710000000123,"p":"101.5","i":"101.2","r":"0.0008"}
                 """));
 
@@ -97,14 +110,31 @@ class AsterQuoteEngineTest {
     }
 
     @Test
+    void symbolTickerUpdatesProduceLastPriceAndVolumeQuotes() throws Exception {
+        CapturingQuoteEngine engine = new CapturingQuoteEngine(new StubRestApi(), new StubWebSocketApi(),
+                new NoOpTickerRegistry());
+
+        engine.onSymbolTickerUpdate(perpTicker(), json("""
+                {"E":1710000000123,"c":"101.7","Q":"0.25","v":"1500.5","q":"152625.85"}
+                """));
+
+        ILevel1Quote quote = engine.lastLevel1Quote;
+        assertNotNull(quote);
+        assertEquals(new BigDecimal("101.7"), quote.getValue(QuoteType.LAST));
+        assertEquals(new BigDecimal("0.25"), quote.getValue(QuoteType.LAST_SIZE));
+        assertEquals(new BigDecimal("1500.5"), quote.getValue(QuoteType.VOLUME));
+        assertEquals(new BigDecimal("152625.85"), quote.getValue(QuoteType.VOLUME_NOTIONAL));
+    }
+
+    @Test
     void depthAndTradeUpdatesProduceQuotes() throws Exception {
         CapturingQuoteEngine engine = new CapturingQuoteEngine(new StubRestApi(), new StubWebSocketApi(),
                 new NoOpTickerRegistry());
 
-        engine.onOrderBookUpdate(ticker(), json("""
+        engine.onOrderBookUpdate(perpTicker(), json("""
                 {"E":1710000000123,"b":[["100.0","1.5"]],"a":[["100.2","2.0"]]}
                 """));
-        engine.onTradeUpdate(ticker(), json("""
+        engine.onTradeUpdate(perpTicker(), json("""
                 {"T":1710000000123,"p":"99.9","q":"4.0","m":true}
                 """));
 
@@ -120,12 +150,35 @@ class AsterQuoteEngineTest {
         assertEquals(OrderFlow.Side.SELL, orderFlow.getSide());
     }
 
-    private static Ticker ticker() {
+    @Test
+    void spotDepthUpdatesSupportSpotBidAndAskFieldNames() throws Exception {
+        CapturingQuoteEngine engine = new CapturingQuoteEngine(new StubRestApi(), new StubWebSocketApi(),
+                new NoOpTickerRegistry());
+
+        engine.onOrderBookUpdate(spotTicker(), json("""
+                {"E":1710000000123,"bids":[["100.0","1.5"]],"asks":[["100.2","2.0"]]}
+                """));
+
+        ILevel2Quote depth = engine.lastLevel2Quote;
+        assertNotNull(depth);
+        assertEquals(0, depth.getOrderBook().getBestBidWithSize().getPrice().compareTo(new BigDecimal("100.0")));
+        assertEquals(0, depth.getOrderBook().getBestAskWithSize().getPrice().compareTo(new BigDecimal("100.2")));
+    }
+
+    private static Ticker perpTicker() {
         return new Ticker("BTCUSDT")
                 .setExchange(Exchange.ASTER)
                 .setInstrumentType(InstrumentType.PERPETUAL_FUTURES)
                 .setMinimumTickSize(new BigDecimal("0.1"))
                 .setFundingRateInterval(8);
+    }
+
+    private static Ticker spotTicker() {
+        return new Ticker("BNBUSDT")
+                .setExchange(Exchange.ASTER)
+                .setInstrumentType(InstrumentType.CRYPTO_SPOT)
+                .setMinimumTickSize(new BigDecimal("0.01"))
+                .setFundingRateInterval(0);
     }
 
     private static JsonNode json(String value) throws Exception {
@@ -219,6 +272,11 @@ class AsterQuoteEngineTest {
 
         @Override
         public JsonNode getPositionRisk(String symbol) {
+            return null;
+        }
+
+        @Override
+        public JsonNode getAccountInformation() {
             return null;
         }
     }

@@ -1,7 +1,6 @@
 package com.fueledbychai.broker.lighter;
 
 import java.math.BigDecimal;
-import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -37,6 +36,7 @@ import com.fueledbychai.lighter.common.api.order.LighterCancelOrderRequest;
 import com.fueledbychai.lighter.common.api.order.LighterCreateOrderRequest;
 import com.fueledbychai.lighter.common.api.order.LighterModifyOrderRequest;
 import com.fueledbychai.lighter.common.api.signer.LighterNativeTransactionSigner;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountOrdersListener;
 import com.fueledbychai.lighter.common.api.ws.model.LighterAccountStats;
 import com.fueledbychai.lighter.common.api.ws.model.LighterAccountStatsUpdate;
 import com.fueledbychai.lighter.common.api.ws.model.LighterOrder;
@@ -44,7 +44,6 @@ import com.fueledbychai.lighter.common.api.ws.model.LighterOrdersUpdate;
 import com.fueledbychai.lighter.common.api.ws.model.LighterSendTxResponse;
 import com.fueledbychai.lighter.common.api.ws.model.LighterTrade;
 import com.fueledbychai.lighter.common.api.ws.model.LighterTradesUpdate;
-import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountOrdersListener;
 import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.ExchangeWebSocketApiFactory;
 import com.fueledbychai.util.FillDeduper;
@@ -393,19 +392,11 @@ public class LighterBroker extends AbstractBasicBroker {
         String token = ensureAuthToken();
         List<OrderTicket> allOpenOrders = new ArrayList<>();
 
-        Set<Integer> marketIndexes = getKnownMarketIndexes();
-        for (Integer marketIndex : marketIndexes) {
-            if (marketIndex == null) {
-                continue;
-            }
-
-            try {
-                List<LighterOrder> lighterOrders = restApi.getAccountActiveOrders(token, accountIndex,
-                        marketIndex.intValue());
-                allOpenOrders.addAll(translator.translateOrders(lighterOrders));
-            } catch (Exception ex) {
-                logger.warn("Unable to retrieve active orders for market {}", marketIndex, ex);
-            }
+        try {
+            List<LighterOrder> lighterOrders = restApi.getAccountActiveOrders(token, accountIndex);
+            allOpenOrders.addAll(translator.translateOrders(lighterOrders));
+        } catch (Exception ex) {
+            logger.warn("Unable to retrieve active orders for account {}", accountIndex, ex);
         }
 
         if (!allOpenOrders.isEmpty()) {

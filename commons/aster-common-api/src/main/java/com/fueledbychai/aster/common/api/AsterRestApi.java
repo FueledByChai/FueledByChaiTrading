@@ -33,7 +33,8 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 /**
- * REST client for Aster perpetual futures.
+ * REST client for Aster public spot and perpetual-futures APIs, plus the
+ * existing futures private endpoints used by the broker implementation.
  */
 public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
 
@@ -42,7 +43,8 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
     static final String API_KEY_HEADER = "X-MBX-APIKEY";
     static final MediaType FORM_MEDIA_TYPE = MediaType.parse("application/x-www-form-urlencoded");
 
-    protected final String baseUrl;
+    protected final String futuresBaseUrl;
+    protected final String spotBaseUrl;
     protected final String apiKey;
     protected final String apiSecret;
     protected final boolean publicApiOnly;
@@ -50,22 +52,40 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
     protected final OkHttpClient client;
     protected final ObjectMapper objectMapper;
     protected final Map<InstrumentType, InstrumentDescriptor[]> descriptorsByType = new EnumMap<>(InstrumentType.class);
-    protected final Map<String, InstrumentDescriptor> descriptorByExchangeSymbol = new ConcurrentHashMap<>();
-    protected final Map<String, InstrumentDescriptor> descriptorByCommonSymbol = new ConcurrentHashMap<>();
+    protected final Map<InstrumentType, Map<String, InstrumentDescriptor>> descriptorByExchangeSymbolByType = new EnumMap<>(
+            InstrumentType.class);
+    protected final Map<InstrumentType, Map<String, InstrumentDescriptor>> descriptorByCommonSymbolByType = new EnumMap<>(
+            InstrumentType.class);
 
     public AsterRestApi(String baseUrl) {
-        this(baseUrl, null, null, AsterConfiguration.getInstance().getRecvWindow());
+        this(baseUrl, deriveSpotBaseUrl(baseUrl), null, null, AsterConfiguration.getInstance().getRecvWindow());
+    }
+
+    public AsterRestApi(String futuresBaseUrl, String spotBaseUrl) {
+        this(futuresBaseUrl, spotBaseUrl, null, null, AsterConfiguration.getInstance().getRecvWindow());
     }
 
     public AsterRestApi(String baseUrl, String apiKey, String apiSecret) {
-        this(baseUrl, apiKey, apiSecret, AsterConfiguration.getInstance().getRecvWindow());
+        this(baseUrl, deriveSpotBaseUrl(baseUrl), apiKey, apiSecret, AsterConfiguration.getInstance().getRecvWindow());
+    }
+
+    public AsterRestApi(String futuresBaseUrl, String spotBaseUrl, String apiKey, String apiSecret) {
+        this(futuresBaseUrl, spotBaseUrl, apiKey, apiSecret, AsterConfiguration.getInstance().getRecvWindow());
     }
 
     public AsterRestApi(String baseUrl, String apiKey, String apiSecret, long recvWindow) {
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new IllegalArgumentException("baseUrl is required");
+        this(baseUrl, deriveSpotBaseUrl(baseUrl), apiKey, apiSecret, recvWindow);
+    }
+
+    public AsterRestApi(String futuresBaseUrl, String spotBaseUrl, String apiKey, String apiSecret, long recvWindow) {
+        if (futuresBaseUrl == null || futuresBaseUrl.isBlank()) {
+            throw new IllegalArgumentException("futuresBaseUrl is required");
         }
-        this.baseUrl = normalizeBaseUrl(baseUrl);
+        if (spotBaseUrl == null || spotBaseUrl.isBlank()) {
+            throw new IllegalArgumentException("spotBaseUrl is required");
+        }
+        this.futuresBaseUrl = normalizeBaseUrl(futuresBaseUrl);
+        this.spotBaseUrl = normalizeBaseUrl(spotBaseUrl);
         this.apiKey = apiKey;
         this.apiSecret = apiSecret;
         this.recvWindow = recvWindow <= 0 ? AsterConfiguration.getInstance().getRecvWindow() : recvWindow;
@@ -96,20 +116,17 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
         }
 
         String normalized = symbol.trim().toUpperCase(Locale.US);
-        InstrumentDescriptor byExchangeSymbol = descriptorByExchangeSymbol.get(normalized);
-        if (byExchangeSymbol != null) {
-            return byExchangeSymbol;
+        InstrumentDescriptor cached = lookupCachedDescriptor(normalized);
+        if (cached != null) {
+            return cached;
         }
 
-        InstrumentDescriptor byCommonSymbol = descriptorByCommonSymbol.get(normalized);
-        if (byCommonSymbol != null) {
-            return byCommonSymbol;
-        }
-
-        for (InstrumentDescriptor descriptor : getAllInstrumentsForType(InstrumentType.PERPETUAL_FUTURES)) {
-            if (normalized.equalsIgnoreCase(descriptor.getExchangeSymbol())
-                    || normalized.equalsIgnoreCase(descriptor.getCommonSymbol())) {
-                return descriptor;
+        for (InstrumentType instrumentType : supportedInstrumentTypes()) {
+            for (InstrumentDescriptor descriptor : getAllInstrumentsForType(instrumentType)) {
+                if (normalized.equalsIgnoreCase(descriptor.getExchangeSymbol())
+                        || normalized.equalsIgnoreCase(descriptor.getCommonSymbol())) {
+                    return descriptor;
+                }
             }
         }
         return null;
@@ -122,33 +139,33 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
 
     @Override
     public Date getServerTime() {
-        JsonNode root = publicRequest("GET", "/fapi/v1/time", null);
+        JsonNode root = publicRequest(futuresBaseUrl, "GET", "/fapi/v1/time", null);
         return new Date(root.path("serverTime").asLong(System.currentTimeMillis()));
     }
 
     @Override
     public String startUserDataStream() {
         requirePrivateApi();
-        JsonNode root = apiKeyRequest("POST", "/fapi/v1/listenKey");
+        JsonNode root = apiKeyRequest(futuresBaseUrl, "POST", "/fapi/v1/listenKey");
         return root.path("listenKey").asText("");
     }
 
     @Override
     public void keepAliveUserDataStream(String listenKey) {
         requirePrivateApi();
-        apiKeyRequest("PUT", "/fapi/v1/listenKey");
+        apiKeyRequest(futuresBaseUrl, "PUT", "/fapi/v1/listenKey");
     }
 
     @Override
     public void closeUserDataStream(String listenKey) {
         requirePrivateApi();
-        apiKeyRequest("DELETE", "/fapi/v1/listenKey");
+        apiKeyRequest(futuresBaseUrl, "DELETE", "/fapi/v1/listenKey");
     }
 
     @Override
     public JsonNode placeOrder(Map<String, String> params) {
         requirePrivateApi();
-        return signedRequest("POST", "/fapi/v1/order", params);
+        return signedRequest(futuresBaseUrl, "POST", "/fapi/v1/order", params);
     }
 
     @Override
@@ -165,7 +182,7 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
         if (!params.containsKey("orderId") && !params.containsKey("origClientOrderId")) {
             throw new IllegalArgumentException("orderId or origClientOrderId is required");
         }
-        return signedRequest("DELETE", "/fapi/v1/order", params);
+        return signedRequest(futuresBaseUrl, "DELETE", "/fapi/v1/order", params);
     }
 
     @Override
@@ -173,7 +190,7 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
         requirePrivateApi();
         LinkedHashMap<String, String> params = new LinkedHashMap<>();
         params.put("symbol", required(symbol, "symbol"));
-        return signedRequest("DELETE", "/fapi/v1/allOpenOrders", params);
+        return signedRequest(futuresBaseUrl, "DELETE", "/fapi/v1/allOpenOrders", params);
     }
 
     @Override
@@ -190,7 +207,7 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
         if (!params.containsKey("orderId") && !params.containsKey("origClientOrderId")) {
             throw new IllegalArgumentException("orderId or origClientOrderId is required");
         }
-        return signedRequest("GET", "/fapi/v1/order", params);
+        return signedRequest(futuresBaseUrl, "GET", "/fapi/v1/order", params);
     }
 
     @Override
@@ -200,7 +217,7 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
         if (symbol != null && !symbol.isBlank()) {
             params.put("symbol", symbol);
         }
-        return signedRequest("GET", "/fapi/v1/openOrders", params);
+        return signedRequest(futuresBaseUrl, "GET", "/fapi/v1/openOrders", params);
     }
 
     @Override
@@ -210,46 +227,61 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
         if (symbol != null && !symbol.isBlank()) {
             params.put("symbol", symbol);
         }
-        return signedRequest("GET", "/fapi/v2/positionRisk", params);
+        return signedRequest(futuresBaseUrl, "GET", "/fapi/v2/positionRisk", params);
+    }
+
+    @Override
+    public JsonNode getAccountInformation() {
+        requirePrivateApi();
+        return signedRequest(futuresBaseUrl, "GET", "/fapi/v4/account", null);
     }
 
     protected InstrumentDescriptor[] loadInstrumentsForType(InstrumentType instrumentType) {
-        JsonNode root = publicRequest("GET", "/fapi/v1/exchangeInfo", null);
-        List<InstrumentDescriptor> descriptors = parseInstrumentDescriptors(root);
+        String path = instrumentType == InstrumentType.CRYPTO_SPOT ? "/api/v1/exchangeInfo" : "/fapi/v1/exchangeInfo";
+        JsonNode root = publicRequest(baseUrlFor(instrumentType), "GET", path, null);
+        List<InstrumentDescriptor> descriptors = parseInstrumentDescriptors(root, instrumentType);
         return descriptors.toArray(new InstrumentDescriptor[0]);
     }
 
-    protected List<InstrumentDescriptor> parseInstrumentDescriptors(JsonNode root) {
+    protected List<InstrumentDescriptor> parseInstrumentDescriptors(JsonNode root, InstrumentType instrumentType) {
         List<InstrumentDescriptor> descriptors = new ArrayList<>();
         if (root == null || !root.has("symbols")) {
             return descriptors;
         }
 
         for (JsonNode symbolNode : root.path("symbols")) {
-            if (!isTradablePerpetual(symbolNode)) {
+            if (!isTradableSymbol(symbolNode, instrumentType)) {
                 continue;
             }
-            InstrumentDescriptor descriptor = toInstrumentDescriptor(symbolNode);
+            InstrumentDescriptor descriptor = toInstrumentDescriptor(symbolNode, instrumentType);
             if (descriptor == null) {
                 continue;
             }
             descriptors.add(descriptor);
-            descriptorByExchangeSymbol.put(descriptor.getExchangeSymbol().toUpperCase(Locale.US), descriptor);
-            descriptorByCommonSymbol.put(descriptor.getCommonSymbol().toUpperCase(Locale.US), descriptor);
+            descriptorByExchangeSymbol(instrumentType).put(descriptor.getExchangeSymbol().toUpperCase(Locale.US),
+                    descriptor);
+            descriptorByCommonSymbol(instrumentType).put(descriptor.getCommonSymbol().toUpperCase(Locale.US),
+                    descriptor);
         }
         return descriptors;
     }
 
-    protected boolean isTradablePerpetual(JsonNode symbolNode) {
+    protected boolean isTradableSymbol(JsonNode symbolNode, InstrumentType instrumentType) {
         if (symbolNode == null) {
             return false;
         }
-        String contractType = symbolNode.path("contractType").asText("");
         String status = symbolNode.path("status").asText("");
-        return "PERPETUAL".equalsIgnoreCase(contractType) && "TRADING".equalsIgnoreCase(status);
+        if (!"TRADING".equalsIgnoreCase(status)) {
+            return false;
+        }
+        if (instrumentType == InstrumentType.CRYPTO_SPOT) {
+            return true;
+        }
+        String contractType = symbolNode.path("contractType").asText("");
+        return "PERPETUAL".equalsIgnoreCase(contractType);
     }
 
-    protected InstrumentDescriptor toInstrumentDescriptor(JsonNode symbolNode) {
+    protected InstrumentDescriptor toInstrumentDescriptor(JsonNode symbolNode, InstrumentType instrumentType) {
         String exchangeSymbol = symbolNode.path("symbol").asText("");
         String baseAsset = symbolNode.path("baseAsset").asText("");
         String quoteAsset = symbolNode.path("quoteAsset").asText("");
@@ -265,10 +297,11 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
         BigDecimal orderSizeIncrement = decimalOrDefault(lotSizeFilter, "stepSize", BigDecimal.ONE);
         BigDecimal minOrderSize = decimalOrDefault(lotSizeFilter, "minQty", BigDecimal.ONE);
         int minNotionalOrderSize = toMinNotional(notionalFilter);
+        int fundingPeriodHours = instrumentType == InstrumentType.PERPETUAL_FUTURES ? DEFAULT_FUNDING_PERIOD_HOURS : 0;
 
-        return new InstrumentDescriptor(InstrumentType.PERPETUAL_FUTURES, Exchange.ASTER, baseAsset + "/" + quoteAsset,
-                exchangeSymbol, baseAsset, quoteAsset, orderSizeIncrement, priceTickSize, minNotionalOrderSize,
-                minOrderSize, DEFAULT_FUNDING_PERIOD_HOURS, BigDecimal.ONE, 1, exchangeSymbol);
+        return new InstrumentDescriptor(instrumentType, Exchange.ASTER, baseAsset + "/" + quoteAsset, exchangeSymbol,
+                baseAsset, quoteAsset, orderSizeIncrement, priceTickSize, minNotionalOrderSize, minOrderSize,
+                fundingPeriodHours, BigDecimal.ONE, 1, exchangeSymbol);
     }
 
     protected JsonNode findFilter(JsonNode symbolNode, String filterType) {
@@ -308,21 +341,33 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
     }
 
     protected JsonNode publicRequest(String method, String path, Map<String, String> params) {
-        HttpUrl url = buildUrl(path, params);
+        return publicRequest(futuresBaseUrl, method, path, params);
+    }
+
+    protected JsonNode publicRequest(String baseUrl, String method, String path, Map<String, String> params) {
+        HttpUrl url = buildUrl(baseUrl, path, params);
         Request.Builder builder = new Request.Builder().url(url);
         applyMethod(builder, method);
         return execute(builder.build());
     }
 
     protected JsonNode apiKeyRequest(String method, String path) {
+        return apiKeyRequest(futuresBaseUrl, method, path);
+    }
+
+    protected JsonNode apiKeyRequest(String baseUrl, String method, String path) {
         Request.Builder builder = new Request.Builder()
-                .url(buildUrl(path, null))
+                .url(buildUrl(baseUrl, path, null))
                 .addHeader(API_KEY_HEADER, apiKey);
         applyMethod(builder, method);
         return execute(builder.build());
     }
 
     protected JsonNode signedRequest(String method, String path, Map<String, String> params) {
+        return signedRequest(futuresBaseUrl, method, path, params);
+    }
+
+    protected JsonNode signedRequest(String baseUrl, String method, String path, Map<String, String> params) {
         LinkedHashMap<String, String> signedParams = new LinkedHashMap<>();
         if (params != null) {
             signedParams.putAll(params);
@@ -334,7 +379,7 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
 
         String queryString = toQueryString(signedParams);
         String signature = sign(queryString);
-        HttpUrl.Builder urlBuilder = buildUrl(path, null).newBuilder();
+        HttpUrl.Builder urlBuilder = buildUrl(baseUrl, path, null).newBuilder();
         if (!queryString.isBlank()) {
             urlBuilder.encodedQuery(queryString + "&signature=" + signature);
         } else {
@@ -349,6 +394,10 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
     }
 
     protected HttpUrl buildUrl(String path, Map<String, String> params) {
+        return buildUrl(futuresBaseUrl, path, params);
+    }
+
+    protected HttpUrl buildUrl(String baseUrl, String path, Map<String, String> params) {
         HttpUrl.Builder builder = HttpUrl.parse(baseUrl + path).newBuilder();
         if (params != null) {
             for (Map.Entry<String, String> entry : params.entrySet()) {
@@ -425,7 +474,7 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
     }
 
     protected void validateSupportedType(InstrumentType instrumentType) {
-        if (instrumentType != InstrumentType.PERPETUAL_FUTURES) {
+        if (instrumentType != InstrumentType.PERPETUAL_FUTURES && instrumentType != InstrumentType.CRYPTO_SPOT) {
             throw new IllegalArgumentException("Unsupported Aster instrument type: " + instrumentType);
         }
     }
@@ -442,6 +491,50 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
             return trimmed.substring(0, trimmed.length() - 1);
         }
         return trimmed;
+    }
+
+    protected InstrumentDescriptor lookupCachedDescriptor(String normalizedSymbol) {
+        for (InstrumentType instrumentType : supportedInstrumentTypes()) {
+            InstrumentDescriptor byExchangeSymbol = descriptorByExchangeSymbol(instrumentType).get(normalizedSymbol);
+            if (byExchangeSymbol != null) {
+                return byExchangeSymbol;
+            }
+
+            InstrumentDescriptor byCommonSymbol = descriptorByCommonSymbol(instrumentType).get(normalizedSymbol);
+            if (byCommonSymbol != null) {
+                return byCommonSymbol;
+            }
+        }
+        return null;
+    }
+
+    protected Map<String, InstrumentDescriptor> descriptorByExchangeSymbol(InstrumentType instrumentType) {
+        return descriptorByExchangeSymbolByType.computeIfAbsent(instrumentType, ignored -> new ConcurrentHashMap<>());
+    }
+
+    protected Map<String, InstrumentDescriptor> descriptorByCommonSymbol(InstrumentType instrumentType) {
+        return descriptorByCommonSymbolByType.computeIfAbsent(instrumentType, ignored -> new ConcurrentHashMap<>());
+    }
+
+    protected InstrumentType[] supportedInstrumentTypes() {
+        return new InstrumentType[] { InstrumentType.PERPETUAL_FUTURES, InstrumentType.CRYPTO_SPOT };
+    }
+
+    protected String baseUrlFor(InstrumentType instrumentType) {
+        return instrumentType == InstrumentType.CRYPTO_SPOT ? spotBaseUrl : futuresBaseUrl;
+    }
+
+    protected static String deriveSpotBaseUrl(String futuresBaseUrl) {
+        if (futuresBaseUrl == null || futuresBaseUrl.isBlank()) {
+            throw new IllegalArgumentException("futuresBaseUrl is required");
+        }
+
+        String normalized = futuresBaseUrl.trim();
+        String replaced = normalized.replace("://fapi.", "://sapi.");
+        if (!replaced.equals(normalized)) {
+            return replaced;
+        }
+        return normalized;
     }
 
     protected String required(String value, String name) {

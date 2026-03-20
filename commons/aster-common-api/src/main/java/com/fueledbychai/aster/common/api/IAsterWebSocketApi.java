@@ -8,8 +8,8 @@ import com.fueledbychai.websocket.IWebSocketEventListener;
 /**
  * Public websocket contract for the Aster exchange integration.
  *
- * Aster follows the Binance-style futures stream model for public market data
- * and private listen-key user streams.
+ * Aster exposes Binance-style websocket surfaces for both public spot/perpetual
+ * market data and listen-key user streams.
  */
 public interface IAsterWebSocketApi {
 

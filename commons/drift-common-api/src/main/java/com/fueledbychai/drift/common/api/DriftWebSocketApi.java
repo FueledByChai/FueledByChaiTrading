@@ -19,6 +19,7 @@ import com.fueledbychai.websocket.AbstractWebSocketProcessor;
 
 public class DriftWebSocketApi implements IDriftWebSocketApi {
 
+    protected static final int DEFAULT_ORDERBOOK_GROUPING = 10;
     protected final String dlobWebSocketUrl;
     protected final String gatewayWebSocketUrl;
     protected final Map<String, ManagedSubscription<?>> subscriptions = new ConcurrentHashMap<>();
@@ -107,6 +108,9 @@ public class DriftWebSocketApi implements IDriftWebSocketApi {
         json.put("channel", "orderbook");
         json.put("market", marketName);
         json.put("marketType", marketType.getApiValue());
+        json.put("grouping", DEFAULT_ORDERBOOK_GROUPING);
+        json.put("includeVamm", true);
+        json.put("includeIndicative", true);
         return json.toString();
     }
 

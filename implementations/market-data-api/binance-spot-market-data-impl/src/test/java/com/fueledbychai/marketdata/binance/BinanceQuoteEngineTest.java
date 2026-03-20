@@ -1,15 +1,5 @@
 package com.fueledbychai.marketdata.binance;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.verify;
-
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -17,15 +7,25 @@ import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import static org.mockito.ArgumentMatchers.any;
 import org.mockito.Mock;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.fueledbychai.binance.ws.aggtrade.TradeRecord;
 import com.fueledbychai.binance.ws.bookticker.BookTickerRecord;
 import com.fueledbychai.binance.ws.partialbook.OrderBookSnapshot;
 import com.fueledbychai.binance.ws.partialbook.PriceLevel;
+import com.fueledbychai.binance.ws.symbolticker.SymbolTickerRecord;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.ILevel2Quote;
@@ -66,15 +66,17 @@ public class BinanceQuoteEngineTest {
     }
 
     @Test
-    public void testSubscribeLevel1StartsBookTickerClient() {
+    public void testSubscribeLevel1StartsBookAndSymbolTickerClients() {
         BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry));
         Ticker ticker = new Ticker("BTCUSDT");
 
         doNothing().when(engine).startBookTickerWSClient(ticker);
+        doNothing().when(engine).startSymbolTickerWSClient(ticker);
 
         engine.subscribeLevel1(ticker, level1Listener);
 
         verify(engine).startBookTickerWSClient(ticker);
+        verify(engine).startSymbolTickerWSClient(ticker);
     }
 
     @Test
@@ -243,5 +245,35 @@ public class BinanceQuoteEngineTest {
         assertEquals(new BigDecimal("1.1"), quote.getValue(QuoteType.BID_SIZE));
         assertEquals(new BigDecimal("100.20"), quote.getValue(QuoteType.ASK));
         assertEquals(new BigDecimal("2.2"), quote.getValue(QuoteType.ASK_SIZE));
+    }
+
+    @Test
+    public void testOnSymbolTickerUpdateProducesLastAndVolumeQuotes() {
+        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry));
+        AtomicReference<ILevel1Quote> captured = new AtomicReference<>();
+        Ticker ticker = new Ticker("BTCUSDT");
+
+        doAnswer(invocation -> {
+            captured.set(invocation.getArgument(0));
+            return null;
+        }).when(engine).fireLevel1Quote(any(ILevel1Quote.class));
+
+        SymbolTickerRecord record = new SymbolTickerRecord();
+        record.setEventTime(1710001234567L);
+        record.setLastPrice("100.15");
+        record.setLastQuantity("0.35");
+        record.setVolume("250.5");
+        record.setVolumeNotional("25123.45");
+
+        engine.onSymbolTickerUpdate(ticker, record);
+
+        ILevel1Quote quote = captured.get();
+        assertNotNull(quote);
+        assertEquals(ZonedDateTime.ofInstant(Instant.ofEpochMilli(1710001234567L), ZoneId.of("UTC")),
+                quote.getTimeStamp());
+        assertEquals(new BigDecimal("100.15"), quote.getValue(QuoteType.LAST));
+        assertEquals(new BigDecimal("0.35"), quote.getValue(QuoteType.LAST_SIZE));
+        assertEquals(new BigDecimal("250.5"), quote.getValue(QuoteType.VOLUME));
+        assertEquals(new BigDecimal("25123.45"), quote.getValue(QuoteType.VOLUME_NOTIONAL));
     }
 }
