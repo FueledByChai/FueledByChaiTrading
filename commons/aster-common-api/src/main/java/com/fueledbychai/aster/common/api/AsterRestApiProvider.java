@@ -21,7 +21,8 @@ public class AsterRestApiProvider implements ExchangeRestApiProvider<IAsterRestA
 
     @Override
     public IAsterRestApi getPublicApi() {
-        return new AsterRestApi(AsterConfiguration.getInstance().getRestUrl());
+        AsterConfiguration config = AsterConfiguration.getInstance();
+        return new AsterRestApi(config.getRestUrl(), config.getSpotRestUrl());
     }
 
     @Override
@@ -40,6 +41,7 @@ public class AsterRestApiProvider implements ExchangeRestApiProvider<IAsterRestA
         if (!config.hasPrivateKeyConfiguration()) {
             throw new IllegalStateException("Aster private API requires api key and api secret configuration.");
         }
-        return new AsterRestApi(config.getRestUrl(), config.getApiKey(), config.getApiSecret(), config.getRecvWindow());
+        return new AsterRestApi(config.getRestUrl(), config.getSpotRestUrl(), config.getApiKey(),
+                config.getApiSecret(), config.getRecvWindow());
     }
 }

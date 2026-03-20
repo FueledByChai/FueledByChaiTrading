@@ -13,18 +13,21 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fueledbychai.aster.common.api.ws.AsterJsonProcessor;
 import com.fueledbychai.aster.common.api.ws.AsterWebSocketClient;
 import com.fueledbychai.aster.common.api.ws.AsterWebSocketClientBuilder;
+import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.websocket.IWebSocketEventListener;
 
 /**
- * Reusable websocket session manager for Aster futures market-data streams.
+ * Reusable websocket session manager for Aster spot and futures market-data
+ * streams, plus the existing futures user-data stream.
  */
 public class AsterWebSocketApi implements IAsterWebSocketApi {
 
     private static final Logger logger = LoggerFactory.getLogger(AsterWebSocketApi.class);
     private static final long RECONNECT_DELAY_MILLIS = 1_000L;
 
-    protected final String webSocketUrl;
+    protected final String futuresWebSocketUrl;
+    protected final String spotWebSocketUrl;
     protected volatile boolean connected = false;
     protected volatile boolean orderEntryConnected = false;
     protected volatile boolean shuttingDown = false;
@@ -39,10 +42,18 @@ public class AsterWebSocketApi implements IAsterWebSocketApi {
     });
 
     public AsterWebSocketApi(String webSocketUrl) {
-        if (webSocketUrl == null || webSocketUrl.isBlank()) {
-            throw new IllegalArgumentException("webSocketUrl is required");
+        this(webSocketUrl, deriveSpotWebSocketUrl(webSocketUrl));
+    }
+
+    public AsterWebSocketApi(String futuresWebSocketUrl, String spotWebSocketUrl) {
+        if (futuresWebSocketUrl == null || futuresWebSocketUrl.isBlank()) {
+            throw new IllegalArgumentException("futuresWebSocketUrl is required");
         }
-        this.webSocketUrl = normalizeWebSocketUrl(webSocketUrl);
+        if (spotWebSocketUrl == null || spotWebSocketUrl.isBlank()) {
+            throw new IllegalArgumentException("spotWebSocketUrl is required");
+        }
+        this.futuresWebSocketUrl = normalizeWebSocketUrl(futuresWebSocketUrl);
+        this.spotWebSocketUrl = normalizeWebSocketUrl(spotWebSocketUrl);
     }
 
     @Override
@@ -79,6 +90,7 @@ public class AsterWebSocketApi implements IAsterWebSocketApi {
 
     @Override
     public AsterWebSocketClient subscribeMarkPrice(Ticker ticker, IWebSocketEventListener<JsonNode> listener) {
+        requirePerpetualTicker(ticker);
         return subscribe(ticker, AsterWebSocketClientBuilder.markPriceChannel(ticker), listener);
     }
 
@@ -93,7 +105,7 @@ public class AsterWebSocketApi implements IAsterWebSocketApi {
 
         shuttingDown = false;
         connected = true;
-        String streamUrl = AsterWebSocketClientBuilder.userDataUrl(webSocketUrl, listenKey);
+        String streamUrl = AsterWebSocketClientBuilder.userDataUrl(futuresWebSocketUrl, listenKey);
         String streamKey = streamKey(streamUrl, "");
         streamChannels.put(streamKey, "");
         streamUrls.put(streamKey, streamUrl);
@@ -145,9 +157,10 @@ public class AsterWebSocketApi implements IAsterWebSocketApi {
         shuttingDown = false;
         connected = true;
 
-        String streamKey = streamKey(webSocketUrl, channel);
+        String streamUrl = resolveMarketDataWebSocketUrl(ticker);
+        String streamKey = streamKey(streamUrl, channel);
         streamChannels.put(streamKey, channel);
-        streamUrls.put(streamKey, webSocketUrl);
+        streamUrls.put(streamKey, streamUrl);
 
         AsterJsonProcessor processor = processors.computeIfAbsent(streamKey, this::newProcessor);
         processor.addEventListener(listener);
@@ -157,7 +170,7 @@ public class AsterWebSocketApi implements IAsterWebSocketApi {
             return existing;
         }
 
-        AsterWebSocketClient client = newClient(webSocketUrl, channel, processor);
+        AsterWebSocketClient client = newClient(streamUrl, channel, processor);
         clients.put(streamKey, client);
         client.connect();
         return client;
@@ -215,5 +228,31 @@ public class AsterWebSocketApi implements IAsterWebSocketApi {
             return trimmed.substring(0, trimmed.length() - 1);
         }
         return trimmed;
+    }
+
+    protected String resolveMarketDataWebSocketUrl(Ticker ticker) {
+        if (ticker != null && ticker.getInstrumentType() == InstrumentType.CRYPTO_SPOT) {
+            return spotWebSocketUrl;
+        }
+        return futuresWebSocketUrl;
+    }
+
+    protected void requirePerpetualTicker(Ticker ticker) {
+        if (ticker != null && ticker.getInstrumentType() == InstrumentType.CRYPTO_SPOT) {
+            throw new IllegalArgumentException("Mark price stream is only available for Aster perpetual futures");
+        }
+    }
+
+    protected static String deriveSpotWebSocketUrl(String futuresWebSocketUrl) {
+        if (futuresWebSocketUrl == null || futuresWebSocketUrl.isBlank()) {
+            throw new IllegalArgumentException("futuresWebSocketUrl is required");
+        }
+
+        String normalized = futuresWebSocketUrl.trim();
+        String replaced = normalized.replace("://fstream.", "://sstream.");
+        if (!replaced.equals(normalized)) {
+            return replaced;
+        }
+        return normalized;
     }
 }

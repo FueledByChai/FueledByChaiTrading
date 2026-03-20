@@ -13,7 +13,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.binance.BinanceConfiguration;
-import com.fueledbychai.data.Exchange;
 import com.fueledbychai.binance.ws.BinanceWebSocketClient;
 import com.fueledbychai.binance.ws.BinanceWebSocketClientBuilder;
 import com.fueledbychai.binance.ws.aggtrade.AggTradeRecordProcessor;
@@ -22,6 +21,9 @@ import com.fueledbychai.binance.ws.bookticker.BookTickerRecord;
 import com.fueledbychai.binance.ws.bookticker.BookTickerRecordProcessor;
 import com.fueledbychai.binance.ws.partialbook.OrderBookSnapshot;
 import com.fueledbychai.binance.ws.partialbook.PartialOrderBookProcessor;
+import com.fueledbychai.binance.ws.symbolticker.SymbolTickerRecord;
+import com.fueledbychai.binance.ws.symbolticker.SymbolTickerRecordProcessor;
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.Level1Quote;
 import com.fueledbychai.marketdata.Level1QuoteListener;
@@ -109,10 +111,12 @@ public class BinanceQuoteEngine extends QuoteEngine {
 
     @Override
     public void subscribeLevel1(Ticker ticker, Level1QuoteListener listener) {
-        if (!super.level1ListenerMap.containsKey(ticker)) {
-            startBookTickerWSClient(ticker);
-        }
+        boolean startStreams = !super.level1ListenerMap.containsKey(ticker);
         super.subscribeLevel1(ticker, listener);
+        if (startStreams) {
+            startBookTickerWSClient(ticker);
+            startSymbolTickerWSClient(ticker);
+        }
     }
 
     @Override
@@ -122,10 +126,11 @@ public class BinanceQuoteEngine extends QuoteEngine {
 
     @Override
     public void subscribeMarketDepth(Ticker ticker, Level2QuoteListener listener) {
-        if (!super.level2ListenerMap.containsKey(ticker) && !super.level1ListenerMap.containsKey(ticker)) {
+        boolean startStream = !super.level2ListenerMap.containsKey(ticker) && !super.level1ListenerMap.containsKey(ticker);
+        super.subscribeMarketDepth(ticker, listener);
+        if (startStream) {
             startPartialOrderBookClient(ticker);
         }
-        super.subscribeMarketDepth(ticker, listener);
     }
 
     @Override
@@ -135,11 +140,12 @@ public class BinanceQuoteEngine extends QuoteEngine {
 
     @Override
     public void subscribeOrderFlow(Ticker ticker, OrderFlowListener listener) {
-        if (!super.orderFlowListenerMap.containsKey(ticker)) {
+        boolean startStream = !super.orderFlowListenerMap.containsKey(ticker);
+        super.subscribeOrderFlow(ticker, listener);
+        if (startStream) {
             // No order flow client yet for this ticker, so create one.
             startTradesWSClient(ticker);
         }
-        super.subscribeOrderFlow(ticker, listener);
     }
 
     @Override
@@ -192,6 +198,43 @@ public class BinanceQuoteEngine extends QuoteEngine {
         BigDecimal askSize = parseQuantity(record.getBestAskQty());
 
         onBBOUpdate(ticker, bestBid, bidSize, bestAsk, askSize, eventTime);
+    }
+
+    public void onSymbolTickerUpdate(Ticker ticker, SymbolTickerRecord record) {
+        if (record == null) {
+            return;
+        }
+
+        Level1Quote quote = new Level1Quote(ticker, toTimestamp(record.getEventTime()));
+        boolean hasValues = false;
+
+        BigDecimal lastPrice = parsePrice(record.getLastPrice());
+        if (lastPrice != null) {
+            quote.addQuote(QuoteType.LAST, lastPrice);
+            hasValues = true;
+        }
+
+        BigDecimal lastSize = parseQuantity(record.getLastQuantity());
+        if (lastSize != null) {
+            quote.addQuote(QuoteType.LAST_SIZE, lastSize);
+            hasValues = true;
+        }
+
+        BigDecimal volume = parseQuantity(record.getVolume());
+        if (volume != null) {
+            quote.addQuote(QuoteType.VOLUME, volume);
+            hasValues = true;
+        }
+
+        BigDecimal volumeNotional = parseQuantity(record.getVolumeNotional());
+        if (volumeNotional != null) {
+            quote.addQuote(QuoteType.VOLUME_NOTIONAL, volumeNotional);
+            hasValues = true;
+        }
+
+        if (hasValues) {
+            fireLevel1Quote(quote);
+        }
     }
 
     protected List<OrderBook.PriceLevel> convertPriceLevels(
@@ -281,6 +324,30 @@ public class BinanceQuoteEngine extends QuoteEngine {
             BinanceWebSocketClient bookTickerClient = BinanceWebSocketClientBuilder.buildBookTickerClient(wsUrl,
                     ticker, processor);
             bookTickerClient.connect();
+
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    protected void startSymbolTickerWSClient(final Ticker ticker) {
+        try {
+            logger.info("Starting Symbol Ticker WebSocket client");
+            SymbolTickerRecordProcessor processor = new SymbolTickerRecordProcessor(() -> {
+                logger.info("Symbol Ticker WebSocket closed, trying to restart...");
+                startSymbolTickerWSClient(ticker);
+            });
+            processor.addEventListener((SymbolTickerRecord obs) -> {
+                try {
+                    onSymbolTickerUpdate(ticker, obs);
+                } catch (Exception e) {
+                    logger.error("Error processing symbol ticker update", e);
+                }
+            });
+
+            BinanceWebSocketClient symbolTickerClient = BinanceWebSocketClientBuilder.buildSymbolTickerClient(wsUrl,
+                    ticker, processor);
+            symbolTickerClient.connect();
 
         } catch (Exception e) {
             throw new IllegalStateException(e);

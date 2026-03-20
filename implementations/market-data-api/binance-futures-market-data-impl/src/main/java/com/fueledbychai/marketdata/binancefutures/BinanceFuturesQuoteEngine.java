@@ -221,6 +221,18 @@ public class BinanceFuturesQuoteEngine extends QuoteEngine {
         Level1Quote quote = new Level1Quote(ticker, toTimestamp(message, "E"));
         boolean hasValues = false;
 
+        BigDecimal lastPrice = decimalValue(message, "c");
+        if (lastPrice != null) {
+            quote.addQuote(QuoteType.LAST, lastPrice);
+            hasValues = true;
+        }
+
+        BigDecimal lastSize = decimalValue(message, "Q");
+        if (lastSize != null) {
+            quote.addQuote(QuoteType.LAST_SIZE, lastSize);
+            hasValues = true;
+        }
+
         BigDecimal volume = decimalValue(message, "v");
         if (volume != null) {
             quote.addQuote(QuoteType.VOLUME, volume);

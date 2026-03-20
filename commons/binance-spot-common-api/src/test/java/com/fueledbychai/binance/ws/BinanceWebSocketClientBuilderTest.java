@@ -3,7 +3,6 @@ package com.fueledbychai.binance.ws;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
-
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -51,6 +50,18 @@ public class BinanceWebSocketClientBuilderTest {
         assertNotNull(client);
         assertEquals("wss://example.test/stream", client.getURI().toString());
         assertEquals("ethusdt@bookTicker", getFieldValue(client, "channel", String.class));
+        assertSame(processor, getFieldValue(client, "processor", IWebSocketProcessor.class));
+    }
+
+    @Test
+    public void testBuildSymbolTickerClient() throws Exception {
+        Ticker ticker = new Ticker("ETHUSDT");
+        BinanceWebSocketClient client = BinanceWebSocketClientBuilder
+                .buildSymbolTickerClient("wss://example.test/stream", ticker, processor);
+
+        assertNotNull(client);
+        assertEquals("wss://example.test/stream", client.getURI().toString());
+        assertEquals("ethusdt@ticker", getFieldValue(client, "channel", String.class));
         assertSame(processor, getFieldValue(client, "processor", IWebSocketProcessor.class));
     }
 

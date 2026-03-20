@@ -45,6 +45,7 @@ public class DriftRestApi extends BaseRestApi implements IDriftRestApi {
 
     protected static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
     protected static final BigDecimal DEFAULT_PRICE_TICK_SIZE = new BigDecimal("0.000001");
+    protected static final int DEFAULT_ORDERBOOK_GROUPING = 10;
     protected static final long PUBLIC_MARKETS_TTL_MILLIS = Duration.ofSeconds(30).toMillis();
     protected static final BigDecimal PRICE_PRECISION = new BigDecimal("1000000");
     protected static final BigDecimal BASE_PRECISION = new BigDecimal("1000000000");
@@ -167,7 +168,10 @@ public class DriftRestApi extends BaseRestApi implements IDriftRestApi {
             throw new IllegalArgumentException("marketName is required");
         }
         HttpUrl.Builder urlBuilder = HttpUrl.parse(dlobRestUrl + "/l2").newBuilder()
-                .addQueryParameter("marketName", marketName);
+                .addQueryParameter("marketName", marketName)
+                .addQueryParameter("grouping", String.valueOf(DEFAULT_ORDERBOOK_GROUPING))
+                .addQueryParameter("includeVamm", "true")
+                .addQueryParameter("includeIndicative", "true");
         if (marketType != null) {
             urlBuilder.addQueryParameter("marketType", marketType.getApiValue());
         }
