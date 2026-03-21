@@ -144,13 +144,15 @@ class BinanceFuturesQuoteEngineTest {
     }
 
     @Test
-    void symbolTickerUpdatesProduceVolumeQuotes() throws Exception {
+    void symbolTickerUpdatesProduceLastAndVolumeQuotes() throws Exception {
         CapturingQuoteEngine engine = newEngine(new StubWebSocketApi());
         engine.onSymbolTickerUpdate(ticker(),
-                json("{\"E\":1710000000123,\"v\":\"123.45\",\"q\":\"67890.12\"}"));
+                json("{\"E\":1710000000123,\"c\":\"101.25\",\"Q\":\"0.75\",\"v\":\"123.45\",\"q\":\"67890.12\"}"));
 
         ILevel1Quote quote = engine.lastLevel1Quote;
         assertNotNull(quote);
+        assertEquals(new BigDecimal("101.25"), quote.getValue(QuoteType.LAST));
+        assertEquals(new BigDecimal("0.75"), quote.getValue(QuoteType.LAST_SIZE));
         assertEquals(new BigDecimal("123.45"), quote.getValue(QuoteType.VOLUME));
         assertEquals(new BigDecimal("67890.12"), quote.getValue(QuoteType.VOLUME_NOTIONAL));
     }

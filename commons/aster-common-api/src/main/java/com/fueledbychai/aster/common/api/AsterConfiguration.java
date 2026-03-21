@@ -7,6 +7,10 @@ public class AsterConfiguration {
     public static final String ASTER_MAINNET_WS_URL = "aster.mainnet.ws.url";
     public static final String ASTER_TESTNET_REST_URL = "aster.testnet.rest.url";
     public static final String ASTER_TESTNET_WS_URL = "aster.testnet.ws.url";
+    public static final String ASTER_SPOT_MAINNET_REST_URL = "aster.spot.mainnet.rest.url";
+    public static final String ASTER_SPOT_MAINNET_WS_URL = "aster.spot.mainnet.ws.url";
+    public static final String ASTER_SPOT_TESTNET_REST_URL = "aster.spot.testnet.rest.url";
+    public static final String ASTER_SPOT_TESTNET_WS_URL = "aster.spot.testnet.ws.url";
     public static final String ASTER_API_KEY = "aster.api.key";
     public static final String ASTER_API_SECRET = "aster.api.secret";
     public static final String ASTER_RECV_WINDOW = "aster.recv.window";
@@ -16,6 +20,10 @@ public class AsterConfiguration {
     private static final String DEFAULT_MAINNET_WS_URL = "wss://fstream.asterdex.com/ws";
     private static final String DEFAULT_TESTNET_REST_URL = DEFAULT_MAINNET_REST_URL;
     private static final String DEFAULT_TESTNET_WS_URL = DEFAULT_MAINNET_WS_URL;
+    private static final String DEFAULT_SPOT_MAINNET_REST_URL = "https://sapi.asterdex.com";
+    private static final String DEFAULT_SPOT_MAINNET_WS_URL = "wss://sstream.asterdex.com/ws";
+    private static final String DEFAULT_SPOT_TESTNET_REST_URL = DEFAULT_SPOT_MAINNET_REST_URL;
+    private static final String DEFAULT_SPOT_TESTNET_WS_URL = DEFAULT_SPOT_MAINNET_WS_URL;
     private static final long DEFAULT_RECV_WINDOW = 5_000L;
 
     private static volatile AsterConfiguration instance;
@@ -24,6 +32,8 @@ public class AsterConfiguration {
     private final String environment;
     private final String restUrl;
     private final String webSocketUrl;
+    private final String spotRestUrl;
+    private final String spotWebSocketUrl;
     private final String apiKey;
     private final String apiSecret;
     private final long recvWindow;
@@ -52,6 +62,10 @@ public class AsterConfiguration {
                 : read(ASTER_TESTNET_REST_URL, DEFAULT_TESTNET_REST_URL);
         this.webSocketUrl = production ? read(ASTER_MAINNET_WS_URL, DEFAULT_MAINNET_WS_URL)
                 : read(ASTER_TESTNET_WS_URL, DEFAULT_TESTNET_WS_URL);
+        this.spotRestUrl = production ? read(ASTER_SPOT_MAINNET_REST_URL, DEFAULT_SPOT_MAINNET_REST_URL)
+                : read(ASTER_SPOT_TESTNET_REST_URL, DEFAULT_SPOT_TESTNET_REST_URL);
+        this.spotWebSocketUrl = production ? read(ASTER_SPOT_MAINNET_WS_URL, DEFAULT_SPOT_MAINNET_WS_URL)
+                : read(ASTER_SPOT_TESTNET_WS_URL, DEFAULT_SPOT_TESTNET_WS_URL);
         this.apiKey = read(ASTER_API_KEY, null);
         this.apiSecret = read(ASTER_API_SECRET, null);
         this.recvWindow = readLong(ASTER_RECV_WINDOW, DEFAULT_RECV_WINDOW);
@@ -90,6 +104,14 @@ public class AsterConfiguration {
 
     public String getWebSocketUrl() {
         return webSocketUrl;
+    }
+
+    public String getSpotRestUrl() {
+        return spotRestUrl;
+    }
+
+    public String getSpotWebSocketUrl() {
+        return spotWebSocketUrl;
     }
 
     public String getApiKey() {

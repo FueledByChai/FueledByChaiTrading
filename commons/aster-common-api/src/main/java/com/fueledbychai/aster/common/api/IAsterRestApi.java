@@ -89,4 +89,10 @@ public interface IAsterRestApi {
      * Returns current position risk, optionally filtered by symbol.
      */
     JsonNode getPositionRisk(String symbol);
+
+    /**
+     * Returns the current futures account snapshot, including top-level balance and
+     * margin totals.
+     */
+    JsonNode getAccountInformation();
 }

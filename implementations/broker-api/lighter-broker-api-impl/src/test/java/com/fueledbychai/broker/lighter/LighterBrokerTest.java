@@ -1,20 +1,5 @@
 package com.fueledbychai.broker.lighter;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
@@ -23,10 +8,24 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import org.mockito.Mock;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.fueledbychai.broker.BrokerAccountInfoListener;
@@ -35,7 +34,6 @@ import com.fueledbychai.broker.order.Fill;
 import com.fueledbychai.broker.order.OrderStatus;
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.broker.order.TradeDirection;
-import com.fueledbychai.data.ResponseException;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.lighter.common.api.ILighterRestApi;
 import com.fueledbychai.lighter.common.api.ILighterWebSocketApi;
@@ -292,6 +290,38 @@ class LighterBrokerTest {
         assertTrue(latch.await(2, TimeUnit.SECONDS));
         assertNotNull(receivedFill.get());
         assertEquals("500", receivedFill.get().getClientOrderId());
+    }
+
+    @Test
+    void getOpenOrders_UsesSingleAllMarketsApiCall() {
+        LighterBroker brokerSpy = spy(broker);
+        doReturn("token").when(brokerSpy).ensureAuthToken();
+
+        LighterOrder lighterOrder = new LighterOrder();
+        OrderTicket translatedOrder = new OrderTicket();
+        translatedOrder.setOrderId("100");
+
+        when(mockRestApi.getAccountActiveOrders("token", 255L)).thenReturn(List.of(lighterOrder));
+        when(mockTranslator.translateOrders(List.of(lighterOrder))).thenReturn(List.of(translatedOrder));
+
+        List<OrderTicket> openOrders = brokerSpy.getOpenOrders();
+
+        assertEquals(1, openOrders.size());
+        assertEquals("100", openOrders.get(0).getOrderId());
+        verify(mockRestApi, times(1)).getAccountActiveOrders("token", 255L);
+        verify(mockRestApi, never()).getAccountActiveOrders(eq("token"), eq(255L), anyInt());
+    }
+
+    @Test
+    void getOpenOrders_WhenSingleCallFails_ReturnsEmptyList() {
+        LighterBroker brokerSpy = spy(broker);
+        doReturn("token").when(brokerSpy).ensureAuthToken();
+        when(mockRestApi.getAccountActiveOrders("token", 255L)).thenThrow(new RuntimeException("rate limited"));
+
+        List<OrderTicket> openOrders = brokerSpy.getOpenOrders();
+
+        assertNotNull(openOrders);
+        assertTrue(openOrders.isEmpty());
     }
 
     private OrderTicket buildLimitOrder(String clientOrderId) {
