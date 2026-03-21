@@ -20,6 +20,7 @@ public class AsterExchangeCapabilitiesProvider implements ExchangeCapabilitiesPr
                 .supportsBrokerage(true)
                 .supportsHistoricalData(false)
                 .addInstrumentType(InstrumentType.PERPETUAL_FUTURES)
+                .addInstrumentType(InstrumentType.CRYPTO_SPOT)
                 .build();
     }
 }

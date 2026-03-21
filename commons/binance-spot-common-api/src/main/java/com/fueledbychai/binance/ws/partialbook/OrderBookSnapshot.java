@@ -1,8 +1,10 @@
 package com.fueledbychai.binance.ws.partialbook;
 
+import java.util.List;
+
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import java.util.List;
 
 /**
  * Represents a Binance order book snapshot. This corresponds to the REST API
@@ -19,6 +21,11 @@ public class OrderBookSnapshot {
 
     @JsonProperty("asks")
     private List<PriceLevel> asks;
+
+    // Optional Binance event time in epoch millis ("E" in stream payloads).
+    @JsonProperty("E")
+    @JsonAlias({ "eventTime", "timestamp" })
+    private Long eventTime;
 
     // Default constructor for Jackson
     public OrderBookSnapshot() {
@@ -46,6 +53,14 @@ public class OrderBookSnapshot {
 
     public void setAsks(List<PriceLevel> asks) {
         this.asks = asks;
+    }
+
+    public Long getEventTime() {
+        return eventTime;
+    }
+
+    public void setEventTime(Long eventTime) {
+        this.eventTime = eventTime;
     }
 
     /**
@@ -93,6 +108,7 @@ public class OrderBookSnapshot {
 
     @Override
     public String toString() {
-        return "OrderBookSnapshot{" + "lastUpdateId=" + lastUpdateId + ", bids=" + bids + ", asks=" + asks + '}';
+        return "OrderBookSnapshot{" + "lastUpdateId=" + lastUpdateId + ", bids=" + bids + ", asks=" + asks
+                + ", eventTime=" + eventTime + '}';
     }
 }

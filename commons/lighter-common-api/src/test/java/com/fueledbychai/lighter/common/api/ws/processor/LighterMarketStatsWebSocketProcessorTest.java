@@ -1,11 +1,10 @@
 package com.fueledbychai.lighter.common.api.ws.processor;
 
+import java.math.BigDecimal;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-
-import java.math.BigDecimal;
-
 import org.junit.jupiter.api.Test;
 
 import com.fueledbychai.lighter.common.api.ws.model.LighterMarketStats;
@@ -19,6 +18,7 @@ public class LighterMarketStatsWebSocketProcessorTest {
         String message = "{"
                 + "\"type\":\"channel_data\","
                 + "\"channel\":\"market_stats:53\","
+                + "\"timestamp\":\"1700000000123\","
                 + "\"market_stats\":{"
                 + "\"market_id\":53,"
                 + "\"mark_price\":\"61.562\","
@@ -38,6 +38,7 @@ public class LighterMarketStatsWebSocketProcessorTest {
         LighterMarketStatsUpdate update = processor.parse(message);
         assertNotNull(update);
         assertEquals("market_stats:53", update.getChannel());
+        assertEquals(1700000000123L, update.getTimestamp());
         assertEquals(1, update.getMarketStatsByMarketId().size());
 
         LighterMarketStats stats = update.getMarketStats("53");

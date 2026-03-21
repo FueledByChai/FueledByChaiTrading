@@ -1,19 +1,13 @@
 package com.fueledbychai.lighter.common.api;
 
 import java.io.IOException;
-import java.lang.reflect.Type;
 import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.net.Proxy;
-import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,8 +19,8 @@ import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.ResponseException;
 import com.fueledbychai.data.Side;
 import com.fueledbychai.data.Ticker;
-import com.fueledbychai.lighter.common.api.account.LighterPosition;
 import com.fueledbychai.http.BaseRestApi;
+import com.fueledbychai.lighter.common.api.account.LighterPosition;
 import com.fueledbychai.lighter.common.api.auth.LighterApiTokenResponse;
 import com.fueledbychai.lighter.common.api.auth.LighterChangeAccountTierRequest;
 import com.fueledbychai.lighter.common.api.auth.LighterChangeAccountTierResponse;
@@ -44,11 +38,9 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.TypeAdapter;
-import com.google.gson.reflect.TypeToken;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
-import okhttp3.Headers;
 import okhttp3.FormBody;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
@@ -410,14 +402,23 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
     }
 
     @Override
+    public List<LighterOrder> getAccountActiveOrders(String authToken, long accountIndex) {
+        return getAccountActiveOrders(authToken, accountIndex, null);
+    }
+
+    @Override
     public List<LighterOrder> getAccountActiveOrders(String authToken, long accountIndex, int marketId) {
+        return getAccountActiveOrders(authToken, accountIndex, Integer.valueOf(marketId));
+    }
+
+    protected List<LighterOrder> getAccountActiveOrders(String authToken, long accountIndex, Integer marketId) {
         if (authToken == null || authToken.isBlank()) {
             throw new IllegalArgumentException("authToken is required");
         }
         if (accountIndex < 0) {
             throw new IllegalArgumentException("accountIndex must be >= 0");
         }
-        if (marketId < 0) {
+        if (marketId != null && marketId.intValue() < 0) {
             throw new IllegalArgumentException("marketId must be >= 0");
         }
 
@@ -425,7 +426,9 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
             String url = baseUrl + "/accountActiveOrders";
             HttpUrl.Builder urlBuilder = HttpUrl.parse(url).newBuilder();
             urlBuilder.addQueryParameter("account_index", Long.toString(accountIndex));
-            urlBuilder.addQueryParameter("market_id", Integer.toString(marketId));
+            if (marketId != null) {
+                urlBuilder.addQueryParameter("market_id", Integer.toString(marketId.intValue()));
+            }
             urlBuilder.addQueryParameter("authorization", authToken);
             String newUrl = urlBuilder.build().toString();
 
@@ -449,6 +452,21 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
                         e);
             }
         }, 3, 500);
+    }
+
+    @Override
+    public List<LighterOrder> getAccountActiveOrders(long accountIndex) {
+        checkPrivateApi();
+        if (accountIndex < 0) {
+            throw new IllegalArgumentException("accountIndex must be >= 0");
+        }
+
+        long timestamp = System.currentTimeMillis() / 1000L;
+        long expiry = timestamp + DEFAULT_AUTH_TOKEN_TTL_SECONDS;
+        int apiKeyIndex = LighterConfiguration.getInstance().getApiKeyIndex();
+        String authToken = getOrCreateAuthSigner(apiKeyIndex, accountIndex).createAuthTokenWithExpiry(timestamp, expiry,
+                apiKeyIndex, accountIndex);
+        return getAccountActiveOrders(authToken, accountIndex);
     }
 
     @Override

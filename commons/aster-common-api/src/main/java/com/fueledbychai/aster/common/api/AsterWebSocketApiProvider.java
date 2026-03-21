@@ -22,6 +22,7 @@ public class AsterWebSocketApiProvider implements ExchangeWebSocketApiProvider<I
 
     @Override
     public IAsterWebSocketApi getWebSocketApi() {
-        return new AsterWebSocketApi(AsterConfiguration.getInstance().getWebSocketUrl());
+        AsterConfiguration config = AsterConfiguration.getInstance();
+        return new AsterWebSocketApi(config.getWebSocketUrl(), config.getSpotWebSocketUrl());
     }
 }

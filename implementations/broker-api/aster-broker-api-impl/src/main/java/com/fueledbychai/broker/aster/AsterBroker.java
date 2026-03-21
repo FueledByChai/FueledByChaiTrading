@@ -121,6 +121,7 @@ public class AsterBroker extends AbstractBasicBroker {
 
         refreshOpenOrdersFromRest();
         refreshPositionsFromRest();
+        refreshAccountSnapshotFromRest();
     }
 
     @Override
@@ -195,6 +196,10 @@ public class AsterBroker extends AbstractBasicBroker {
         Ticker resolvedTicker = resolveTicker(ticker);
         if (resolvedTicker == null) {
             return new BrokerRequestResult(false, true, "ticker is required",
+                    BrokerRequestResult.FailureType.VALIDATION_FAILED);
+        }
+        if (!supportsBrokerTicker(resolvedTicker)) {
+            return new BrokerRequestResult(false, true, "Aster broker currently supports perpetual futures only",
                     BrokerRequestResult.FailureType.VALIDATION_FAILED);
         }
 
@@ -398,6 +403,10 @@ public class AsterBroker extends AbstractBasicBroker {
             return new BrokerRequestResult(false, true, "order ticker is required",
                     BrokerRequestResult.FailureType.VALIDATION_FAILED);
         }
+        if (!supportsBrokerTicker(order.getTicker())) {
+            return new BrokerRequestResult(false, true, "Aster broker currently supports perpetual futures only",
+                    BrokerRequestResult.FailureType.VALIDATION_FAILED);
+        }
         if (order.getSize() == null || order.getSize().signum() <= 0) {
             return new BrokerRequestResult(false, true, "order size must be > 0",
                     BrokerRequestResult.FailureType.INVALID_SIZE);
@@ -427,6 +436,10 @@ public class AsterBroker extends AbstractBasicBroker {
 
     protected boolean supportsOrderType(Type type) {
         return type == Type.MARKET || type == Type.LIMIT || type == Type.STOP || type == Type.STOP_LIMIT;
+    }
+
+    protected boolean supportsBrokerTicker(Ticker ticker) {
+        return ticker == null || ticker.getInstrumentType() != InstrumentType.CRYPTO_SPOT;
     }
 
     protected void ensureOrderIds(OrderTicket order) {
@@ -540,6 +553,24 @@ public class AsterBroker extends AbstractBasicBroker {
         }
         positionsByKey.clear();
         positionsByKey.putAll(refreshed);
+    }
+
+    protected void refreshAccountSnapshotFromRest() {
+        JsonNode response = restApi.getAccountInformation();
+        if (response == null || response.isNull() || response.isMissingNode()) {
+            return;
+        }
+
+        BigDecimal accountEquity = firstNonNull(decimalValue(response, "totalMarginBalance"),
+                decimalValue(response, "totalWalletBalance"));
+        BigDecimal availableFunds = decimalValue(response, "availableBalance");
+
+        if (accountEquity != null) {
+            fireAccountEquityUpdated(accountEquity.doubleValue());
+        }
+        if (availableFunds != null) {
+            fireAvailableFundsUpdated(availableFunds.doubleValue());
+        }
     }
 
     protected void onUserDataMessage(JsonNode message) {

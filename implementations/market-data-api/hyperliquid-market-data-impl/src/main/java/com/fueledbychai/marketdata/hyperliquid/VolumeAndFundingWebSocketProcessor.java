@@ -1,6 +1,7 @@
 package com.fueledbychai.marketdata.hyperliquid;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
@@ -86,8 +87,7 @@ public class VolumeAndFundingWebSocketProcessor implements IWebSocketProcessor {
             String coin = data.getString("coin");
             JSONObject activeAssetCtx = data.getJSONObject("ctx");
 
-            // Convert timestamp to ZonedDateTime
-            ZonedDateTime timestamp = getTimestamp();
+            ZonedDateTime timestamp = resolveTimestamp(jsonObject, data, activeAssetCtx);
 
             BigDecimal volumeNotional = new BigDecimal(activeAssetCtx.getString("dayNtlVlm"));
             BigDecimal fundingRate = new BigDecimal(activeAssetCtx.getString("funding"));
@@ -137,5 +137,39 @@ public class VolumeAndFundingWebSocketProcessor implements IWebSocketProcessor {
 
     protected ZonedDateTime getTimestamp() {
         return ZonedDateTime.now(ZoneId.of("UTC"));
+    }
+
+    protected ZonedDateTime resolveTimestamp(JSONObject root, JSONObject data, JSONObject ctx) {
+        ZonedDateTime fromData = toZonedDateTime(data == null ? null : data.opt("time"));
+        if (fromData != null) {
+            return fromData;
+        }
+
+        ZonedDateTime fromCtx = toZonedDateTime(ctx == null ? null : ctx.opt("time"));
+        if (fromCtx != null) {
+            return fromCtx;
+        }
+
+        ZonedDateTime fromRoot = toZonedDateTime(root == null ? null : root.opt("time"));
+        if (fromRoot != null) {
+            return fromRoot;
+        }
+
+        return getTimestamp();
+    }
+
+    protected ZonedDateTime toZonedDateTime(Object rawTimestamp) {
+        if (rawTimestamp == null || rawTimestamp == JSONObject.NULL) {
+            return null;
+        }
+        try {
+            long epochMillis = Long.parseLong(rawTimestamp.toString());
+            if (Math.abs(epochMillis) < 100_000_000_000L) {
+                epochMillis = epochMillis * 1000L;
+            }
+            return ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneId.of("UTC"));
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 }

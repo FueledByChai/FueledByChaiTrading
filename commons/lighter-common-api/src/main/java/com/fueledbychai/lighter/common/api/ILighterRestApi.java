@@ -120,6 +120,16 @@ public interface ILighterRestApi {
     List<LighterPosition> getPositions(long accountIndex);
 
     /**
+        * Returns active orders for an account across all markets, authorized with a
+        * caller-supplied auth token.
+        *
+        * @param authToken the auth token to authorize the request
+        * @param accountIndex the exchange account index
+        * @return active orders for the supplied account across all markets
+        */
+        List<LighterOrder> getAccountActiveOrders(String authToken, long accountIndex);
+
+        /**
      * Returns active orders for an account, authorized with a caller-supplied auth
      * token.
      *
@@ -131,6 +141,15 @@ public interface ILighterRestApi {
     List<LighterOrder> getAccountActiveOrders(String authToken, long accountIndex, int marketId);
 
     /**
+        * Returns active orders for an account across all markets using credentials
+        * configured on the REST API instance.
+        *
+        * @param accountIndex the exchange account index
+        * @return active orders for the supplied account across all markets
+        */
+        List<LighterOrder> getAccountActiveOrders(long accountIndex);
+
+        /**
      * Returns active orders for an account using credentials configured on the
      * REST API instance.
      *

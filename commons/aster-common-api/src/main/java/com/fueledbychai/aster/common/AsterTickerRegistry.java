@@ -39,11 +39,12 @@ public class AsterTickerRegistry extends AbstractTickerRegistry implements ITick
 
     protected void initialize() {
         registerDescriptors(restApi.getAllInstrumentsForType(InstrumentType.PERPETUAL_FUTURES));
+        registerDescriptors(restApi.getAllInstrumentsForType(InstrumentType.CRYPTO_SPOT));
     }
 
     @Override
     protected boolean supportsInstrumentType(InstrumentType instrumentType) {
-        return instrumentType == InstrumentType.PERPETUAL_FUTURES;
+        return instrumentType == InstrumentType.PERPETUAL_FUTURES || instrumentType == InstrumentType.CRYPTO_SPOT;
     }
 
     @Override

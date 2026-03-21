@@ -1,8 +1,8 @@
 package com.fueledbychai.marketdata.hyperliquid;
 
-import static org.junit.Assert.*;
-
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -10,6 +10,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.After;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -93,6 +97,49 @@ public class VolumeAndFundingWebSocketProcessorTest {
         assertEquals("Open interest should match", new BigDecimal("33380.0945799999"),
                 volumeListener.getOpenInterest());
         assertNotNull("Timestamp should not be null", volumeListener.getTimestamp());
+    }
+
+    @Test
+    public void testMessageReceivedUsesExchangeTimestampWhenPresent() throws InterruptedException {
+        long exchangeTimeMillis = 1757865689689L;
+        String jsonMessage = "{\n" + "    \"channel\": \"activeAssetCtx\",\n" + "    \"data\": {\n"
+                + "        \"coin\": \"BTC\",\n" + "        \"time\": " + exchangeTimeMillis + ",\n"
+                + "        \"ctx\": {\n" + "            \"funding\": \"0.0000125\",\n"
+                + "            \"openInterest\": \"33380.0945799999\",\n"
+                + "            \"dayNtlVlm\": \"4718133837.5883026123\",\n"
+                + "            \"markPx\": \"116364.0\",\n"
+                + "            \"dayBaseVlm\": \"40674.73547\"\n" + "        }\n" + "    }\n" + "}";
+
+        processor.add(volumeListener);
+        processor.messageReceived(jsonMessage);
+
+        assertTrue("Listener should have been called", volumeListener.waitForUpdate(5, TimeUnit.SECONDS));
+        assertEquals("Should use exchange timestamp from message",
+                ZonedDateTime.ofInstant(Instant.ofEpochMilli(exchangeTimeMillis), ZoneId.of("UTC")),
+                volumeListener.getTimestamp());
+    }
+
+    @Test
+    public void testMessageReceivedFallsBackToNowWhenTimestampMissing() throws InterruptedException {
+        String jsonMessage = "{\n" + "    \"channel\": \"activeAssetCtx\",\n" + "    \"data\": {\n"
+                + "        \"coin\": \"BTC\",\n" + "        \"ctx\": {\n"
+                + "            \"funding\": \"0.0000125\",\n"
+                + "            \"openInterest\": \"33380.0945799999\",\n"
+                + "            \"dayNtlVlm\": \"4718133837.5883026123\",\n"
+                + "            \"markPx\": \"116364.0\",\n"
+                + "            \"dayBaseVlm\": \"40674.73547\"\n" + "        }\n" + "    }\n" + "}";
+
+        processor.add(volumeListener);
+        ZonedDateTime before = ZonedDateTime.now(ZoneId.of("UTC")).minusSeconds(1);
+
+        processor.messageReceived(jsonMessage);
+
+        assertTrue("Listener should have been called", volumeListener.waitForUpdate(5, TimeUnit.SECONDS));
+        ZonedDateTime timestamp = volumeListener.getTimestamp();
+        ZonedDateTime after = ZonedDateTime.now(ZoneId.of("UTC")).plusSeconds(1);
+        assertNotNull("Timestamp should not be null", timestamp);
+        assertTrue("Fallback timestamp should be close to now", !timestamp.isBefore(before));
+        assertTrue("Fallback timestamp should be close to now", !timestamp.isAfter(after));
     }
 
     @Test

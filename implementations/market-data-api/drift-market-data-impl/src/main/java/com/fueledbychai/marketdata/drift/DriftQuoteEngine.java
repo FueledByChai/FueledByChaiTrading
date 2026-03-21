@@ -134,19 +134,21 @@ public class DriftQuoteEngine extends QuoteEngine {
     public synchronized void subscribeLevel1(Ticker ticker, Level1QuoteListener listener) {
         validateTickerAndListener(ticker, listener);
         tickerBySymbol.put(ticker.getSymbol(), ticker);
+        super.subscribeLevel1(ticker, listener);
         ensureOrderBookSubscription(ticker);
+        publishOrderBookSnapshot(ticker);
         marketStatsSubscriptions.add(ticker.getSymbol());
         ensureMarketStatsScheduler();
         publishMarketStatsSnapshot(ticker);
-        super.subscribeLevel1(ticker, listener);
     }
 
     @Override
     public synchronized void subscribeMarketDepth(Ticker ticker, Level2QuoteListener listener) {
         validateTickerAndListener(ticker, listener);
         tickerBySymbol.put(ticker.getSymbol(), ticker);
-        ensureOrderBookSubscription(ticker);
         super.subscribeMarketDepth(ticker, listener);
+        ensureOrderBookSubscription(ticker);
+        publishOrderBookSnapshot(ticker);
     }
 
     @Override
@@ -158,10 +160,9 @@ public class DriftQuoteEngine extends QuoteEngine {
 
     protected void ensureOrderBookSubscription(Ticker ticker) {
         if (orderBookSubscriptions.add(ticker.getSymbol())) {
-            DriftMarketType marketType = ticker.getInstrumentType() == com.fueledbychai.data.InstrumentType.CRYPTO_SPOT
-                    ? DriftMarketType.SPOT
-                    : DriftMarketType.PERP;
-            webSocketApi.subscribeOrderBook(ticker.getSymbol(), marketType, this::handleOrderBookUpdate);
+            DriftMarketType marketType = marketType(ticker);
+            webSocketApi.subscribeOrderBook(ticker.getSymbol(), marketType,
+                    snapshot -> handleOrderBookUpdate(ticker, snapshot));
         }
     }
 
@@ -208,41 +209,61 @@ public class DriftQuoteEngine extends QuoteEngine {
     }
 
     protected void handleOrderBookUpdate(DriftOrderBookSnapshot snapshot) {
+        handleOrderBookUpdate(null, snapshot);
+    }
+
+    protected void publishOrderBookSnapshot(Ticker ticker) {
+        try {
+            DriftOrderBookSnapshot snapshot = restApi.getOrderBook(ticker.getSymbol(), marketType(ticker));
+            handleOrderBookUpdate(ticker, snapshot);
+        } catch (Exception e) {
+            logger.warn("Failed to refresh Drift order book for {}", ticker.getSymbol(), e);
+        }
+    }
+
+    protected void handleOrderBookUpdate(Ticker subscribedTicker, DriftOrderBookSnapshot snapshot) {
         if (snapshot == null) {
             return;
         }
-        Ticker ticker = tickerBySymbol.get(snapshot.getMarketName());
+        DriftOrderBookSnapshot normalizedSnapshot = normalizeSnapshot(subscribedTicker, snapshot);
+        Ticker ticker = subscribedTicker != null ? subscribedTicker : tickerBySymbol.get(normalizedSnapshot.getMarketName());
         if (ticker == null) {
             return;
         }
 
-        ZonedDateTime timestamp = timestamp(snapshot.getTimestampMillis());
-        OrderBook orderBook = buildOrderBook(ticker, snapshot, timestamp);
+        ZonedDateTime timestamp = timestamp(normalizedSnapshot.getTimestampMillis());
+        OrderBook orderBook = buildOrderBook(ticker, normalizedSnapshot, timestamp);
 
         if (hasLevel2Listeners(ticker)) {
             fireMarketDepthQuote(new Level2Quote(ticker, orderBook, timestamp));
         }
         if (hasLevel1Listeners(ticker)) {
             Level1Quote quote = new Level1Quote(ticker, timestamp);
-            if (snapshot.getBestBidPrice() != null) {
-                quote.addQuote(QuoteType.BID, ticker.formatPrice(snapshot.getBestBidPrice()));
+            DriftOrderBookLevel bestBidLevel = normalizedSnapshot.getBids().isEmpty() ? null
+                    : normalizedSnapshot.getBids().get(0);
+            DriftOrderBookLevel bestAskLevel = normalizedSnapshot.getAsks().isEmpty() ? null
+                    : normalizedSnapshot.getAsks().get(0);
+            BigDecimal bestBidPrice = normalizedSnapshot.getBestBidPrice() != null ? normalizedSnapshot.getBestBidPrice()
+                    : bestBidLevel == null ? null : bestBidLevel.getPrice();
+            BigDecimal bestAskPrice = normalizedSnapshot.getBestAskPrice() != null ? normalizedSnapshot.getBestAskPrice()
+                    : bestAskLevel == null ? null : bestAskLevel.getPrice();
+            if (bestBidPrice != null) {
+                quote.addQuote(QuoteType.BID, ticker.formatPrice(bestBidPrice));
             }
-            if (snapshot.getBestAskPrice() != null) {
-                quote.addQuote(QuoteType.ASK, ticker.formatPrice(snapshot.getBestAskPrice()));
+            if (bestAskPrice != null) {
+                quote.addQuote(QuoteType.ASK, ticker.formatPrice(bestAskPrice));
             }
-            DriftOrderBookLevel bestBidLevel = snapshot.getBids().isEmpty() ? null : snapshot.getBids().get(0);
-            DriftOrderBookLevel bestAskLevel = snapshot.getAsks().isEmpty() ? null : snapshot.getAsks().get(0);
             if (bestBidLevel != null) {
                 quote.addQuote(QuoteType.BID_SIZE, bestBidLevel.getSize());
             }
             if (bestAskLevel != null) {
                 quote.addQuote(QuoteType.ASK_SIZE, bestAskLevel.getSize());
             }
-            if (snapshot.getMarkPrice() != null) {
-                quote.addQuote(QuoteType.MARK_PRICE, ticker.formatPrice(snapshot.getMarkPrice()));
+            if (normalizedSnapshot.getMarkPrice() != null) {
+                quote.addQuote(QuoteType.MARK_PRICE, ticker.formatPrice(normalizedSnapshot.getMarkPrice()));
             }
-            if (snapshot.getOraclePrice() != null) {
-                quote.addQuote(QuoteType.UNDERLYING_PRICE, ticker.formatPrice(snapshot.getOraclePrice()));
+            if (normalizedSnapshot.getOraclePrice() != null) {
+                quote.addQuote(QuoteType.UNDERLYING_PRICE, ticker.formatPrice(normalizedSnapshot.getOraclePrice()));
             }
             if (quote.hasUpdates()) {
                 fireLevel1Quote(quote);
@@ -317,6 +338,26 @@ public class DriftQuoteEngine extends QuoteEngine {
         return ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), UTC);
     }
 
+    protected DriftOrderBookSnapshot normalizeSnapshot(Ticker subscribedTicker, DriftOrderBookSnapshot snapshot) {
+        if (snapshot == null || subscribedTicker == null) {
+            return snapshot;
+        }
+
+        String marketName = hasText(snapshot.getMarketName()) ? snapshot.getMarketName() : subscribedTicker.getSymbol();
+        DriftMarketType marketType = snapshot.getMarketType() != null ? snapshot.getMarketType() : marketType(subscribedTicker);
+        if (marketName.equals(snapshot.getMarketName()) && marketType == snapshot.getMarketType()) {
+            return snapshot;
+        }
+        return new DriftOrderBookSnapshot(marketName, marketType, snapshot.getMarketIndex(),
+                snapshot.getTimestampMillis(), snapshot.getSlot(), snapshot.getMarkPrice(), snapshot.getBestBidPrice(),
+                snapshot.getBestAskPrice(), snapshot.getOraclePrice(), snapshot.getBids(), snapshot.getAsks());
+    }
+
+    protected DriftMarketType marketType(Ticker ticker) {
+        return ticker.getInstrumentType() == com.fueledbychai.data.InstrumentType.CRYPTO_SPOT ? DriftMarketType.SPOT
+                : DriftMarketType.PERP;
+    }
+
     protected boolean hasLevel1Listeners(Ticker ticker) {
         List<Level1QuoteListener> listeners = level1ListenerMap.get(ticker);
         return listeners != null && !listeners.isEmpty();
@@ -334,5 +375,9 @@ public class DriftQuoteEngine extends QuoteEngine {
         if (listener == null) {
             throw new IllegalArgumentException("listener is required");
         }
+    }
+
+    protected boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 }
