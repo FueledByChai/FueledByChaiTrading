@@ -446,10 +446,63 @@ public class ParadexBrokerTest {
 
     @Test
     public void testCheckConnected_DoesNotThrow() {
-        // Act & Assert - checkConnected is currently a no-op
+        // Act & Assert
         assertDoesNotThrow(() -> {
             broker.checkConnected();
         });
+    }
+
+    @Test
+    public void testIsConnected_FalseByDefault() {
+        assertFalse(broker.isConnected());
+    }
+
+    @Test
+    public void testIsConnected_TrueAfterConnect() {
+        broker.connect();
+        assertTrue(broker.isConnected());
+        broker.disconnect();
+    }
+
+    @Test
+    public void testIsConnected_FalseAfterDisconnect() {
+        broker.connect();
+        assertTrue(broker.isConnected());
+        broker.disconnect();
+        assertFalse(broker.isConnected());
+    }
+
+    @Test
+    public void testPlaceOrder_WhenNotConnected_LogsWarning() {
+        // Arrange - broker is not connected by default
+        assertFalse(broker.isConnected());
+        broker.jwtToken = "testToken";
+        when(mockTradeOrder.getTicker()).thenReturn(mockTicker1);
+        when(mockTicker1.getSymbol()).thenReturn("ETH-USD");
+        when(mockTranslator.translateOrder(mockTradeOrder)).thenReturn(mockParadexOrder);
+        when(mockRestApi.placeOrder("testToken", mockParadexOrder)).thenReturn("id-123");
+
+        // Act - placeOrder calls checkConnected internally but should not throw
+        assertDoesNotThrow(() -> broker.placeOrder(mockTradeOrder));
+
+        // Assert - order was still placed (checkConnected only warns)
+        verify(mockRestApi).placeOrder("testToken", mockParadexOrder);
+    }
+
+    @Test
+    public void testCancelOrder_WhenNotConnected_LogsWarning() {
+        // Arrange - broker is not connected by default
+        assertFalse(broker.isConnected());
+        broker.jwtToken = "testToken";
+        RestResponse mockResponse = mock(RestResponse.class);
+        when(mockRestApi.cancelOrder("testToken", "order123")).thenReturn(mockResponse);
+        when(mockResponse.isSuccessful()).thenReturn(true);
+
+        // Act - cancelOrder calls checkConnected internally but should not throw
+        assertDoesNotThrow(() -> broker.cancelOrder("order123"));
+
+        // Assert - cancel was still attempted
+        verify(mockRestApi).cancelOrder("testToken", "order123");
     }
 
     // ==================== Integration Tests ====================
