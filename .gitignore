@@ -1,6 +1,4 @@
-/sumzeroParent/sumzero-commons-api/target/
-# NetBeans specific #
-nbproject/private/
+
 build/
 nbbuild/
 dist/
@@ -31,4 +29,5 @@ logs/latency.log
 logs/latency.log
 commons/lighter-common-api/local-resources/*
 commons/lighter-common-api/local-resources/lighter.properties
+.claude/settings.local.json
 .claude/settings.local.json

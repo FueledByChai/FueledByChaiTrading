@@ -1,9 +1,15 @@
 package com.fueledbychai.broker.aster;
 
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -11,13 +17,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-
-import java.math.BigDecimal;
-import java.util.List;
-import java.util.Map;
-
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -86,7 +85,7 @@ class AsterBrokerTest {
     }
 
     @Test
-    void placeOrder_FloorsExactPrecisionOverMaximumCaseBeforeSendingToAster() {
+    void placeOrder_FloorsQuantityWithPrecisionExceedingStepSizeBeforeSendingToAster() {
         IAsterRestApi restApi = mock(IAsterRestApi.class);
         IAsterWebSocketApi webSocketApi = mock(IAsterWebSocketApi.class);
         ITickerRegistry tickerRegistry = mock(ITickerRegistry.class);
