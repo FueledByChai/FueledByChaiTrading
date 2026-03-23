@@ -51,6 +51,7 @@ public class AsterBroker extends AbstractBasicBroker {
 
     protected static final Logger logger = LoggerFactory.getLogger(AsterBroker.class);
     protected static final long USER_STREAM_KEEPALIVE_PERIOD_MINUTES = 30L;
+    protected static final long ACCOUNT_SNAPSHOT_POLL_SECONDS = 1L;
     protected static final BigDecimal DEFAULT_TICK_SIZE = new BigDecimal("0.01");
 
     protected final IAsterRestApi restApi;
@@ -63,6 +64,7 @@ public class AsterBroker extends AbstractBasicBroker {
     protected volatile boolean connected = false;
     protected volatile String listenKey;
     protected volatile ScheduledExecutorService listenKeyKeepAliveExecutor;
+    protected volatile ScheduledExecutorService accountSnapshotExecutor;
 
     public AsterBroker() {
         this(ExchangeRestApiFactory.getPrivateApi(Exchange.ASTER, IAsterRestApi.class),
@@ -89,6 +91,7 @@ public class AsterBroker extends AbstractBasicBroker {
     protected void onDisconnect() {
         connected = false;
         stopKeepAliveTask();
+        stopAccountSnapshotPoller();
         try {
             if (listenKey != null && !listenKey.isBlank() && !restApi.isPublicApiOnly()) {
                 restApi.closeUserDataStream(listenKey);
@@ -124,6 +127,7 @@ public class AsterBroker extends AbstractBasicBroker {
         refreshOpenOrdersFromRest();
         refreshPositionsFromRest();
         refreshAccountSnapshotFromRest();
+        startAccountSnapshotPoller();
     }
 
     @Override
@@ -801,23 +805,6 @@ public class AsterBroker extends AbstractBasicBroker {
             return;
         }
 
-        JsonNode balances = account.path("B");
-        if (balances.isArray()) {
-            for (JsonNode balance : balances) {
-                if (!"USDT".equalsIgnoreCase(text(balance, "a"))) {
-                    continue;
-                }
-                BigDecimal walletBalance = decimalValue(balance, "wb");
-                BigDecimal availableFunds = decimalValue(balance, "cw");
-                if (walletBalance != null) {
-                    fireAccountEquityUpdated(walletBalance.doubleValue());
-                }
-                if (availableFunds != null) {
-                    fireAvailableFundsUpdated(availableFunds.doubleValue());
-                }
-            }
-        }
-
         JsonNode positions = account.path("P");
         if (positions.isArray()) {
             for (JsonNode positionNode : positions) {
@@ -833,6 +820,9 @@ public class AsterBroker extends AbstractBasicBroker {
                 }
             }
         }
+
+        // Account equity is polled from REST on a 1-second interval since the websocket
+        // ACCOUNT_UPDATE only provides wb (wallet balance) which excludes margin in use.
     }
 
     protected synchronized void startKeepAliveTask() {
@@ -857,6 +847,31 @@ public class AsterBroker extends AbstractBasicBroker {
         if (listenKeyKeepAliveExecutor != null) {
             listenKeyKeepAliveExecutor.shutdownNow();
             listenKeyKeepAliveExecutor = null;
+        }
+    }
+
+    protected synchronized void startAccountSnapshotPoller() {
+        stopAccountSnapshotPoller();
+        accountSnapshotExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "aster-account-snapshot-poll");
+            thread.setDaemon(true);
+            return thread;
+        });
+        accountSnapshotExecutor.scheduleAtFixedRate(() -> {
+            try {
+                if (connected) {
+                    refreshAccountSnapshotFromRest();
+                }
+            } catch (Exception e) {
+                logger.warn("Failed to refresh Aster account snapshot", e);
+            }
+        }, ACCOUNT_SNAPSHOT_POLL_SECONDS, ACCOUNT_SNAPSHOT_POLL_SECONDS, TimeUnit.SECONDS);
+    }
+
+    protected synchronized void stopAccountSnapshotPoller() {
+        if (accountSnapshotExecutor != null) {
+            accountSnapshotExecutor.shutdownNow();
+            accountSnapshotExecutor = null;
         }
     }
 
