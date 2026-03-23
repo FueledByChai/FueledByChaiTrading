@@ -38,9 +38,11 @@ import com.fueledbychai.broker.order.OrderTicket.Modifier;
 import com.fueledbychai.broker.order.OrderTicket.Type;
 import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.data.Exchange;
+import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Side;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.data.TickerTranslator;
 import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.ExchangeWebSocketApiFactory;
 import com.fueledbychai.util.ITickerRegistry;
@@ -50,6 +52,7 @@ public class AsterBroker extends AbstractBasicBroker {
 
     protected static final Logger logger = LoggerFactory.getLogger(AsterBroker.class);
     protected static final long USER_STREAM_KEEPALIVE_PERIOD_MINUTES = 30L;
+    protected static final BigDecimal DEFAULT_TICK_SIZE = new BigDecimal("0.01");
 
     protected final IAsterRestApi restApi;
     protected final IAsterWebSocketApi webSocketApi;
@@ -244,14 +247,13 @@ public class AsterBroker extends AbstractBasicBroker {
             return notConnectedResult();
         }
 
-        BrokerRequestResult validation = validateOrder(order);
-        if (!validation.isSuccess()) {
-            return validation;
+        PreparedOrder preparedOrder = prepareOrderForSubmission(order);
+        if (!preparedOrder.validationResult.isSuccess()) {
+            return preparedOrder.validationResult;
         }
 
         try {
-            Ticker resolvedTicker = resolveTicker(order.getTicker());
-            order.setTicker(resolvedTicker);
+            applyPreparedOrder(order, preparedOrder);
             ensureOrderIds(order);
             order.setOrderEntryTime(getCurrentTime());
 
@@ -470,6 +472,187 @@ public class AsterBroker extends AbstractBasicBroker {
     protected BrokerRequestResult notConnectedResult() {
         return new BrokerRequestResult(false, false, "Broker is not connected",
                 BrokerRequestResult.FailureType.UNKNOWN);
+    }
+
+    protected PreparedOrder prepareOrderForSubmission(OrderTicket order) {
+        BrokerRequestResult validation = validateOrder(order);
+        if (!validation.isSuccess()) {
+            return PreparedOrder.failed(validation);
+        }
+
+        Ticker resolvedTicker = resolveSubmissionTicker(order.getTicker());
+        Type type = order.getType() == null ? Type.MARKET : order.getType();
+        boolean applyVenueConstraints = shouldApplyVenueConstraints(order.getTicker(), resolvedTicker);
+
+        BigDecimal normalizedSize = order.getSize();
+        if (applyVenueConstraints) {
+            normalizedSize = normalizeDown(order.getSize(), resolvedTicker.getOrderSizeIncrement());
+            if (normalizedSize == null || normalizedSize.signum() <= 0) {
+                return PreparedOrder.failed(validationFailure(BrokerRequestResult.FailureType.INVALID_SIZE,
+                        "order size " + formatDecimal(normalizedSize)
+                                + " is invalid after applying Aster step size "
+                                + formatDecimal(resolvedTicker.getOrderSizeIncrement()) + " for "
+                                + resolvedSymbol(resolvedTicker, order.getTicker())));
+            }
+        }
+
+        BigDecimal normalizedLimitPrice = order.getLimitPrice();
+        if (applyVenueConstraints && (type == Type.LIMIT || type == Type.STOP_LIMIT)) {
+            normalizedLimitPrice = normalizeDown(order.getLimitPrice(), resolvedTicker.getMinimumTickSize());
+            if (normalizedLimitPrice == null || normalizedLimitPrice.signum() <= 0) {
+                return PreparedOrder.failed(validationFailure(BrokerRequestResult.FailureType.INVALID_PRICE,
+                        "limit price " + formatDecimal(normalizedLimitPrice)
+                                + " is invalid after applying Aster tick size "
+                                + formatDecimal(resolvedTicker.getMinimumTickSize()) + " for "
+                                + resolvedSymbol(resolvedTicker, order.getTicker())));
+            }
+        }
+
+        BigDecimal normalizedStopPrice = order.getStopPrice();
+        if (applyVenueConstraints && (type == Type.STOP || type == Type.STOP_LIMIT)) {
+            normalizedStopPrice = normalizeDown(order.getStopPrice(), resolvedTicker.getMinimumTickSize());
+            if (normalizedStopPrice == null || normalizedStopPrice.signum() <= 0) {
+                return PreparedOrder.failed(validationFailure(BrokerRequestResult.FailureType.INVALID_PRICE,
+                        "stop price " + formatDecimal(normalizedStopPrice)
+                                + " is invalid after applying Aster tick size "
+                                + formatDecimal(resolvedTicker.getMinimumTickSize()) + " for "
+                                + resolvedSymbol(resolvedTicker, order.getTicker())));
+            }
+        }
+
+        BrokerRequestResult normalizedValidation = validateNormalizedOrder(resolvedTicker, order.getTicker(), type,
+                normalizedSize, normalizedLimitPrice, normalizedStopPrice, applyVenueConstraints);
+        if (!normalizedValidation.isSuccess()) {
+            return PreparedOrder.failed(normalizedValidation);
+        }
+
+        return PreparedOrder.success(resolvedTicker, normalizedSize, normalizedLimitPrice, normalizedStopPrice);
+    }
+
+    protected void applyPreparedOrder(OrderTicket order, PreparedOrder preparedOrder) {
+        if (order == null || preparedOrder == null) {
+            return;
+        }
+        order.setTicker(preparedOrder.resolvedTicker);
+        order.setSize(preparedOrder.normalizedSize);
+        if (preparedOrder.normalizedLimitPrice != null) {
+            order.setLimitPrice(preparedOrder.normalizedLimitPrice);
+        }
+        if (preparedOrder.normalizedStopPrice != null) {
+            order.setStopPrice(preparedOrder.normalizedStopPrice);
+        }
+    }
+
+    protected BrokerRequestResult validateNormalizedOrder(Ticker resolvedTicker, Ticker originalTicker, Type type,
+            BigDecimal normalizedSize, BigDecimal normalizedLimitPrice, BigDecimal normalizedStopPrice,
+            boolean applyVenueConstraints) {
+        if (!applyVenueConstraints) {
+            return new BrokerRequestResult();
+        }
+
+        String symbol = resolvedSymbol(resolvedTicker, originalTicker);
+        BigDecimal minOrderSize = positiveOrNull(resolvedTicker.getMinimumOrderSize());
+        if (minOrderSize != null && normalizedSize.compareTo(minOrderSize) < 0) {
+            return validationFailure(BrokerRequestResult.FailureType.INVALID_SIZE,
+                    "normalized order size " + formatDecimal(normalizedSize)
+                            + " is below Aster minimum order size " + formatDecimal(minOrderSize) + " for "
+                            + symbol);
+        }
+
+        BigDecimal minNotional = positiveOrNull(resolvedTicker.getMinimumOrderSizeNotional());
+        BigDecimal validationPrice = resolveValidationPrice(type, normalizedLimitPrice, normalizedStopPrice);
+        if (minNotional != null && validationPrice != null) {
+            BigDecimal normalizedNotional = normalizedSize.multiply(validationPrice);
+            if (normalizedNotional.compareTo(minNotional) < 0) {
+                return validationFailure(BrokerRequestResult.FailureType.VALIDATION_FAILED,
+                        "normalized order notional " + formatDecimal(normalizedNotional)
+                                + " is below Aster minimum notional " + formatDecimal(minNotional) + " for "
+                                + symbol);
+            }
+        }
+
+        return new BrokerRequestResult();
+    }
+
+    protected BrokerRequestResult validationFailure(BrokerRequestResult.FailureType failureType, String message) {
+        return new BrokerRequestResult(false, true, message, failureType);
+    }
+
+    protected BigDecimal normalizeDown(BigDecimal value, BigDecimal increment) {
+        if (value == null || increment == null || increment.signum() <= 0) {
+            return value;
+        }
+
+        BigDecimal normalizedIncrement = increment.stripTrailingZeros();
+        BigDecimal normalizedValue = value.divideToIntegralValue(normalizedIncrement).multiply(normalizedIncrement);
+        return normalizedValue.stripTrailingZeros();
+    }
+
+    protected BigDecimal resolveValidationPrice(Type type, BigDecimal normalizedLimitPrice, BigDecimal normalizedStopPrice) {
+        if (type == Type.LIMIT || type == Type.STOP_LIMIT) {
+            return normalizedLimitPrice;
+        }
+        if (type == Type.STOP) {
+            return normalizedStopPrice;
+        }
+        return null;
+    }
+
+    protected BigDecimal positiveOrNull(BigDecimal value) {
+        if (value == null || value.signum() <= 0) {
+            return null;
+        }
+        return value.stripTrailingZeros();
+    }
+
+    protected Ticker resolveSubmissionTicker(Ticker ticker) {
+        if (ticker == null) {
+            return null;
+        }
+
+        Ticker resolvedTicker = resolveTicker(ticker);
+        if (resolvedTicker != null && resolvedTicker != ticker) {
+            return resolvedTicker;
+        }
+
+        String symbol = ticker.getSymbol();
+        if (symbol == null || symbol.isBlank()) {
+            return ticker;
+        }
+
+        InstrumentDescriptor descriptor = restApi.getInstrumentDescriptor(symbol);
+        if (descriptor != null) {
+            return new TickerTranslator().translateTicker(descriptor);
+        }
+        return resolvedTicker == null ? ticker : resolvedTicker;
+    }
+
+    protected boolean shouldApplyVenueConstraints(Ticker originalTicker, Ticker resolvedTicker) {
+        if (resolvedTicker == null) {
+            return false;
+        }
+        if (resolvedTicker != originalTicker) {
+            return true;
+        }
+        if (positiveOrNull(originalTicker.getMinimumOrderSize()) != null) {
+            return true;
+        }
+        if (positiveOrNull(originalTicker.getMinimumOrderSizeNotional()) != null) {
+            return true;
+        }
+        BigDecimal orderSizeIncrement = positiveOrNull(originalTicker.getOrderSizeIncrement());
+        if (orderSizeIncrement != null && orderSizeIncrement.compareTo(BigDecimal.ONE) != 0) {
+            return true;
+        }
+        BigDecimal minimumTickSize = positiveOrNull(originalTicker.getMinimumTickSize());
+        return minimumTickSize != null && minimumTickSize.compareTo(DEFAULT_TICK_SIZE) != 0;
+    }
+
+    protected String resolvedSymbol(Ticker resolvedTicker, Ticker originalTicker) {
+        if (resolvedTicker != null && resolvedTicker.getSymbol() != null && !resolvedTicker.getSymbol().isBlank()) {
+            return resolvedTicker.getSymbol();
+        }
+        return originalTicker == null ? "" : originalTicker.getSymbol();
     }
 
     protected Map<String, String> buildPlaceOrderParams(OrderTicket order) {
@@ -1054,5 +1237,32 @@ public class AsterBroker extends AbstractBasicBroker {
 
     protected String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value;
+    }
+
+    protected static final class PreparedOrder {
+        private final BrokerRequestResult validationResult;
+        private final Ticker resolvedTicker;
+        private final BigDecimal normalizedSize;
+        private final BigDecimal normalizedLimitPrice;
+        private final BigDecimal normalizedStopPrice;
+
+        private PreparedOrder(BrokerRequestResult validationResult, Ticker resolvedTicker, BigDecimal normalizedSize,
+                BigDecimal normalizedLimitPrice, BigDecimal normalizedStopPrice) {
+            this.validationResult = validationResult;
+            this.resolvedTicker = resolvedTicker;
+            this.normalizedSize = normalizedSize;
+            this.normalizedLimitPrice = normalizedLimitPrice;
+            this.normalizedStopPrice = normalizedStopPrice;
+        }
+
+        private static PreparedOrder success(Ticker resolvedTicker, BigDecimal normalizedSize,
+                BigDecimal normalizedLimitPrice, BigDecimal normalizedStopPrice) {
+            return new PreparedOrder(new BrokerRequestResult(), resolvedTicker, normalizedSize, normalizedLimitPrice,
+                    normalizedStopPrice);
+        }
+
+        private static PreparedOrder failed(BrokerRequestResult validationResult) {
+            return new PreparedOrder(validationResult, null, null, null, null);
+        }
     }
 }
