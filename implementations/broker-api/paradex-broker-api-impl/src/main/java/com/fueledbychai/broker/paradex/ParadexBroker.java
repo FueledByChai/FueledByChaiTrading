@@ -282,8 +282,7 @@ public class ParadexBroker extends AbstractBasicBroker {
 
     @Override
     public boolean isConnected() {
-        throw new UnsupportedOperationException("Not supported yet."); // To change body of generated methods, choose
-                                                                       // Tools | Templates.
+        return connected;
     }
 
     @Override
@@ -362,6 +361,9 @@ public class ParadexBroker extends AbstractBasicBroker {
     }
 
     protected void checkConnected() {
+        if (!connected) {
+            logger.warn("Paradex broker API method called while broker is not connected");
+        }
     }
 
     protected void onParadexOrderStatusEvent(IParadexOrderStatusUpdate orderStatus) {

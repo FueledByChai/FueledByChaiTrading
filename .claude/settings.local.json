@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(mvn test:*)",
-      "Bash(find /Users/robterpilowski/Code/JavaProjects/FueledByChaiTrading/implementations/broker-api/lighter-broker-api-impl -name *.java -type f)"
+      "Bash(find /Users/robterpilowski/Code/JavaProjects/FueledByChaiTrading/implementations/broker-api/lighter-broker-api-impl -name *.java -type f)",
+      "Bash(mvn compile:*)"
     ]
   }
 }
