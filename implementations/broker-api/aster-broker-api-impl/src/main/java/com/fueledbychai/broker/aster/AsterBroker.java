@@ -4,7 +4,6 @@ import java.math.BigDecimal;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -545,8 +544,8 @@ public class AsterBroker extends AbstractBasicBroker {
 
     protected BrokerRequestResult validateNormalizedOrder(Ticker resolvedTicker, Ticker originalTicker, Type type,
             BigDecimal normalizedSize, BigDecimal normalizedLimitPrice, BigDecimal normalizedStopPrice,
-            boolean applyVenueConstraints) {
-        if (!applyVenueConstraints) {
+            boolean hasVenueConstraints) {
+        if (!hasVenueConstraints) {
             return new BrokerRequestResult();
         }
 
