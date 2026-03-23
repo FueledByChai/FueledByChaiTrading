@@ -42,6 +42,8 @@ import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Side;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.data.TickerTranslator;
+import com.fueledbychai.time.Span;
+import com.fueledbychai.time.WsLatency;
 import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.ExchangeWebSocketApiFactory;
 import com.fueledbychai.util.ITickerRegistry;
@@ -210,7 +212,9 @@ public class AsterBroker extends AbstractBasicBroker {
         }
 
         try {
-            restApi.cancelAllOpenOrders(resolvedTicker.getSymbol());
+            try (var s = Span.start("AST_CANCEL_ALL_ORDERS_API_CALL", resolvedTicker.getSymbol())) {
+                restApi.cancelAllOpenOrders(resolvedTicker.getSymbol());
+            }
             for (OrderTicket openOrder : new ArrayList<>(orderRegistry.getOpenOrdersByTicker(resolvedTicker))) {
                 markOrderCanceled(openOrder, CancelReason.USER_CANCELED, getCurrentTime(), true);
             }
@@ -260,7 +264,10 @@ public class AsterBroker extends AbstractBasicBroker {
             ensureOrderIds(order);
             order.setOrderEntryTime(getCurrentTime());
 
-            JsonNode response = restApi.placeOrder(buildPlaceOrderParams(order));
+            JsonNode response;
+            try (var s = Span.start("AST_PLACE_ORDER_API_CALL", order.getClientOrderId())) {
+                response = restApi.placeOrder(buildPlaceOrderParams(order));
+            }
             ZonedDateTime timestamp = toTimestamp(response, "updateTime");
             OrderTicket trackedOrder = applyOrderSnapshot(response, timestamp, true);
             if (trackedOrder == null) {
@@ -319,7 +326,10 @@ public class AsterBroker extends AbstractBasicBroker {
         }
 
         try {
-            JsonNode response = restApi.queryOrder(knownOrder.getTicker().getSymbol(), orderId, null);
+            JsonNode response;
+            try (var s = Span.start("AST_QUERY_ORDER_BY_ID_API_CALL", orderId)) {
+                response = restApi.queryOrder(knownOrder.getTicker().getSymbol(), orderId, null);
+            }
             return applyOrderSnapshot(response, toTimestamp(response, "updateTime"), false);
         } catch (Exception e) {
             logger.debug("Unable to refresh Aster order {}", orderId, e);
@@ -339,7 +349,10 @@ public class AsterBroker extends AbstractBasicBroker {
         }
 
         try {
-            JsonNode response = restApi.queryOrder(knownOrder.getTicker().getSymbol(), null, clientOrderId);
+            JsonNode response;
+            try (var s = Span.start("AST_QUERY_ORDER_BY_CLIENT_ID_API_CALL", clientOrderId)) {
+                response = restApi.queryOrder(knownOrder.getTicker().getSymbol(), null, clientOrderId);
+            }
             return applyOrderSnapshot(response, toTimestamp(response, "updateTime"), false);
         } catch (Exception e) {
             logger.debug("Unable to refresh Aster order {}", clientOrderId, e);
@@ -389,8 +402,11 @@ public class AsterBroker extends AbstractBasicBroker {
 
     protected BrokerRequestResult cancelResolvedOrder(OrderTicket order) {
         try {
-            JsonNode response = restApi.cancelOrder(order.getTicker().getSymbol(), blankToNull(order.getOrderId()),
-                    blankToNull(order.getClientOrderId()));
+            JsonNode response;
+            try (var s = Span.start("AST_CANCEL_ORDER_API_CALL", order.getClientOrderId())) {
+                response = restApi.cancelOrder(order.getTicker().getSymbol(), blankToNull(order.getOrderId()),
+                        blankToNull(order.getClientOrderId()));
+            }
             applyOrderSnapshot(response, toTimestamp(response, "updateTime"), true);
             return new BrokerRequestResult();
         } catch (Exception e) {
@@ -713,7 +729,10 @@ public class AsterBroker extends AbstractBasicBroker {
     }
 
     protected void refreshOpenOrdersFromRest() {
-        JsonNode response = restApi.getOpenOrders(null);
+        JsonNode response;
+        try (var s = Span.start("AST_GET_OPEN_ORDERS_API_CALL", "N/A")) {
+            response = restApi.getOpenOrders(null);
+        }
         List<OrderTicket> openOrders = new ArrayList<>();
         if (response != null && response.isArray()) {
             for (JsonNode node : response) {
@@ -727,7 +746,10 @@ public class AsterBroker extends AbstractBasicBroker {
     }
 
     protected void refreshPositionsFromRest() {
-        JsonNode response = restApi.getPositionRisk(null);
+        JsonNode response;
+        try (var s = Span.start("AST_GET_POSITIONS_API_CALL", "N/A")) {
+            response = restApi.getPositionRisk(null);
+        }
         Map<String, Position> refreshed = new LinkedHashMap<>();
         if (response != null && response.isArray()) {
             for (JsonNode node : response) {
@@ -742,7 +764,10 @@ public class AsterBroker extends AbstractBasicBroker {
     }
 
     protected void refreshAccountSnapshotFromRest() {
-        JsonNode response = restApi.getAccountInformation();
+        JsonNode response;
+        try (var s = Span.start("AST_GET_ACCOUNT_INFO_API_CALL", "N/A")) {
+            response = restApi.getAccountInformation();
+        }
         if (response == null || response.isNull() || response.isMissingNode()) {
             return;
         }
@@ -776,18 +801,34 @@ public class AsterBroker extends AbstractBasicBroker {
     }
 
     protected void onOrderTradeUpdate(JsonNode message) {
+        long recvMs = System.currentTimeMillis();
         JsonNode orderNode = message.path("o");
         if (orderNode.isMissingNode() || orderNode.isNull()) {
             return;
         }
 
         ZonedDateTime eventTime = toTimestamp(message, "E");
+        String clientOrderId = firstNonBlank(text(orderNode, "c"), text(orderNode, "clientOrderId"));
+        long eventTimeMs = message.path("E").asLong(0);
+
         OrderTicket order = applyOrderSnapshot(orderNode, eventTime, true);
         if (order == null) {
             return;
         }
 
         String executionType = text(orderNode, "x");
+        String orderStatus = text(orderNode, "X");
+
+        try {
+            if ("TRADE".equalsIgnoreCase(executionType)) {
+                WsLatency.onMessage("AST-Fill", clientOrderId, recvMs, eventTimeMs);
+            } else {
+                WsLatency.onMessage("AST-OrderStatus(" + orderStatus + ")", clientOrderId, recvMs, eventTimeMs);
+            }
+        } catch (Exception e) {
+            logger.debug("Error processing latency for order trade update", e);
+        }
+
         if ("TRADE".equalsIgnoreCase(executionType)) {
             Fill fill = toFill(order, orderNode, eventTime);
             if (fill != null && processedFillIds.add(fillKey(fill))) {
