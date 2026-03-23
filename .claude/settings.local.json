@@ -3,7 +3,16 @@
     "allow": [
       "Bash(mvn test:*)",
       "Bash(find /Users/robterpilowski/Code/JavaProjects/FueledByChaiTrading/implementations/broker-api/lighter-broker-api-impl -name *.java -type f)",
-      "Bash(mvn compile:*)"
+      "Bash(mvn compile:*)",
+      "Bash(find /Users/robterpilowski/Code/JavaProjects/FueledByChaiTrading -type f -name *aster* -o -name *Aster*)",
+      "WebFetch(domain:aster-dex.readme.io)",
+      "WebFetch(domain:docs.aster.finance)",
+      "WebFetch(domain:aster-dex.gitbook.io)",
+      "WebFetch(domain:aster.finance)",
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "WebFetch(domain:asterdex.github.io)",
+      "WebFetch(domain:docs.asterdex.com)"
     ]
   }
 }

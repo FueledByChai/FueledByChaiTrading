@@ -343,9 +343,103 @@ class AsterBrokerTest {
         return OBJECT_MAPPER.readTree(value);
     }
 
+    @Test
+    void onAccountUpdate_DoesNotRefreshEquityFromWebsocket() throws Exception {
+        IAsterRestApi restApi = mock(IAsterRestApi.class);
+        IAsterWebSocketApi webSocketApi = mock(IAsterWebSocketApi.class);
+        ITickerRegistry tickerRegistry = mock(ITickerRegistry.class);
+        TestableAsterBroker broker = new TestableAsterBroker(restApi, webSocketApi, tickerRegistry);
+
+        // wb = 0.13 is misleading (excludes margin in use). Equity should NOT be
+        // updated from websocket — it's polled from REST on a 1-second interval instead.
+        JsonNode message = json("""
+                {
+                  "e": "ACCOUNT_UPDATE",
+                  "E": 1710000000000,
+                  "T": 1710000000000,
+                  "a": {
+                    "m": "ORDER",
+                    "B": [
+                      { "a": "USDT", "wb": "0.13000000", "cw": "0.13000000", "bc": "0" }
+                    ],
+                    "P": [
+                      { "s": "BTCUSDT", "pa": "0.001", "ep": "50000", "up": "0.00000000", "mt": "cross", "iw": "0", "ps": "BOTH", "ma": "USDT" }
+                    ]
+                  }
+                }
+                """);
+
+        broker.onAccountUpdate(message);
+
+        // Account equity should not have been updated from websocket data
+        assertEquals(0.0d, broker.lastAccountEquity, 0.0001);
+        verify(restApi, never()).getAccountInformation();
+    }
+
+    @Test
+    void onAccountUpdate_UpdatesPositionsFromWebsocket() throws Exception {
+        IAsterRestApi restApi = mock(IAsterRestApi.class);
+        IAsterWebSocketApi webSocketApi = mock(IAsterWebSocketApi.class);
+        ITickerRegistry tickerRegistry = mock(ITickerRegistry.class);
+        TestableAsterBroker broker = new TestableAsterBroker(restApi, webSocketApi, tickerRegistry);
+
+        JsonNode message = json("""
+                {
+                  "e": "ACCOUNT_UPDATE",
+                  "E": 1710000000000,
+                  "T": 1710000000000,
+                  "a": {
+                    "m": "ORDER",
+                    "B": [
+                      { "a": "USDT", "wb": "5.00000000", "cw": "3.00000000", "bc": "0" }
+                    ],
+                    "P": [
+                      { "s": "BTCUSDT", "pa": "0.001", "ep": "50000", "up": "0.50000000", "mt": "cross", "iw": "0", "ps": "BOTH", "ma": "USDT" }
+                    ]
+                  }
+                }
+                """);
+
+        broker.onAccountUpdate(message);
+
+        // Positions should still be updated from the websocket data
+        assertFalse(broker.getAllPositions().isEmpty());
+    }
+
+    @Test
+    void connect_StartsAccountSnapshotPoller() throws Exception {
+        IAsterRestApi restApi = mock(IAsterRestApi.class);
+        IAsterWebSocketApi webSocketApi = mock(IAsterWebSocketApi.class);
+        ITickerRegistry tickerRegistry = mock(ITickerRegistry.class);
+
+        when(restApi.isPublicApiOnly()).thenReturn(false);
+        when(restApi.startUserDataStream()).thenReturn("listen-key");
+        when(restApi.getOpenOrders(null)).thenReturn(OBJECT_MAPPER.createArrayNode());
+        when(restApi.getPositionRisk(null)).thenReturn(OBJECT_MAPPER.createArrayNode());
+        when(restApi.getAccountInformation()).thenReturn(json("""
+                {
+                  "totalMarginBalance": "3.00",
+                  "availableBalance": "3.00",
+                  "totalWalletBalance": "3.00"
+                }
+                """));
+
+        TestableAsterBroker broker = new TestableAsterBroker(restApi, webSocketApi, tickerRegistry);
+        broker.connect();
+
+        assertTrue(broker.isConnected());
+        assertTrue(broker.accountSnapshotPollerStarted);
+
+        broker.disconnect();
+
+        assertTrue(broker.accountSnapshotPollerStopped);
+    }
+
     private static final class TestableAsterBroker extends AsterBroker {
         private double lastAccountEquity;
         private double lastAvailableFunds;
+        private boolean accountSnapshotPollerStarted;
+        private boolean accountSnapshotPollerStopped;
 
         private TestableAsterBroker(IAsterRestApi restApi, IAsterWebSocketApi webSocketApi,
                 ITickerRegistry tickerRegistry) {
@@ -360,6 +454,16 @@ class AsterBrokerTest {
         @Override
         protected synchronized void stopKeepAliveTask() {
             // No-op for unit tests.
+        }
+
+        @Override
+        protected synchronized void startAccountSnapshotPoller() {
+            accountSnapshotPollerStarted = true;
+        }
+
+        @Override
+        protected synchronized void stopAccountSnapshotPoller() {
+            accountSnapshotPollerStopped = true;
         }
 
         @Override
