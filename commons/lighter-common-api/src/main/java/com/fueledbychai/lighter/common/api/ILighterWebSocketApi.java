@@ -2,6 +2,7 @@ package com.fueledbychai.lighter.common.api;
 
 import com.fueledbychai.lighter.common.api.ws.listener.ILighterMarketStatsListener;
 import com.fueledbychai.lighter.common.api.ws.listener.ILighterOrderBookListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterTickerListener;
 import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountAllTradesListener;
 import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountOrdersListener;
 import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountStatsListener;
@@ -40,6 +41,15 @@ public interface ILighterWebSocketApi {
      * @return the websocket client managing that subscription
      */
     LighterWebSocketClient subscribeAllMarketStats(ILighterMarketStatsListener listener);
+
+    /**
+     * Subscribes to ticker (BBO) updates for a single market.
+     *
+     * @param marketId the exchange market identifier
+     * @param listener the listener that receives updates
+     * @return the websocket client managing that subscription
+     */
+    LighterWebSocketClient subscribeTicker(int marketId, ILighterTickerListener listener);
 
     /**
      * Subscribes to order book updates for a single market.

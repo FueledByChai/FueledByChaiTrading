@@ -24,6 +24,7 @@ import com.fueledbychai.lighter.common.api.ws.model.LighterMarketStats;
 import com.fueledbychai.lighter.common.api.ws.model.LighterMarketStatsUpdate;
 import com.fueledbychai.lighter.common.api.ws.model.LighterOrderBookLevel;
 import com.fueledbychai.lighter.common.api.ws.model.LighterOrderBookUpdate;
+import com.fueledbychai.lighter.common.api.ws.model.LighterTickerUpdate;
 import com.fueledbychai.lighter.common.api.ws.model.LighterTrade;
 import com.fueledbychai.lighter.common.api.ws.model.LighterTradesUpdate;
 import com.fueledbychai.marketdata.Level1Quote;
@@ -56,9 +57,11 @@ public class LighterQuoteEngine extends QuoteEngine {
     protected final Map<Integer, Ticker> marketStatsTickerByMarketId = new ConcurrentHashMap<>();
     protected final Map<Integer, Ticker> orderBookTickerByMarketId = new ConcurrentHashMap<>();
     protected final Map<Integer, Ticker> orderFlowTickerByMarketId = new ConcurrentHashMap<>();
+    protected final Map<Integer, Ticker> tickerTickerByMarketId = new ConcurrentHashMap<>();
     protected final Map<Integer, MarketOrderBookState> orderBookStateByMarketId = new ConcurrentHashMap<>();
     protected final Set<Integer> marketStatsSubscriptions = ConcurrentHashMap.newKeySet();
     protected final Set<Integer> orderBookSubscriptions = ConcurrentHashMap.newKeySet();
+    protected final Set<Integer> tickerSubscriptions = ConcurrentHashMap.newKeySet();
     protected final Set<Integer> orderFlowSubscriptions = ConcurrentHashMap.newKeySet();
 
     protected volatile boolean started;
@@ -115,9 +118,11 @@ public class LighterQuoteEngine extends QuoteEngine {
         webSocketApi.disconnectAll();
         marketStatsSubscriptions.clear();
         orderBookSubscriptions.clear();
+        tickerSubscriptions.clear();
         orderFlowSubscriptions.clear();
         marketStatsTickerByMarketId.clear();
         orderBookTickerByMarketId.clear();
+        tickerTickerByMarketId.clear();
         orderFlowTickerByMarketId.clear();
         orderBookStateByMarketId.clear();
     }
@@ -132,13 +137,13 @@ public class LighterQuoteEngine extends QuoteEngine {
         validateTickerAndListener(ticker, listener);
         int marketId = resolveMarketId(ticker);
         marketStatsTickerByMarketId.put(marketId, ticker);
-        orderBookTickerByMarketId.put(marketId, ticker);
+        tickerTickerByMarketId.put(marketId, ticker);
 
         if (marketStatsSubscriptions.add(marketId)) {
             webSocketApi.subscribeMarketStats(marketId, this::handleMarketStatsUpdate);
         }
-        if (orderBookSubscriptions.add(marketId)) {
-            webSocketApi.subscribeOrderBook(marketId, this::handleOrderBookUpdate);
+        if (tickerSubscriptions.add(marketId)) {
+            webSocketApi.subscribeTicker(marketId, this::handleTickerUpdate);
         }
         super.subscribeLevel1(ticker, listener);
     }
@@ -201,6 +206,48 @@ public class LighterQuoteEngine extends QuoteEngine {
         }
     }
 
+    protected void handleTickerUpdate(LighterTickerUpdate update) {
+        if (update == null) {
+            return;
+        }
+        Integer marketId = update.getMarketId();
+        if (marketId == null) {
+            return;
+        }
+        Ticker ticker = tickerTickerByMarketId.get(marketId);
+        if (ticker == null || !hasLevel1Listeners(ticker)) {
+            return;
+        }
+        ZonedDateTime timestamp = toZonedDateTime(update.getTimestamp());
+        Level1Quote quote = buildTickerQuote(ticker, update, timestamp);
+        if (quote.hasUpdates()) {
+            fireLevel1Quote(quote);
+        }
+    }
+
+    protected Level1Quote buildTickerQuote(Ticker ticker, LighterTickerUpdate update, ZonedDateTime timestamp) {
+        Level1Quote quote = new Level1Quote(ticker, timestamp);
+        if (update.getBidPrice() != null && update.getBidPrice().compareTo(BigDecimal.ZERO) > 0) {
+            quote.addQuote(QuoteType.BID, ticker.formatPrice(update.getBidPrice()));
+            if (update.getBidSize() != null) {
+                quote.addQuote(QuoteType.BID_SIZE, update.getBidSize());
+            }
+        } else {
+            quote.clearQuote(QuoteType.BID);
+            quote.clearQuote(QuoteType.BID_SIZE);
+        }
+        if (update.getAskPrice() != null && update.getAskPrice().compareTo(BigDecimal.ZERO) > 0) {
+            quote.addQuote(QuoteType.ASK, ticker.formatPrice(update.getAskPrice()));
+            if (update.getAskSize() != null) {
+                quote.addQuote(QuoteType.ASK_SIZE, update.getAskSize());
+            }
+        } else {
+            quote.clearQuote(QuoteType.ASK);
+            quote.clearQuote(QuoteType.ASK_SIZE);
+        }
+        return quote;
+    }
+
     protected void handleOrderBookUpdate(LighterOrderBookUpdate update) {
         if (update == null) {
             return;
@@ -222,12 +269,6 @@ public class LighterQuoteEngine extends QuoteEngine {
 
         if (hasLevel2Listeners(ticker)) {
             fireMarketDepthQuote(new Level2Quote(ticker, orderBook, timestamp));
-        }
-        if (hasLevel1Listeners(ticker)) {
-            Level1Quote topOfBookQuote = buildTopOfBookQuote(ticker, orderBook, timestamp);
-            if (topOfBookQuote.hasUpdates()) {
-                fireLevel1Quote(topOfBookQuote);
-            }
         }
     }
 
