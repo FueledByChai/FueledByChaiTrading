@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(mvn compile:*)"
+      "Bash(mvn compiler:*)",
+      "WebSearch",
+      "WebFetch(domain:docs.asterdex.com)"
     ]
   }
 }
