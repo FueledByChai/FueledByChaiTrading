@@ -76,7 +76,7 @@ public class ParadexFillsWebSocketProcessor extends AbstractWebSocketProcessor<P
         fill.underlyingPrice = data.optString("underlying_price", null);
 
         try {
-            WsLatency.onMessage("PD-Fill", fill.clientId, recvMs, fill.createdAt);
+            WsLatency.onMessage("PD-Fill", fill.clientId, recvMs, fill.createdAt, "latency.paradex");
         } catch (Exception e) {
             logger.error("Error processing latency for fill: " + e.getMessage(), e);
         }

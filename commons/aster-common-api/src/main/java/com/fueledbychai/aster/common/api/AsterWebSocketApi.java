@@ -201,6 +201,10 @@ public class AsterWebSocketApi implements IAsterWebSocketApi {
             return;
         }
         try {
+            AsterWebSocketClient oldClient = clients.get(streamKey);
+            if (oldClient != null) {
+                try { oldClient.close(); } catch (Exception e) { /* already closing */ }
+            }
             AsterWebSocketClient client = newClient(streamUrl, channel == null || channel.isBlank() ? null : channel,
                     processor);
             clients.put(streamKey, client);

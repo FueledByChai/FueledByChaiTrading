@@ -156,6 +156,9 @@ public class DriftWebSocketApi implements IDriftWebSocketApi {
 
         private synchronized void connect() {
             try {
+                if (client != null) {
+                    try { client.close(); } catch (Exception e) { /* already closing */ }
+                }
                 DriftWebSocketClient newClient = clientFactory.create(processor);
                 client = newClient;
                 reconnectAttempts++;
