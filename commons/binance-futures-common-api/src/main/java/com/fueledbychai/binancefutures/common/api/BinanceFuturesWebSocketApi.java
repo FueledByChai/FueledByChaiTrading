@@ -169,6 +169,10 @@ public class BinanceFuturesWebSocketApi implements IBinanceFuturesWebSocketApi {
             return;
         }
         try {
+            BinanceFuturesWebSocketClient oldClient = clients.get(streamKey);
+            if (oldClient != null) {
+                try { oldClient.close(); } catch (Exception e) { /* already closing */ }
+            }
             BinanceFuturesWebSocketClient client = newClient(streamUrl, channel, processor);
             clients.put(streamKey, client);
             client.connect();

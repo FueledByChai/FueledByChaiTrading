@@ -186,6 +186,9 @@ public class DeribitWebSocketApi implements IDeribitWebSocketApi {
 
             connectFuture = new CompletableFuture<>();
             try {
+                if (webSocket != null) {
+                    try { webSocket.close(); } catch (Exception e) { /* already closing */ }
+                }
                 webSocket = new DeribitSocketClient();
                 webSocket.connect();
             } catch (RuntimeException e) {

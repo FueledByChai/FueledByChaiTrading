@@ -52,6 +52,7 @@ import com.fueledbychai.util.TickerRegistryFactory;
 public class AsterBroker extends AbstractBasicBroker {
 
     protected static final Logger logger = LoggerFactory.getLogger(AsterBroker.class);
+    protected static final String LATENCY_LOGGER = "latency.aster";
     protected static final long USER_STREAM_KEEPALIVE_PERIOD_MINUTES = 30L;
     protected static final long ACCOUNT_SNAPSHOT_POLL_SECONDS = 1L;
     protected static final BigDecimal DEFAULT_TICK_SIZE = new BigDecimal("0.01");
@@ -212,7 +213,7 @@ public class AsterBroker extends AbstractBasicBroker {
         }
 
         try {
-            try (var s = Span.start("AST_CANCEL_ALL_ORDERS_API_CALL", resolvedTicker.getSymbol())) {
+            try (var s = Span.start("AST_CANCEL_ALL_ORDERS_API_CALL", resolvedTicker.getSymbol(), LATENCY_LOGGER)) {
                 restApi.cancelAllOpenOrders(resolvedTicker.getSymbol());
             }
             for (OrderTicket openOrder : new ArrayList<>(orderRegistry.getOpenOrdersByTicker(resolvedTicker))) {
@@ -265,7 +266,7 @@ public class AsterBroker extends AbstractBasicBroker {
             order.setOrderEntryTime(getCurrentTime());
 
             JsonNode response;
-            try (var s = Span.start("AST_PLACE_ORDER_API_CALL", order.getClientOrderId())) {
+            try (var s = Span.start("AST_PLACE_ORDER_API_CALL", order.getClientOrderId(), LATENCY_LOGGER)) {
                 response = restApi.placeOrder(buildPlaceOrderParams(order));
             }
             ZonedDateTime timestamp = toTimestamp(response, "updateTime");
@@ -327,7 +328,7 @@ public class AsterBroker extends AbstractBasicBroker {
 
         try {
             JsonNode response;
-            try (var s = Span.start("AST_QUERY_ORDER_BY_ID_API_CALL", orderId)) {
+            try (var s = Span.start("AST_QUERY_ORDER_BY_ID_API_CALL", orderId, LATENCY_LOGGER)) {
                 response = restApi.queryOrder(knownOrder.getTicker().getSymbol(), orderId, null);
             }
             return applyOrderSnapshot(response, toTimestamp(response, "updateTime"), false);
@@ -350,7 +351,7 @@ public class AsterBroker extends AbstractBasicBroker {
 
         try {
             JsonNode response;
-            try (var s = Span.start("AST_QUERY_ORDER_BY_CLIENT_ID_API_CALL", clientOrderId)) {
+            try (var s = Span.start("AST_QUERY_ORDER_BY_CLIENT_ID_API_CALL", clientOrderId, LATENCY_LOGGER)) {
                 response = restApi.queryOrder(knownOrder.getTicker().getSymbol(), null, clientOrderId);
             }
             return applyOrderSnapshot(response, toTimestamp(response, "updateTime"), false);
@@ -403,7 +404,7 @@ public class AsterBroker extends AbstractBasicBroker {
     protected BrokerRequestResult cancelResolvedOrder(OrderTicket order) {
         try {
             JsonNode response;
-            try (var s = Span.start("AST_CANCEL_ORDER_API_CALL", order.getClientOrderId())) {
+            try (var s = Span.start("AST_CANCEL_ORDER_API_CALL", order.getClientOrderId(), LATENCY_LOGGER)) {
                 response = restApi.cancelOrder(order.getTicker().getSymbol(), blankToNull(order.getOrderId()),
                         blankToNull(order.getClientOrderId()));
             }
@@ -730,7 +731,7 @@ public class AsterBroker extends AbstractBasicBroker {
 
     protected void refreshOpenOrdersFromRest() {
         JsonNode response;
-        try (var s = Span.start("AST_GET_OPEN_ORDERS_API_CALL", "N/A")) {
+        try (var s = Span.start("AST_GET_OPEN_ORDERS_API_CALL", "N/A", LATENCY_LOGGER)) {
             response = restApi.getOpenOrders(null);
         }
         List<OrderTicket> openOrders = new ArrayList<>();
@@ -747,7 +748,7 @@ public class AsterBroker extends AbstractBasicBroker {
 
     protected void refreshPositionsFromRest() {
         JsonNode response;
-        try (var s = Span.start("AST_GET_POSITIONS_API_CALL", "N/A")) {
+        try (var s = Span.start("AST_GET_POSITIONS_API_CALL", "N/A", LATENCY_LOGGER)) {
             response = restApi.getPositionRisk(null);
         }
         Map<String, Position> refreshed = new LinkedHashMap<>();
@@ -765,7 +766,7 @@ public class AsterBroker extends AbstractBasicBroker {
 
     protected void refreshAccountSnapshotFromRest() {
         JsonNode response;
-        try (var s = Span.start("AST_GET_ACCOUNT_INFO_API_CALL", "N/A")) {
+        try (var s = Span.start("AST_GET_ACCOUNT_INFO_API_CALL", "N/A", LATENCY_LOGGER)) {
             response = restApi.getAccountInformation();
         }
         if (response == null || response.isNull() || response.isMissingNode()) {
@@ -821,9 +822,9 @@ public class AsterBroker extends AbstractBasicBroker {
 
         try {
             if ("TRADE".equalsIgnoreCase(executionType)) {
-                WsLatency.onMessage("AST-Fill", clientOrderId, recvMs, eventTimeMs);
+                WsLatency.onMessage("AST-Fill", clientOrderId, recvMs, eventTimeMs, LATENCY_LOGGER);
             } else {
-                WsLatency.onMessage("AST-OrderStatus(" + orderStatus + ")", clientOrderId, recvMs, eventTimeMs);
+                WsLatency.onMessage("AST-OrderStatus(" + orderStatus + ")", clientOrderId, recvMs, eventTimeMs, LATENCY_LOGGER);
             }
         } catch (Exception e) {
             logger.debug("Error processing latency for order trade update", e);
