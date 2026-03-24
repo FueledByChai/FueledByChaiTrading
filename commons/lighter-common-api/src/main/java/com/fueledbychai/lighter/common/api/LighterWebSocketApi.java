@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.lighter.common.api.ws.listener.ILighterMarketStatsListener;
 import com.fueledbychai.lighter.common.api.ws.listener.ILighterOrderBookListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterTickerListener;
 import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountAllTradesListener;
 import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountOrdersListener;
 import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountStatsListener;
@@ -38,6 +39,7 @@ import com.fueledbychai.lighter.common.api.ws.processor.LighterAccountOrdersWebS
 import com.fueledbychai.lighter.common.api.ws.processor.LighterAccountStatsWebSocketProcessor;
 import com.fueledbychai.lighter.common.api.ws.processor.LighterMarketStatsWebSocketProcessor;
 import com.fueledbychai.lighter.common.api.ws.processor.LighterOrderBookWebSocketProcessor;
+import com.fueledbychai.lighter.common.api.ws.processor.LighterTickerWebSocketProcessor;
 import com.fueledbychai.lighter.common.api.ws.processor.LighterTradesWebSocketProcessor;
 import com.fueledbychai.lighter.common.api.ws.client.LighterWSClientBuilder;
 import com.fueledbychai.lighter.common.api.ws.client.LighterWebSocketClient;
@@ -67,13 +69,14 @@ public class LighterWebSocketApi
     private static final long DEFAULT_CONNECT_ATTEMPT_WINDOW_MILLIS = 60_000L;
 
     protected enum ChannelType {
-        MARKET_STATS, ORDER_BOOK, TRADE, ACCOUNT_ALL_TRADES, ACCOUNT_ORDERS, ACCOUNT_STATS
+        MARKET_STATS, ORDER_BOOK, TICKER, TRADE, ACCOUNT_ALL_TRADES, ACCOUNT_ORDERS, ACCOUNT_STATS
     }
 
     private final String webSocketUrl;
     private final Map<String, LighterWebSocketClient> channelClients = new ConcurrentHashMap<>();
     private final Map<String, LighterMarketStatsWebSocketProcessor> marketStatsProcessors = new ConcurrentHashMap<>();
     private final Map<String, LighterOrderBookWebSocketProcessor> orderBookProcessors = new ConcurrentHashMap<>();
+    private final Map<String, LighterTickerWebSocketProcessor> tickerProcessors = new ConcurrentHashMap<>();
     private final Map<String, LighterTradesWebSocketProcessor> tradeProcessors = new ConcurrentHashMap<>();
     private final Map<String, LighterAccountAllTradesWebSocketProcessor> accountAllTradesProcessors = new ConcurrentHashMap<>();
     private final Map<String, LighterAccountOrdersWebSocketProcessor> accountOrdersProcessors = new ConcurrentHashMap<>();
@@ -130,6 +133,15 @@ public class LighterWebSocketApi
     @Override
     public LighterWebSocketClient subscribeAllMarketStats(ILighterMarketStatsListener listener) {
         return subscribeMarketStats(LighterWSClientBuilder.WS_TYPE_MARKET_STATS_ALL, listener);
+    }
+
+    @Override
+    public LighterWebSocketClient subscribeTicker(int marketId, ILighterTickerListener listener) {
+        if (marketId < 0) {
+            throw new IllegalArgumentException("marketId must be >= 0");
+        }
+        String channel = LighterWSClientBuilder.getTickerChannel(marketId);
+        return subscribeTicker(channel, listener);
     }
 
     @Override
@@ -288,6 +300,32 @@ public class LighterWebSocketApi
             channelClients.put(channel, client);
             logger.info("Connecting to Lighter websocket channel: {} using {}", channel, webSocketUrl);
             acquireConnectAttemptSlot("market stats/" + channel);
+            client.connect();
+        }
+
+        processor.addEventListener(listener);
+        return channelClients.get(channel);
+    }
+
+    protected synchronized LighterWebSocketClient subscribeTicker(String channel, ILighterTickerListener listener) {
+        if (channel == null || channel.isBlank()) {
+            throw new IllegalArgumentException("channel is required");
+        }
+        if (listener == null) {
+            throw new IllegalArgumentException("listener is required");
+        }
+        manualCloseChannels.remove(channel);
+        channelSubscribeAuth.remove(channel);
+        cancelReconnectTask(channel);
+
+        LighterTickerWebSocketProcessor processor = tickerProcessors.get(channel);
+        if (processor == null) {
+            processor = createTickerProcessor(channel);
+            LighterWebSocketClient client = createClient(channel, processor);
+            tickerProcessors.put(channel, processor);
+            channelClients.put(channel, client);
+            logger.info("Connecting to Lighter websocket channel: {} using {}", channel, webSocketUrl);
+            acquireConnectAttemptSlot("ticker/" + channel);
             client.connect();
         }
 
@@ -509,6 +547,13 @@ public class LighterWebSocketApi
                 logger.error("Error shutting down websocket processor", e);
             }
         }
+        for (LighterTickerWebSocketProcessor processor : tickerProcessors.values()) {
+            try {
+                processor.shutdown();
+            } catch (Exception e) {
+                logger.error("Error shutting down websocket processor", e);
+            }
+        }
         for (LighterTradesWebSocketProcessor processor : tradeProcessors.values()) {
             try {
                 processor.shutdown();
@@ -540,6 +585,7 @@ public class LighterWebSocketApi
         channelClients.clear();
         marketStatsProcessors.clear();
         orderBookProcessors.clear();
+        tickerProcessors.clear();
         tradeProcessors.clear();
         accountAllTradesProcessors.clear();
         accountOrdersProcessors.clear();
@@ -556,6 +602,12 @@ public class LighterWebSocketApi
     protected LighterMarketStatsWebSocketProcessor createMarketStatsProcessor(String channel) {
         return new LighterMarketStatsWebSocketProcessor(() -> {
             handleChannelClosed(channel, ChannelType.MARKET_STATS);
+        });
+    }
+
+    protected LighterTickerWebSocketProcessor createTickerProcessor(String channel) {
+        return new LighterTickerWebSocketProcessor(() -> {
+            handleChannelClosed(channel, ChannelType.TICKER);
         });
     }
 
@@ -863,6 +915,7 @@ public class LighterWebSocketApi
         return switch (type) {
             case MARKET_STATS -> marketStatsProcessors.get(channel);
             case ORDER_BOOK -> orderBookProcessors.get(channel);
+            case TICKER -> tickerProcessors.get(channel);
             case TRADE -> tradeProcessors.get(channel);
             case ACCOUNT_ALL_TRADES -> accountAllTradesProcessors.get(channel);
             case ACCOUNT_ORDERS -> accountOrdersProcessors.get(channel);

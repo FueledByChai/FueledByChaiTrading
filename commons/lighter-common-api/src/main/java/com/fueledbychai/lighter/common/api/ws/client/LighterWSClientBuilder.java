@@ -7,6 +7,7 @@ public class LighterWSClientBuilder {
     public static final String WS_TYPE_MARKET_STATS = "market_stats";
     public static final String WS_TYPE_MARKET_STATS_ALL = WS_TYPE_MARKET_STATS + "/all";
     public static final String WS_TYPE_ORDER_BOOK = "order_book";
+    public static final String WS_TYPE_TICKER = "ticker";
     public static final String WS_TYPE_TRADE = "trade";
     public static final String WS_TYPE_ACCOUNT_ALL_TRADES = "account_all_trades";
     public static final String WS_TYPE_ACCOUNT_ORDERS = "account_orders";
@@ -62,6 +63,13 @@ public class LighterWSClientBuilder {
             throw new IllegalArgumentException("marketId must be >= 0");
         }
         return WS_TYPE_MARKET_STATS + "/" + marketId;
+    }
+
+    public static String getTickerChannel(int marketId) {
+        if (marketId < 0) {
+            throw new IllegalArgumentException("marketId must be >= 0");
+        }
+        return WS_TYPE_TICKER + "/" + marketId;
     }
 
     public static String getOrderBookChannel(int marketId) {
