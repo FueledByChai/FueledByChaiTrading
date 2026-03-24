@@ -206,6 +206,9 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
 
             connectFuture = new CompletableFuture<>();
             try {
+                if (webSocket != null) {
+                    try { webSocket.close(); } catch (Exception e) { /* already closing */ }
+                }
                 webSocket = new OkxSocketClient();
                 webSocket.connect();
             } catch (RuntimeException e) {

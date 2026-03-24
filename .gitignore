@@ -31,3 +31,4 @@ commons/lighter-common-api/local-resources/*
 commons/lighter-common-api/local-resources/lighter.properties
 .claude/settings.local.json
 .claude/settings.local.json
+.claude/settings.json

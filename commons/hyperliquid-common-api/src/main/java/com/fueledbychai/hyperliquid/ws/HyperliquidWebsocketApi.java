@@ -121,6 +121,9 @@ public class HyperliquidWebsocketApi implements IWebSocketEventListener<SubmitPo
     }
 
     private void connectToWebSocket() {
+        if (this.client != null) {
+            try { this.client.close(); } catch (Exception e) { /* already closing */ }
+        }
         HyperliquidPostWebSocketProcessor wsProcessor = new HyperliquidPostWebSocketProcessor(() -> {
             connectToWebSocket();
         });
