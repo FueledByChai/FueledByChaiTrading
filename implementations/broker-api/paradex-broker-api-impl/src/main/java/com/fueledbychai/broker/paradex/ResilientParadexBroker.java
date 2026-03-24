@@ -62,6 +62,7 @@ import io.github.resilience4j.retry.RetryConfig;
  */
 public class ResilientParadexBroker extends ForwardingBroker {
     private static final Logger logger = LoggerFactory.getLogger(ResilientParadexBroker.class);
+    private static final String LATENCY_LOGGER = "latency.paradex";
 
     protected IBroker delegate;
     protected IBrokerOrderRegistry orderRegistry;
@@ -384,7 +385,7 @@ public class ResilientParadexBroker extends ForwardingBroker {
     public BrokerRequestResult placeOrder(OrderTicket order) {
         // Ensure order has a client order ID for reconciliation
         if (order.getClientOrderId() == null || order.getClientOrderId().trim().isEmpty()) {
-            try (var s = Span.start("PD_GENERATE_CLIENT_ORDER_ID", order.getTicker().getSymbol())) {
+            try (var s = Span.start("PD_GENERATE_CLIENT_ORDER_ID", order.getTicker().getSymbol(), LATENCY_LOGGER)) {
                 String clientOrderId = generateClientOrderId(order);
                 order.setClientOrderId(clientOrderId);
                 logger.debug("Generated client order ID {} for order {}", clientOrderId, order.getTicker().getSymbol());
@@ -473,7 +474,7 @@ public class ResilientParadexBroker extends ForwardingBroker {
     public BrokerRequestResult modifyOrder(OrderTicket order) {
         // Ensure order has a client order ID for reconciliation
         if (order.getClientOrderId() == null || order.getClientOrderId().trim().isEmpty()) {
-            try (var s = Span.start("PD_GENERATE_CLIENT_ORDER_ID", order.getTicker().getSymbol())) {
+            try (var s = Span.start("PD_GENERATE_CLIENT_ORDER_ID", order.getTicker().getSymbol(), LATENCY_LOGGER)) {
                 String clientOrderId = generateClientOrderId(order);
                 order.setClientOrderId(clientOrderId);
                 logger.debug("Generated client order ID {} for modify order {}", clientOrderId,

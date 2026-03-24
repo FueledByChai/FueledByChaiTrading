@@ -256,6 +256,9 @@ public class BybitWebSocketApi implements IBybitWebSocketApi {
 
             state.connectFuture = new CompletableFuture<>();
             try {
+                if (state.webSocket != null) {
+                    try { state.webSocket.close(); } catch (Exception e) { /* already closing */ }
+                }
                 BybitSocketClient socket = new BybitSocketClient(state);
                 state.webSocket = socket;
                 socket.connect();

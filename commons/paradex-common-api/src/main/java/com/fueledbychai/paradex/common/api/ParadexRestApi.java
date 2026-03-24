@@ -54,7 +54,8 @@ import okhttp3.Response;
 
 public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
     protected static Logger logger = LoggerFactory.getLogger(ParadexRestApi.class);
-    protected static Logger latencyLogger = LoggerFactory.getLogger(Span.LATENCY_LOGGER_NAME);
+    protected static final String LATENCY_LOGGER = "latency.paradex";
+    protected static Logger latencyLogger = LoggerFactory.getLogger(LATENCY_LOGGER);
     private final Gson gson;
 
     protected static IParadexRestApi publicOnlyApi;
@@ -359,7 +360,7 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
             logger.info("Request: " + request);
 
             Response response;
-            try (var s = Span.start("PD_CANCEL_ORDER_BY_ID_REST_CALL", orderId)) {
+            try (var s = Span.start("PD_CANCEL_ORDER_BY_ID_REST_CALL", orderId, LATENCY_LOGGER)) {
                 response = client.newCall(request).execute();
                 if (!response.isSuccessful()) {
                     String body = "";
@@ -395,7 +396,7 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
             logger.info("Request: " + request);
 
             Response response;
-            try (var s = Span.start("PD_CANCEL_ORDER_BY_CLIENT_ID_REST_CALL", clientOrderId)) {
+            try (var s = Span.start("PD_CANCEL_ORDER_BY_CLIENT_ID_REST_CALL", clientOrderId, LATENCY_LOGGER)) {
                 response = client.newCall(request).execute();
                 if (!response.isSuccessful()) {
                     logger.error("Error response: " + response.body().string());
@@ -554,7 +555,7 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
         String url = baseUrl + path;
         long timestamp = System.currentTimeMillis();
         String signatureString = "";
-        try (var s = Span.start("PD_SIGN_PLACE_ORDER_HTTP_REQUEST", order.getClientId())) {
+        try (var s = Span.start("PD_SIGN_PLACE_ORDER_HTTP_REQUEST", order.getClientId(), LATENCY_LOGGER)) {
             // Use optimized direct signing method to avoid JSON parsing overhead
             signatureString = getOrderMessageSignatureDirect(timestamp, order.getTicker(),
                     order.getSide().getChainSide(), order.getOrderType().toString(), order.getChainSize().toString(),
@@ -595,7 +596,7 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
         logger.info("Request: " + request);
         logger.info("Request body: " + orderJson.toString());
 
-        try (var s = Span.start("PD_SEND_PLACE_ORDER_REST_REQUEST", order.getClientId())) {
+        try (var s = Span.start("PD_SEND_PLACE_ORDER_REST_REQUEST", order.getClientId(), LATENCY_LOGGER)) {
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
                     logger.error("Error response: " + response.body().string());
@@ -627,7 +628,7 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
 
         long timestamp = System.currentTimeMillis();
         String signatureString = "";
-        try (var s = Span.start("PD_SIGN_MODIFY_ORDER_HTTP_REQUEST", order.getClientId())) {
+        try (var s = Span.start("PD_SIGN_MODIFY_ORDER_HTTP_REQUEST", order.getClientId(), LATENCY_LOGGER)) {
             // Use optimized direct signing method for modify orders
             signatureString = getModifyOrderMessageSignatureDirect(timestamp, order.getTicker(),
                     order.getSide().getChainSide(), order.getOrderType().toString(), order.getChainSize().toString(),
@@ -656,7 +657,7 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
         logger.info("Request: " + request);
         logger.info("Request body: " + orderJson.toString());
 
-        try (var s = Span.start("PD_SEND_MODIFY_ORDER_REST_REQUEST", order.getClientId())) {
+        try (var s = Span.start("PD_SEND_MODIFY_ORDER_REST_REQUEST", order.getClientId(), LATENCY_LOGGER)) {
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
                     String responseBody = response.body().string();

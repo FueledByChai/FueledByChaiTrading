@@ -47,7 +47,7 @@ public class OrderStatusWebSocketProcessor extends AbstractWebSocketProcessor<IP
                 }
 
                 try {
-                    WsLatency.onMessage("PD-OrderStatus", clientOrderId, recvMs, timestamp);
+                    WsLatency.onMessage("PD-OrderStatus", clientOrderId, recvMs, timestamp, "latency.paradex");
                 } catch (Exception e) {
                     logger.error("Error processing latency for order status: " + message, e);
                 }

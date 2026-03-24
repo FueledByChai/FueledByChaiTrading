@@ -59,6 +59,7 @@ import com.fueledbychai.util.FillDeduper;
  */
 public class ParadexBroker extends AbstractBasicBroker {
     protected static Logger logger = LoggerFactory.getLogger(ParadexBroker.class);
+    protected static final String LATENCY_LOGGER = "latency.paradex";
     protected static boolean unitTestMode = false;
 
     protected static int contractRequestId = 1;
@@ -133,7 +134,7 @@ public class ParadexBroker extends AbstractBasicBroker {
         checkConnected();
         logger.info("Canceling order with ID: {}", id);
         RestResponse cancelOrderResponse;
-        try (var s = Span.start("PD_CANCEL_ORDER_BY_ID_API_CALL", id)) {
+        try (var s = Span.start("PD_CANCEL_ORDER_BY_ID_API_CALL", id, LATENCY_LOGGER)) {
             cancelOrderResponse = restApi.cancelOrder(jwtToken, id);
         }
         logger.info("Response code: {}", cancelOrderResponse.getHttpCode());
@@ -164,7 +165,7 @@ public class ParadexBroker extends AbstractBasicBroker {
         checkConnected();
         logger.info("Canceling order with Client Order ID: {}", clientOrderId);
         RestResponse cancelOrderResponse;
-        try (var s = Span.start("PD_CANCEL_ORDER_BY_CLIENT_ID_API_CALL", clientOrderId)) {
+        try (var s = Span.start("PD_CANCEL_ORDER_BY_CLIENT_ID_API_CALL", clientOrderId, LATENCY_LOGGER)) {
             cancelOrderResponse = restApi.cancelOrderByClientOrderId(jwtToken, clientOrderId);
         }
         logger.info("Response code: {}", cancelOrderResponse.getHttpCode());
@@ -195,11 +196,11 @@ public class ParadexBroker extends AbstractBasicBroker {
     public BrokerRequestResult cancelOrder(OrderTicket order) {
         checkConnected();
         if (order.getClientOrderId() != null && !order.getClientOrderId().isEmpty()) {
-            try (var s = Span.start("PD_CANCEL_ORDER_BY_CLIENT_ID", order.getClientOrderId())) {
+            try (var s = Span.start("PD_CANCEL_ORDER_BY_CLIENT_ID", order.getClientOrderId(), LATENCY_LOGGER)) {
                 return cancelOrderByClientOrderId(order.getClientOrderId());
             }
         } else {
-            try (var s = Span.start("PD_CANCEL_ORDER_BY_ID", order.getOrderId())) {
+            try (var s = Span.start("PD_CANCEL_ORDER_BY_ID", order.getOrderId(), LATENCY_LOGGER)) {
                 return cancelOrder(order.getOrderId());
             }
         }
@@ -213,7 +214,7 @@ public class ParadexBroker extends AbstractBasicBroker {
 
         String orderId;
         orderRegistry.addOpenOrder(order);
-        try (var s = Span.start("PD_PLACE_ORDER_WITH_API", order.getClientOrderId())) {
+        try (var s = Span.start("PD_PLACE_ORDER_WITH_API", order.getClientOrderId(), LATENCY_LOGGER)) {
             orderId = restApi.placeOrder(jwtToken, paradexOrder);
         }
         logger.info("{} Order for {} placed with ID: {}", order.getDirection(), order.getTicker().getSymbol(), orderId);
@@ -225,7 +226,7 @@ public class ParadexBroker extends AbstractBasicBroker {
 
     @Override
     public BrokerRequestResult modifyOrder(OrderTicket order) {
-        try (var s = Span.start("PD_MODIFY_ORDER_WITH_API", order.getClientOrderId())) {
+        try (var s = Span.start("PD_MODIFY_ORDER_WITH_API", order.getClientOrderId(), LATENCY_LOGGER)) {
             order.setOrderEntryTime(getCurrentTime());
             restApi.modifyOrder(jwtToken, translator.translateOrder(order));
             return new BrokerRequestResult();
@@ -235,7 +236,7 @@ public class ParadexBroker extends AbstractBasicBroker {
     @Override
     public String getNextOrderId() {
         // generate a unique client order ID
-        try (var s = Span.start("PD_GENERATE_CLIENT_ORDER_ID", "N/A")) {
+        try (var s = Span.start("PD_GENERATE_CLIENT_ORDER_ID", "N/A", LATENCY_LOGGER)) {
             return UUID.randomUUID().toString();
         }
     }
@@ -321,7 +322,7 @@ public class ParadexBroker extends AbstractBasicBroker {
             return BrokerStatus.UNKNOWN;
         }
 
-        try (var s = Span.start("PD_GET_SYSTEM_STATE", "N/A")) {
+        try (var s = Span.start("PD_GET_SYSTEM_STATE", "N/A", LATENCY_LOGGER)) {
             SystemStatus systemStatus = restApi.getSystemState();
             if (systemStatus == null) {
                 return BrokerStatus.UNKNOWN;
@@ -473,6 +474,7 @@ public class ParadexBroker extends AbstractBasicBroker {
 
     public void startAccountInfoWSClient() {
         logger.info("Starting account info WebSocket client");
+        closeQuietly(accountInfoWSClient);
         String jwtToken = restApi.getJwtToken();
         String wsUrl = getWebSocketUrl();
 
@@ -482,13 +484,12 @@ public class ParadexBroker extends AbstractBasicBroker {
             accountInfoWSClient.connect();
         } catch (Exception e) {
             throw new IllegalStateException(e);
-
         }
-
     }
 
     public void startOrderStatusWSClient() {
         logger.info("Starting order status WebSocket client");
+        closeQuietly(orderStatusWSClient);
         String jwtToken = restApi.getJwtToken();
         String wsUrl = getWebSocketUrl();
 
@@ -497,13 +498,12 @@ public class ParadexBroker extends AbstractBasicBroker {
             orderStatusWSClient.connect();
         } catch (Exception e) {
             throw new IllegalStateException(e);
-
         }
-
     }
 
     public void startFillsWSClient() {
         logger.info("Starting fills WebSocket client");
+        closeQuietly(fillsWSClient);
         String jwtToken = restApi.getJwtToken();
         String wsUrl = getWebSocketUrl();
 
@@ -520,9 +520,17 @@ public class ParadexBroker extends AbstractBasicBroker {
             fillsWSClient.connect();
         } catch (Exception e) {
             throw new IllegalStateException(e);
-
         }
+    }
 
+    private void closeQuietly(ParadexWebSocketClient client) {
+        if (client != null) {
+            try {
+                client.close();
+            } catch (Exception e) {
+                logger.debug("Error closing old websocket client", e);
+            }
+        }
     }
 
     @Override
