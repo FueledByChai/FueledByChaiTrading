@@ -35,6 +35,7 @@ public class AsterWebSocketApi implements IAsterWebSocketApi {
     protected final Map<String, AsterJsonProcessor> processors = new ConcurrentHashMap<>();
     protected final Map<String, String> streamChannels = new ConcurrentHashMap<>();
     protected final Map<String, String> streamUrls = new ConcurrentHashMap<>();
+    protected volatile String userDataStreamKey;
     protected final ScheduledExecutorService reconnectExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread thread = new Thread(r, "aster-ws-reconnect");
         thread.setDaemon(true);
@@ -105,8 +106,12 @@ public class AsterWebSocketApi implements IAsterWebSocketApi {
 
         shuttingDown = false;
         connected = true;
+        // Disconnect previous user data stream if any (listenKey changed)
+        disconnectUserData();
+
         String streamUrl = AsterWebSocketClientBuilder.userDataUrl(futuresWebSocketUrl, listenKey);
         String streamKey = streamKey(streamUrl, "");
+        userDataStreamKey = streamKey;
         streamChannels.put(streamKey, "");
         streamUrls.put(streamKey, streamUrl);
 
@@ -122,6 +127,29 @@ public class AsterWebSocketApi implements IAsterWebSocketApi {
         clients.put(streamKey, client);
         client.connect();
         return client;
+    }
+
+    @Override
+    public void disconnectUserData() {
+        String key = userDataStreamKey;
+        if (key == null) {
+            return;
+        }
+        userDataStreamKey = null;
+        AsterWebSocketClient client = clients.remove(key);
+        if (client != null) {
+            try {
+                client.close();
+            } catch (Exception e) {
+                logger.debug("Ignoring user data websocket close failure", e);
+            }
+        }
+        AsterJsonProcessor processor = processors.remove(key);
+        if (processor != null) {
+            processor.shutdown();
+        }
+        streamChannels.remove(key);
+        streamUrls.remove(key);
     }
 
     @Override
