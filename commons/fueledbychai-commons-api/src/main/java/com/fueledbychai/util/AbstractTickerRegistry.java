@@ -195,11 +195,22 @@ public abstract class AbstractTickerRegistry implements ITickerTranslator, ITick
                 return direct;
             }
             // Prefix search: bare base symbol (e.g. "BTC") matches "BTC/USDT", "BTC/USDT-PERP", etc.
+            // To avoid dependence on Map iteration order (e.g. HashMap), deterministically select
+            // the lexicographically smallest matching key.
             String prefix = commonSymbol + "/";
+            String bestKey = null;
+            Ticker bestTicker = null;
             for (Map.Entry<String, Ticker> entry : map.entrySet()) {
-                if (entry.getKey() != null && entry.getKey().startsWith(prefix)) {
-                    return entry.getValue();
+                String key = entry.getKey();
+                if (key != null && key.startsWith(prefix)) {
+                    if (bestKey == null || key.compareTo(bestKey) < 0) {
+                        bestKey = key;
+                        bestTicker = entry.getValue();
+                    }
                 }
+            }
+            if (bestTicker != null) {
+                return bestTicker;
             }
         }
         String exchangeSymbol = commonSymbolToExchangeSymbol(instrumentType, commonSymbol);
