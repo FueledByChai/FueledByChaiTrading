@@ -10,6 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.junit.jupiter.api.Test;
 
 import com.fueledbychai.bybit.common.api.IBybitRestApi;
+import com.google.gson.JsonObject;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
@@ -58,6 +59,11 @@ class BybitTickerRegistryTest {
         @Override
         public InstrumentDescriptor getInstrumentDescriptor(String symbol) {
             return null;
+        }
+
+        @Override
+        public JsonObject getTicker(String category, String symbol) {
+            return new JsonObject();
         }
 
         @Override

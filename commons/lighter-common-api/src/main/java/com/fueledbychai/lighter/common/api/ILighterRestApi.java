@@ -4,6 +4,7 @@ import java.util.List;
 
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
+import com.google.gson.JsonObject;
 import com.fueledbychai.lighter.common.api.account.LighterPosition;
 import com.fueledbychai.lighter.common.api.auth.LighterApiTokenResponse;
 import com.fueledbychai.lighter.common.api.auth.LighterChangeAccountTierRequest;
@@ -20,6 +21,17 @@ import com.fueledbychai.lighter.common.api.ws.model.LighterOrder;
  * objects instead of raw transport payloads whenever possible.
  */
 public interface ILighterRestApi {
+
+    /**
+     * Returns the top-of-book (best bid/offer) data for the given market.
+     *
+     * The response is the raw JSON payload from the Lighter REST API
+     * containing order book levels that can be used to extract BBO data.
+     *
+     * @param marketId the Lighter market identifier
+     * @return the parsed JSON response object
+     */
+    JsonObject getOrderBookBBO(int marketId);
 
     /**
      * Returns the known instruments for the supplied instrument type.

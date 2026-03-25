@@ -58,7 +58,11 @@ public class DriftTickerRegistry extends AbstractTickerRegistry implements ITick
             if (trimmed.endsWith("/USDC")) {
                 return trimmed.substring(0, trimmed.length() - 5) + "-PERP";
             }
-            return trimmed.replace("/", "-");
+            String result = trimmed.replace("/", "-");
+            if (!result.endsWith("-PERP")) {
+                return result + "-PERP";
+            }
+            return result;
         }
 
         if (trimmed.endsWith("/USDC")) {

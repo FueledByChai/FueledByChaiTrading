@@ -27,6 +27,7 @@ import com.fueledbychai.drift.common.api.model.DriftMarket;
 import com.fueledbychai.drift.common.api.model.DriftMarketType;
 import com.fueledbychai.drift.common.api.model.DriftOrderBookLevel;
 import com.fueledbychai.drift.common.api.model.DriftOrderBookSnapshot;
+import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.Level1Quote;
 import com.fueledbychai.marketdata.Level1QuoteListener;
 import com.fueledbychai.marketdata.Level2Quote;
@@ -123,6 +124,34 @@ public class DriftQuoteEngine extends QuoteEngine {
         orderBookSubscriptions.clear();
         marketStatsSubscriptions.clear();
         tickerBySymbol.clear();
+    }
+
+    @Override
+    public ILevel1Quote requestLevel1Snapshot(Ticker ticker) {
+        if (ticker == null) {
+            throw new IllegalArgumentException("ticker is required");
+        }
+        DriftOrderBookSnapshot snapshot = restApi.getOrderBook(ticker.getSymbol(), marketType(ticker));
+        if (snapshot == null) {
+            throw new IllegalStateException("No order book data returned for " + ticker.getSymbol());
+        }
+        ZonedDateTime timestamp = snapshot.getTimestampMillis() > 0
+                ? ZonedDateTime.ofInstant(Instant.ofEpochMilli(snapshot.getTimestampMillis()), UTC)
+                : ZonedDateTime.now(UTC);
+        Level1Quote quote = new Level1Quote(ticker, timestamp);
+        if (snapshot.getBestBidPrice() != null) {
+            quote.addQuote(QuoteType.BID, snapshot.getBestBidPrice());
+        }
+        if (snapshot.getBestAskPrice() != null) {
+            quote.addQuote(QuoteType.ASK, snapshot.getBestAskPrice());
+        }
+        if (snapshot.getMarkPrice() != null) {
+            quote.addQuote(QuoteType.MARK_PRICE, snapshot.getMarkPrice());
+        }
+        if (snapshot.getOraclePrice() != null) {
+            quote.addQuote(QuoteType.UNDERLYING_PRICE, snapshot.getOraclePrice());
+        }
+        return quote;
     }
 
     @Override

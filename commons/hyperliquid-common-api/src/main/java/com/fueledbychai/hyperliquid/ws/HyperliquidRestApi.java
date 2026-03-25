@@ -162,6 +162,33 @@ public class HyperliquidRestApi extends BaseRestApi implements IHyperliquidRestA
     }
 
     @Override
+    public JsonObject getL2Book(String coin) {
+        if (coin == null || coin.isBlank()) {
+            throw new IllegalArgumentException("coin is required");
+        }
+        return executeWithRetry(() -> {
+            String url = baseUrl + "/info";
+            JsonObject requestBody = new JsonObject();
+            requestBody.addProperty("type", "l2Book");
+            requestBody.addProperty("coin", coin.trim());
+            RequestBody body = RequestBody.create(requestBody.toString(), MediaType.parse("application/json"));
+            Request request = new Request.Builder().url(url).post(body).build();
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    String responseBody = response.body() != null ? response.body().string() : "";
+                    throw new IOException("Unexpected Hyperliquid response " + response.code() + ": " + responseBody);
+                }
+                if (response.body() == null) {
+                    throw new IOException("Empty Hyperliquid response");
+                }
+                return JsonParser.parseString(response.body().string()).getAsJsonObject();
+            } catch (IOException e) {
+                throw new RuntimeException("Unable to load L2 book for " + coin, e);
+            }
+        }, 3, 500);
+    }
+
+    @Override
     public boolean isPublicApiOnly() {
         return publicApiOnly;
     }

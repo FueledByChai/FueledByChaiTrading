@@ -6,6 +6,7 @@ import java.util.Map;
 import com.fueledbychai.broker.Position;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
+import com.google.gson.JsonObject;
 import com.fueledbychai.paradex.common.api.historical.OHLCBar;
 import com.fueledbychai.paradex.common.api.order.ParadexOrder;
 import com.fueledbychai.paradex.common.api.ws.SystemStatus;
@@ -50,6 +51,14 @@ public interface IParadexRestApi {
     // String getOrderMessageSignature(String orderMessage);
 
     boolean isPublicApiOnly();
+
+    /**
+     * Returns the best bid/offer (BBO) data for the given market.
+     *
+     * @param market the Paradex market symbol (e.g. {@code BTC-USD-PERP})
+     * @return the parsed JSON response object containing bid/ask prices and sizes
+     */
+    JsonObject getBBO(String market);
 
     InstrumentDescriptor getInstrumentDescriptor(String symbol);
 

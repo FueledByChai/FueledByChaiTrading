@@ -35,7 +35,10 @@ import com.fueledbychai.marketdata.Level2QuoteListener;
 import com.fueledbychai.marketdata.OrderFlow;
 import com.fueledbychai.marketdata.OrderFlowListener;
 import com.fueledbychai.marketdata.QuoteType;
+import com.fueledbychai.binance.IBinanceRestApi;
 import com.fueledbychai.util.ITickerRegistry;
+
+import static org.mockito.Mockito.mock;
 
 @ExtendWith(MockitoExtension.class)
 public class BinanceQuoteEngineTest {
@@ -54,7 +57,7 @@ public class BinanceQuoteEngineTest {
 
     @Test
     public void testStartStopEngine() {
-        BinanceQuoteEngine engine = new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry);
+        BinanceQuoteEngine engine = new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry, mock(IBinanceRestApi.class));
 
         engine.startEngine();
         assertTrue(engine.started());
@@ -67,7 +70,7 @@ public class BinanceQuoteEngineTest {
 
     @Test
     public void testSubscribeLevel1StartsBookAndSymbolTickerClients() {
-        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry));
+        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry, mock(IBinanceRestApi.class)));
         Ticker ticker = new Ticker("BTCUSDT");
 
         doNothing().when(engine).startBookTickerWSClient(ticker);
@@ -81,7 +84,7 @@ public class BinanceQuoteEngineTest {
 
     @Test
     public void testSubscribeMarketDepthStartsPartialBookClient() {
-        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry));
+        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry, mock(IBinanceRestApi.class)));
         Ticker ticker = new Ticker("BTCUSDT");
 
         doNothing().when(engine).startPartialOrderBookClient(ticker);
@@ -93,7 +96,7 @@ public class BinanceQuoteEngineTest {
 
     @Test
     public void testSubscribeOrderFlowStartsTradesClient() {
-        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry));
+        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry, mock(IBinanceRestApi.class)));
         Ticker ticker = new Ticker("BTCUSDT");
 
         doNothing().when(engine).startTradesWSClient(ticker);
@@ -105,7 +108,7 @@ public class BinanceQuoteEngineTest {
 
     @Test
     public void testOnBboUpdateFiresLevel1Quote() {
-        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry));
+        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry, mock(IBinanceRestApi.class)));
         AtomicReference<ILevel1Quote> captured = new AtomicReference<>();
         Ticker ticker = new Ticker("BTCUSDT");
         ZonedDateTime timeStamp = ZonedDateTime.now(ZoneId.of("UTC"));
@@ -134,7 +137,7 @@ public class BinanceQuoteEngineTest {
 
     @Test
     public void testOnOrderBookUpdateFiresLevel2Quote() {
-        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry));
+        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry, mock(IBinanceRestApi.class)));
         AtomicReference<ILevel2Quote> captured = new AtomicReference<>();
         Ticker ticker = new Ticker("BTCUSDT");
         ZonedDateTime timeStamp = ZonedDateTime.now(ZoneId.of("UTC"));
@@ -166,7 +169,7 @@ public class BinanceQuoteEngineTest {
 
     @Test
     public void testOnTradeRecordUpdateFiresOrderFlow() {
-        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry));
+        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry, mock(IBinanceRestApi.class)));
         AtomicReference<OrderFlow> captured = new AtomicReference<>();
         Ticker ticker = new Ticker("BTCUSDT");
 
@@ -195,7 +198,7 @@ public class BinanceQuoteEngineTest {
 
     @Test
     public void testResolveSnapshotEventTimeUsesExchangeEventTime() {
-        BinanceQuoteEngine engine = new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry);
+        BinanceQuoteEngine engine = new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry, mock(IBinanceRestApi.class));
         OrderBookSnapshot snapshot = new OrderBookSnapshot();
         snapshot.setEventTime(1700000000123L);
 
@@ -206,7 +209,7 @@ public class BinanceQuoteEngineTest {
 
     @Test
     public void testResolveSnapshotEventTimeFallsBackToNowWhenMissing() {
-        BinanceQuoteEngine engine = new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry);
+        BinanceQuoteEngine engine = new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry, mock(IBinanceRestApi.class));
         OrderBookSnapshot snapshot = new OrderBookSnapshot();
 
         ZonedDateTime before = ZonedDateTime.now(ZoneId.of("UTC")).minusSeconds(1);
@@ -219,7 +222,7 @@ public class BinanceQuoteEngineTest {
 
     @Test
     public void testOnBookTickerUpdateUsesExchangeTimestamp() {
-        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry));
+        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry, mock(IBinanceRestApi.class)));
         AtomicReference<ILevel1Quote> captured = new AtomicReference<>();
         Ticker ticker = new Ticker("BTCUSDT");
 
@@ -249,7 +252,7 @@ public class BinanceQuoteEngineTest {
 
     @Test
     public void testOnSymbolTickerUpdateProducesLastAndVolumeQuotes() {
-        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry));
+        BinanceQuoteEngine engine = spy(new BinanceQuoteEngine("wss://example.test/stream", tickerRegistry, mock(IBinanceRestApi.class)));
         AtomicReference<ILevel1Quote> captured = new AtomicReference<>();
         Ticker ticker = new Ticker("BTCUSDT");
 
