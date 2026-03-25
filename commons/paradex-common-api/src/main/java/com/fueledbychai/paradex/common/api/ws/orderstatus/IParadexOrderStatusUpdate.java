@@ -35,6 +35,8 @@ public interface IParadexOrderStatusUpdate {
 
     BigDecimal getAverageFillPrice();
 
+    BigDecimal getPrice();
+
     OrderType getOrderType();
 
     Side getSide();

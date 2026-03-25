@@ -120,6 +120,11 @@ public class OrderStatusWebSocketProcessorTest {
         }
 
         @Override
+        public java.math.BigDecimal getPrice() {
+            return null;
+        }
+
+        @Override
         public OrderType getOrderType() {
             return null;
         }
