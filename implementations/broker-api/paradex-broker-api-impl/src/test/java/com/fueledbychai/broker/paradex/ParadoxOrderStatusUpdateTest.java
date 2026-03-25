@@ -52,7 +52,7 @@ public class ParadoxOrderStatusUpdateTest {
         public void testConstructor_ValidParameters_CreatesObjectSuccessfully() {
                 // Act
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, cancelReasonString, averageFillPrice, orderType, side, timestamp);
+                                originalSize, status, cancelReasonString, averageFillPrice, null, orderType, side, timestamp);
 
                 // Assert
                 assertNotNull(orderStatusUpdate);
@@ -73,23 +73,23 @@ public class ParadoxOrderStatusUpdateTest {
         public void testConstructor_AllParadexOrderStatusValues() {
                 // Test NEW status
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, "NEW", cancelReasonString, averageFillPrice, orderType, side, timestamp);
+                                originalSize, "NEW", cancelReasonString, averageFillPrice, null, orderType, side, timestamp);
                 assertEquals(ParadexOrderStatus.NEW, orderStatusUpdate.getStatus());
 
                 // Test OPEN status
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, "OPEN", cancelReasonString, averageFillPrice, orderType, side, timestamp);
+                                originalSize, "OPEN", cancelReasonString, averageFillPrice, null, orderType, side, timestamp);
                 assertEquals(ParadexOrderStatus.OPEN, orderStatusUpdate.getStatus());
 
                 // Test CLOSED status
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, "CLOSED", cancelReasonString, averageFillPrice, orderType, side,
+                                originalSize, "CLOSED", cancelReasonString, averageFillPrice, null, orderType, side,
                                 timestamp);
                 assertEquals(ParadexOrderStatus.CLOSED, orderStatusUpdate.getStatus());
 
                 // Test UNTRIGGERED status
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, "UNTRIGGERED", cancelReasonString, averageFillPrice, orderType, side,
+                                originalSize, "UNTRIGGERED", cancelReasonString, averageFillPrice, null, orderType, side,
                                 timestamp);
                 assertEquals(ParadexOrderStatus.UNTRIGGERED, orderStatusUpdate.getStatus());
         }
@@ -98,18 +98,18 @@ public class ParadoxOrderStatusUpdateTest {
         public void testConstructor_AllCancelReasonValues() {
                 // Test NONE cancel reason
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, "NONE", averageFillPrice, orderType, side, timestamp);
+                                originalSize, status, "NONE", averageFillPrice, null, orderType, side, timestamp);
                 assertEquals(CancelReason.NONE, orderStatusUpdate.getCancelReason());
 
                 // Test POST_ONLY_WOULD_CROSS cancel reason
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, "POST_ONLY_WOULD_CROSS", averageFillPrice, orderType, side,
+                                originalSize, status, "POST_ONLY_WOULD_CROSS", averageFillPrice, null, orderType, side,
                                 timestamp);
                 assertEquals(CancelReason.POST_ONLY_WOULD_CROSS, orderStatusUpdate.getCancelReason());
 
                 // Test USER_CANCELED cancel reason
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, "USER_CANCELED", averageFillPrice, orderType, side, timestamp);
+                                originalSize, status, "USER_CANCELED", averageFillPrice, null, orderType, side, timestamp);
                 assertEquals(CancelReason.USER_CANCELED, orderStatusUpdate.getCancelReason());
         }
 
@@ -117,7 +117,7 @@ public class ParadoxOrderStatusUpdateTest {
         public void testConstructor_InvalidCancelReason_DefaultsToNone() {
                 // Act
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, "INVALID_REASON", averageFillPrice, orderType, side, timestamp);
+                                originalSize, status, "INVALID_REASON", averageFillPrice, null, orderType, side, timestamp);
 
                 // Assert
                 assertEquals(CancelReason.UNKNOWN, orderStatusUpdate.getCancelReason());
@@ -128,7 +128,7 @@ public class ParadoxOrderStatusUpdateTest {
         public void testConstructor_NullCancelReason_DefaultsToNone() {
                 // Act
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, null, averageFillPrice, orderType, side, timestamp);
+                                originalSize, status, null, averageFillPrice, null, orderType, side, timestamp);
 
                 // Assert
                 assertEquals(CancelReason.NONE, orderStatusUpdate.getCancelReason());
@@ -139,7 +139,7 @@ public class ParadoxOrderStatusUpdateTest {
         public void testConstructor_EmptyCancelReason_DefaultsToNone() {
                 // Act
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, "", averageFillPrice, orderType, side, timestamp);
+                                originalSize, status, "", averageFillPrice, null, orderType, side, timestamp);
 
                 // Assert
                 assertEquals(CancelReason.NONE, orderStatusUpdate.getCancelReason());
@@ -150,17 +150,17 @@ public class ParadoxOrderStatusUpdateTest {
         public void testConstructor_AllOrderTypes() {
                 // Test MARKET order type
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, cancelReasonString, averageFillPrice, "MARKET", side, timestamp);
+                                originalSize, status, cancelReasonString, averageFillPrice, null, "MARKET", side, timestamp);
                 assertEquals(OrderType.MARKET, orderStatusUpdate.getOrderType());
 
                 // Test LIMIT order type
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, cancelReasonString, averageFillPrice, "LIMIT", side, timestamp);
+                                originalSize, status, cancelReasonString, averageFillPrice, null, "LIMIT", side, timestamp);
                 assertEquals(OrderType.LIMIT, orderStatusUpdate.getOrderType());
 
                 // Test STOP order type
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, cancelReasonString, averageFillPrice, "STOP", side, timestamp);
+                                originalSize, status, cancelReasonString, averageFillPrice, null, "STOP", side, timestamp);
                 assertEquals(OrderType.STOP, orderStatusUpdate.getOrderType());
         }
 
@@ -168,13 +168,13 @@ public class ParadoxOrderStatusUpdateTest {
         public void testConstructor_AllSides() {
                 // Test BUY side
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, cancelReasonString, averageFillPrice, orderType, "BUY",
+                                originalSize, status, cancelReasonString, averageFillPrice, null, orderType, "BUY",
                                 timestamp);
                 assertEquals(Side.BUY, orderStatusUpdate.getSide());
 
                 // Test SELL side
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, cancelReasonString, averageFillPrice, orderType, "SELL",
+                                originalSize, status, cancelReasonString, averageFillPrice, null, orderType, "SELL",
                                 timestamp);
                 assertEquals(Side.SELL, orderStatusUpdate.getSide());
         }
@@ -184,7 +184,7 @@ public class ParadoxOrderStatusUpdateTest {
                 // Act & Assert
                 assertThrows(IllegalArgumentException.class, () -> {
                         new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize, originalSize,
-                                        "INVALID_STATUS", cancelReasonString, averageFillPrice, orderType, side,
+                                        "INVALID_STATUS", cancelReasonString, averageFillPrice, null, orderType, side,
                                         timestamp);
                 });
         }
@@ -194,7 +194,7 @@ public class ParadoxOrderStatusUpdateTest {
                 // Act & Assert
                 assertThrows(IllegalArgumentException.class, () -> {
                         new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize, originalSize,
-                                        status, cancelReasonString, averageFillPrice, "INVALID_TYPE", side, timestamp);
+                                        status, cancelReasonString, averageFillPrice, null, "INVALID_TYPE", side, timestamp);
                 });
         }
 
@@ -203,7 +203,7 @@ public class ParadoxOrderStatusUpdateTest {
                 // Act & Assert
                 assertThrows(IllegalArgumentException.class, () -> {
                         new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize, originalSize,
-                                        status, cancelReasonString, averageFillPrice, orderType, "INVALID_SIDE",
+                                        status, cancelReasonString, averageFillPrice, null, orderType, "INVALID_SIDE",
                                         timestamp);
                 });
         }
@@ -212,7 +212,7 @@ public class ParadoxOrderStatusUpdateTest {
         public void testSetOrderId() {
                 // Arrange
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, cancelReasonString, averageFillPrice, orderType, side, timestamp);
+                                originalSize, status, cancelReasonString, averageFillPrice, null, orderType, side, timestamp);
                 String newOrderId = "newOrder456";
 
                 // Act
@@ -226,7 +226,7 @@ public class ParadoxOrderStatusUpdateTest {
         public void testSetRemainingSize() {
                 // Arrange
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, cancelReasonString, averageFillPrice, orderType, side, timestamp);
+                                originalSize, status, cancelReasonString, averageFillPrice, null, orderType, side, timestamp);
                 BigDecimal newRemainingSize = new BigDecimal("3.5");
 
                 // Act
@@ -240,7 +240,7 @@ public class ParadoxOrderStatusUpdateTest {
         public void testSetStatus() {
                 // Arrange
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, cancelReasonString, averageFillPrice, orderType, side, timestamp);
+                                originalSize, status, cancelReasonString, averageFillPrice, null, orderType, side, timestamp);
 
                 // Act
                 orderStatusUpdate.setStatus(ParadexOrderStatus.CLOSED);
@@ -253,7 +253,7 @@ public class ParadoxOrderStatusUpdateTest {
         public void testSetCancelReasonString() {
                 // Arrange
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, cancelReasonString, averageFillPrice, orderType, side, timestamp);
+                                originalSize, status, cancelReasonString, averageFillPrice, null, orderType, side, timestamp);
                 String newCancelReason = "MARKET_CLOSED";
 
                 // Act
@@ -267,7 +267,7 @@ public class ParadoxOrderStatusUpdateTest {
         public void testSetOriginalSize() {
                 // Arrange
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, cancelReasonString, averageFillPrice, orderType, side, timestamp);
+                                originalSize, status, cancelReasonString, averageFillPrice, null, orderType, side, timestamp);
                 BigDecimal newOriginalSize = new BigDecimal("15.0");
 
                 // Act
@@ -281,7 +281,7 @@ public class ParadoxOrderStatusUpdateTest {
         public void testSetCancelReason() {
                 // Arrange
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, cancelReasonString, averageFillPrice, orderType, side, timestamp);
+                                originalSize, status, cancelReasonString, averageFillPrice, null, orderType, side, timestamp);
 
                 // Act
                 orderStatusUpdate.setCancelReason(CancelReason.USER_CANCELED);
@@ -294,7 +294,7 @@ public class ParadoxOrderStatusUpdateTest {
         public void testToString_ContainsAllFields() {
                 // Arrange
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, cancelReasonString, averageFillPrice, orderType, side, timestamp);
+                                originalSize, status, cancelReasonString, averageFillPrice, null, orderType, side, timestamp);
 
                 // Act
                 String result = orderStatusUpdate.toString();
@@ -320,7 +320,7 @@ public class ParadoxOrderStatusUpdateTest {
 
                 // Act
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, zeroSize,
-                                zeroSize, status, cancelReasonString, zeroPrice, orderType, side, timestamp);
+                                zeroSize, status, cancelReasonString, zeroPrice, null, orderType, side, timestamp);
 
                 // Assert
                 assertEquals(zeroSize, orderStatusUpdate.getRemainingSize());
@@ -332,7 +332,7 @@ public class ParadoxOrderStatusUpdateTest {
         public void testBigDecimalFields_HandlesNullValues() {
                 // Act
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, null, null,
-                                status, cancelReasonString, null, orderType, side, timestamp);
+                                status, cancelReasonString, null, null, orderType, side, timestamp);
 
                 // Assert
                 assertNull(orderStatusUpdate.getRemainingSize());
@@ -344,7 +344,7 @@ public class ParadoxOrderStatusUpdateTest {
         public void testTimestamp_HandlesZero() {
                 // Act
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, cancelReasonString, averageFillPrice, orderType, side, 0);
+                                originalSize, status, cancelReasonString, averageFillPrice, null, orderType, side, 0);
 
                 // Assert
                 assertEquals(0, orderStatusUpdate.getTimestamp());
@@ -357,7 +357,7 @@ public class ParadoxOrderStatusUpdateTest {
 
                 // Act
                 orderStatusUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId, remainingSize,
-                                originalSize, status, cancelReasonString, averageFillPrice, orderType, side,
+                                originalSize, status, cancelReasonString, averageFillPrice, null, orderType, side,
                                 negativeTimestamp);
 
                 // Assert
@@ -371,7 +371,7 @@ public class ParadoxOrderStatusUpdateTest {
 
                 for (String ticker : tickers) {
                         orderStatusUpdate = new ParadoxOrderStatusUpdate(ticker, orderId, clientOrderId, remainingSize,
-                                        originalSize, status, cancelReasonString, averageFillPrice, orderType, side,
+                                        originalSize, status, cancelReasonString, averageFillPrice, null, orderType, side,
                                         timestamp);
 
                         assertEquals(ticker, orderStatusUpdate.getTickerString());
@@ -387,7 +387,7 @@ public class ParadoxOrderStatusUpdateTest {
 
                 // Act
                 orderStatusUpdate = new ParadoxOrderStatusUpdate("BTC-USD", "partial123", "client123", partialRemaining,
-                                fullSize, "OPEN", "NONE", fillPrice, "LIMIT", "BUY", timestamp);
+                                fullSize, "OPEN", "NONE", fillPrice, null, "LIMIT", "BUY", timestamp);
 
                 // Assert
                 assertEquals(fullSize, orderStatusUpdate.getOriginalSize());
@@ -402,7 +402,7 @@ public class ParadoxOrderStatusUpdateTest {
                 // Arrange - Simulate a canceled order
                 // Act
                 orderStatusUpdate = new ParadoxOrderStatusUpdate("ETH-USD", "cancel456", "client456", remainingSize,
-                                originalSize, "CLOSED", "USER_CANCELED", averageFillPrice, "MARKET", "SELL", timestamp);
+                                originalSize, "CLOSED", "USER_CANCELED", averageFillPrice, null, "MARKET", "SELL", timestamp);
 
                 // Assert
                 assertEquals(ParadexOrderStatus.CLOSED, orderStatusUpdate.getStatus());
@@ -417,7 +417,7 @@ public class ParadoxOrderStatusUpdateTest {
                 // Arrange - Simulate a post-only order that would cross
                 // Act
                 orderStatusUpdate = new ParadoxOrderStatusUpdate("SOL-USD", "postonly789", "client789", originalSize,
-                                originalSize, "CLOSED", "POST_ONLY_WOULD_CROSS", BigDecimal.ZERO, "LIMIT", "BUY",
+                                originalSize, "CLOSED", "POST_ONLY_WOULD_CROSS", BigDecimal.ZERO, null, "LIMIT", "BUY",
                                 timestamp);
 
                 // Assert

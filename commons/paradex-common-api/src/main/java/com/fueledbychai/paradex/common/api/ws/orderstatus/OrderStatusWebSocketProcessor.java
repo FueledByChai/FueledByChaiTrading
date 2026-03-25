@@ -38,6 +38,7 @@ public class OrderStatusWebSocketProcessor extends AbstractWebSocketProcessor<IP
                 String cancelReason = data.getString("cancel_reason");
                 String orderType = data.getString("type");
                 String averageFillPriceStr = data.getString("avg_fill_price");
+                String priceStr = data.optString("price", "");
                 long timestamp = data.getLong("published_at");
                 String side = data.getString("side");
                 String tickerString = data.getString("market");
@@ -45,6 +46,7 @@ public class OrderStatusWebSocketProcessor extends AbstractWebSocketProcessor<IP
                 if (averageFillPriceStr.equals("")) {
                     averageFillPriceStr = "0";
                 }
+                BigDecimal price = (priceStr != null && !priceStr.isEmpty()) ? new BigDecimal(priceStr) : null;
 
                 try {
                     WsLatency.onMessage("PD-OrderStatus", clientOrderId, recvMs, timestamp, "latency.paradex");
@@ -54,7 +56,7 @@ public class OrderStatusWebSocketProcessor extends AbstractWebSocketProcessor<IP
 
                 ParadoxOrderStatusUpdate orderStatus = new ParadoxOrderStatusUpdate(tickerString, orderId,
                         clientOrderId, new BigDecimal(remainingSizeStr), new BigDecimal(originalSizeStr), status,
-                        cancelReason, new BigDecimal(averageFillPriceStr), orderType, side, timestamp);
+                        cancelReason, new BigDecimal(averageFillPriceStr), price, orderType, side, timestamp);
                 return orderStatus;
             } else {
                 return null;

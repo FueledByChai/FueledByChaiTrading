@@ -3,7 +3,8 @@
     "allow": [
       "Bash(mvn compiler:*)",
       "WebSearch",
-      "WebFetch(domain:docs.asterdex.com)"
+      "WebFetch(domain:docs.asterdex.com)",
+      "Bash(mvn test-compile)"
     ]
   }
 }
