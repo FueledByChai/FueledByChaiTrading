@@ -2,6 +2,7 @@ package com.fueledbychai.binancefutures.common.api;
 
 import java.util.Date;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 
@@ -36,6 +37,14 @@ public interface IBinanceFuturesRestApi {
      * @return the exchange server time
      */
     Date getServerTime();
+
+    /**
+     * Returns the best bid/offer (book ticker) for the given symbol.
+     *
+     * @param symbol the exchange symbol
+     * @return the JSON response containing bidPrice, bidQty, askPrice, askQty
+     */
+    JsonNode getBookTicker(String symbol);
 
     /**
      * Indicates whether this API instance was created without private

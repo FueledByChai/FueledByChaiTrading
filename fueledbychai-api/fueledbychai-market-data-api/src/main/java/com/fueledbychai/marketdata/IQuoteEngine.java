@@ -164,8 +164,19 @@ public interface IQuoteEngine {
     public void fireOrderFlow(OrderFlow orderFlow);
 
     /**
+     * Requests a synchronous Level 1 quote snapshot for the specified ticker.
+     * Makes a one-shot REST call to retrieve the current best bid/offer
+     * without subscribing to streaming data.
+     *
+     * @param ticker The ticker to request the snapshot for
+     * @return The current Level 1 quote snapshot
+     * @throws UnsupportedOperationException if this quote engine does not support snapshots
+     */
+    ILevel1Quote requestLevel1Snapshot(Ticker ticker);
+
+    /**
      * Set to true if ok to use delayed data.
-     * 
+     *
      * @param useDelayed true if ok to use delayed rather than real-time data
      */
     public void useDelayedData(boolean useDelayed);

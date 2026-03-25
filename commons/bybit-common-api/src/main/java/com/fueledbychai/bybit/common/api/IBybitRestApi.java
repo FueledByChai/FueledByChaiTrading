@@ -2,6 +2,7 @@ package com.fueledbychai.bybit.common.api;
 
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
+import com.google.gson.JsonObject;
 
 /**
  * Public REST contract for the Bybit exchange integration.
@@ -40,6 +41,18 @@ public interface IBybitRestApi {
      * @return the resolved descriptor, or {@code null} when unavailable
      */
     InstrumentDescriptor getInstrumentDescriptor(String symbol);
+
+    /**
+     * Returns the public ticker snapshot for the given category and symbol.
+     *
+     * The response contains the full Bybit API payload including best bid/ask
+     * prices and sizes from the {@code /v5/market/tickers} endpoint.
+     *
+     * @param category the Bybit product category (e.g. {@code linear}, {@code spot})
+     * @param symbol   the Bybit symbol (e.g. {@code BTCUSDT})
+     * @return the parsed JSON response object
+     */
+    JsonObject getTicker(String category, String symbol);
 
     /**
      * Indicates whether this API instance was created without private

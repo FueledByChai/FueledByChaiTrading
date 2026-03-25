@@ -174,6 +174,20 @@ public class BybitRestApi implements IBybitRestApi {
     }
 
     @Override
+    public JsonObject getTicker(String category, String symbol) {
+        if (!isPresent(category)) {
+            throw new IllegalArgumentException("category is required");
+        }
+        if (!isPresent(symbol)) {
+            throw new IllegalArgumentException("symbol is required");
+        }
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("category", category.trim());
+        params.put("symbol", symbol.trim());
+        return executeGet("market/tickers", params);
+    }
+
+    @Override
     public boolean isPublicApiOnly() {
         return publicApiOnly;
     }

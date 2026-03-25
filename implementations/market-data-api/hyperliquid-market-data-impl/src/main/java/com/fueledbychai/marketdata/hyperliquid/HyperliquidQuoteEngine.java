@@ -1,6 +1,7 @@
 package com.fueledbychai.marketdata.hyperliquid;
 
 import java.math.BigDecimal;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Date;
@@ -9,10 +10,15 @@ import java.util.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.hyperliquid.ws.HyperliquidConfiguration;
 import com.fueledbychai.hyperliquid.ws.HyperliquidWebSocketClient;
 import com.fueledbychai.hyperliquid.ws.HyperliquidWebSocketClientBuilder;
+import com.fueledbychai.hyperliquid.ws.IHyperliquidRestApi;
+import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.IOrderBook;
 import com.fueledbychai.marketdata.Level1Quote;
 import com.fueledbychai.marketdata.Level1QuoteListener;
@@ -23,6 +29,7 @@ import com.fueledbychai.marketdata.OrderFlow;
 import com.fueledbychai.marketdata.OrderFlowListener;
 import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.QuoteType;
+import com.fueledbychai.util.ExchangeRestApiFactory;
 
 public class HyperliquidQuoteEngine extends QuoteEngine implements OrderBookUpdateListener, IBBOWebSocketListener,
         IVolumeAndFundingWebsocketListener, IOrderflowUpdateListener {
@@ -42,9 +49,11 @@ public class HyperliquidQuoteEngine extends QuoteEngine implements OrderBookUpda
 
     protected String wsUrl;
     protected boolean includeFundingRate = true;
+    protected IHyperliquidRestApi restApi;
 
     public HyperliquidQuoteEngine() {
         wsUrl = HyperliquidConfiguration.getInstance().getWebSocketUrl();
+        restApi = ExchangeRestApiFactory.getPublicApi(Exchange.HYPERLIQUID, IHyperliquidRestApi.class);
     }
 
     @Override
@@ -87,6 +96,57 @@ public class HyperliquidQuoteEngine extends QuoteEngine implements OrderBookUpda
     public void stopEngine() {
         started = false;
         // stopFundingRateUpdates();
+    }
+
+    public ILevel1Quote requestLevel1Snapshot(Ticker ticker) {
+        if (ticker == null) {
+            throw new IllegalArgumentException("ticker is required");
+        }
+        String coin = ticker.getSymbol();
+        JsonObject response = restApi.getL2Book(coin);
+        if (response == null) {
+            throw new IllegalStateException("No L2 book data returned for " + coin);
+        }
+        JsonArray levels = response.has("levels") && response.get("levels").isJsonArray()
+                ? response.getAsJsonArray("levels") : null;
+        if (levels == null || levels.size() < 2) {
+            throw new IllegalStateException("No L2 book data returned for " + coin);
+        }
+        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("UTC"));
+        Level1Quote quote = new Level1Quote(ticker, now);
+        // levels[0] = bids, levels[1] = asks
+        JsonArray bids = levels.get(0).isJsonArray() ? levels.get(0).getAsJsonArray() : null;
+        JsonArray asks = levels.get(1).isJsonArray() ? levels.get(1).getAsJsonArray() : null;
+        if (bids != null && !bids.isEmpty() && bids.get(0).isJsonObject()) {
+            JsonObject bestBid = bids.get(0).getAsJsonObject();
+            BigDecimal bidPrice = parseGsonDecimal(bestBid, "px");
+            BigDecimal bidSize = parseGsonDecimal(bestBid, "sz");
+            if (bidPrice != null) quote.addQuote(QuoteType.BID, bidPrice);
+            if (bidSize != null) quote.addQuote(QuoteType.BID_SIZE, bidSize);
+        }
+        if (asks != null && !asks.isEmpty() && asks.get(0).isJsonObject()) {
+            JsonObject bestAsk = asks.get(0).getAsJsonObject();
+            BigDecimal askPrice = parseGsonDecimal(bestAsk, "px");
+            BigDecimal askSize = parseGsonDecimal(bestAsk, "sz");
+            if (askPrice != null) quote.addQuote(QuoteType.ASK, askPrice);
+            if (askSize != null) quote.addQuote(QuoteType.ASK_SIZE, askSize);
+        }
+        return quote;
+    }
+
+    protected BigDecimal parseGsonDecimal(JsonObject object, String key) {
+        if (object == null || key == null || !object.has(key) || object.get(key).isJsonNull()) {
+            return null;
+        }
+        String value = object.get(key).getAsString();
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return new BigDecimal(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @Override

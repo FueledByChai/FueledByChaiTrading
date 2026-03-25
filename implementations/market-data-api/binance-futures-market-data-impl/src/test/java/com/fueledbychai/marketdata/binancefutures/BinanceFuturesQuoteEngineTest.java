@@ -309,6 +309,11 @@ class BinanceFuturesQuoteEngineTest {
         }
 
         @Override
+        public JsonNode getBookTicker(String symbol) {
+            return null;
+        }
+
+        @Override
         public boolean isPublicApiOnly() {
             return true;
         }
