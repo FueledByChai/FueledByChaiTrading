@@ -21,7 +21,26 @@
       "Bash(mvn test-compile:*)",
       "Bash(git worktree:*)",
       "Bash(git branch:*)",
-      "Bash(mvn clean:*)"
+      "Bash(mvn clean:*)",
+      "Bash(curl -s -L \"https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api\")",
+      "Bash(curl -s -L \"https://docs.paradex.trade/\")",
+      "Bash(curl -s -L --max-time 15 \"https://docs.zklighter.elliot.ai/\")",
+      "Bash(curl -s -L \"https://drift-labs.github.io/v2-teacher/\")",
+      "Bash(curl -s -L --max-time 15 \"https://docs.aster.finance/\")",
+      "Bash(curl -s -L \"https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/rate-limits\")",
+      "Bash(curl -s -L --max-time 15 \"https://lighter.xyz/docs\")",
+      "Bash(curl -s -L \"https://docs.drift.trade/\")",
+      "Bash(curl -s -L --max-time 15 \"https://docs.aster.finance/api-reference\")",
+      "Bash(curl -s -L https://docs.paradex.trade/api-reference/rate-limits)",
+      "Bash(curl -s -L --max-time 15 \"https://docs.lighter.xyz/\")",
+      "Bash(curl -s -L \"https://raw.githubusercontent.com/hyperliquid-dex/hyperliquid-python-sdk/main/README.md\")",
+      "Bash(curl -s -L --max-time 15 \"https://api.aster.finance/\")",
+      "Bash(curl -s -L \"https://drift-labs.github.io/v2-teacher/#rate-limits\")",
+      "Bash(curl -s -L https://docs.paradex.trade/rate-limits)",
+      "WebFetch(domain:docs.lighter.xyz)",
+      "WebFetch(domain:docs.aster.finance)",
+      "WebFetch(domain:hyperliquid.gitbook.io)",
+      "WebFetch(domain:drift-labs.github.io)"
     ]
   }
 }

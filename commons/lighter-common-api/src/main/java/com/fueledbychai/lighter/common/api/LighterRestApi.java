@@ -147,11 +147,11 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
             throw new IllegalArgumentException("marketId must be >= 0");
         }
         return executeWithRetry(() -> {
-            String path = "/orderBook";
+            String path = "/orderBookOrders";
             String url = baseUrl + path;
             HttpUrl.Builder urlBuilder = HttpUrl.parse(url).newBuilder();
             urlBuilder.addQueryParameter("market_id", Integer.toString(marketId));
-            urlBuilder.addQueryParameter("depth", "1");
+            urlBuilder.addQueryParameter("limit", "1");
             String newUrl = urlBuilder.build().toString();
 
             Request request = new Request.Builder().url(newUrl).get().build();

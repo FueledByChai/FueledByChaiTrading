@@ -1,5 +1,7 @@
 package com.fueledbychai.paradex.example.market.data;
 
+import java.util.List;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,28 +35,62 @@ public class Level1SnapshotExample {
 
     private static final Logger logger = LoggerFactory.getLogger(Level1SnapshotExample.class);
 
+    private static final List<Exchange> EXCHANGES = List.of(
+            Exchange.PARADEX, Exchange.HYPERLIQUID, Exchange.LIGHTER, Exchange.DRIFT, Exchange.ASTER,
+            Exchange.BINANCE_FUTURES, Exchange.BINANCE_SPOT, Exchange.OKX, Exchange.BYBIT, Exchange.DERIBIT);
+
     public static void main(String[] args) {
-        Exchange exchange = args.length > 0 ? Exchange.getExchangeFromString(args[0].trim().toUpperCase()) : Exchange.ASTER;
-        String symbol = args.length > 1 ? args[1] : "BTCUSDT";
-        InstrumentType instrumentType = args.length > 2
-                ? InstrumentType.valueOf(args[2].trim().toUpperCase())
-                : InstrumentType.PERPETUAL_FUTURES;
+        System.setProperty("fueledbychai.run.proxy", "true");
+        String symbol = args.length > 0 ? args[0] : "BTC";
 
-        logger.info("Requesting L1 snapshot from {} for {} ({})", exchange, symbol, instrumentType);
+        record Result(Exchange exchange, String ticker, ILevel1Quote quote, String error) {}
+        List<Result> results = new java.util.ArrayList<>();
 
-        Ticker ticker = resolveTicker(exchange, symbol, instrumentType);
-        QuoteEngine quoteEngine = QuoteEngine.getInstance(exchange);
+        for (Exchange exchange : EXCHANGES) {
+            InstrumentType instrumentType = exchange == Exchange.BINANCE_SPOT
+                    ? InstrumentType.CRYPTO_SPOT : InstrumentType.PERPETUAL_FUTURES;
 
-        ILevel1Quote quote = quoteEngine.requestLevel1Snapshot(ticker);
+            logger.info("Requesting L1 snapshot from {} for {} ({})", exchange, symbol, instrumentType);
+            try {
+                Ticker ticker = resolveTicker(exchange, symbol, instrumentType);
+                QuoteEngine quoteEngine = QuoteEngine.getInstance(exchange);
 
-        logger.info("=== L1 Snapshot for {} on {} ===", ticker.getSymbol(), exchange);
-        logField(quote, "Bid", QuoteType.BID);
-        logField(quote, "Bid Size", QuoteType.BID_SIZE);
-        logField(quote, "Ask", QuoteType.ASK);
-        logField(quote, "Ask Size", QuoteType.ASK_SIZE);
-        logField(quote, "Mark Price", QuoteType.MARK_PRICE);
-        logField(quote, "Underlying", QuoteType.UNDERLYING_PRICE);
-        logger.info("Timestamp: {}", quote.getTimeStamp());
+                ILevel1Quote quote = quoteEngine.requestLevel1Snapshot(ticker);
+                results.add(new Result(exchange, ticker.getSymbol(), quote, null));
+
+                logger.info("=== L1 Snapshot for {} on {} ===", ticker.getSymbol(), exchange);
+                logField(quote, "Bid", QuoteType.BID);
+                logField(quote, "Bid Size", QuoteType.BID_SIZE);
+                logField(quote, "Ask", QuoteType.ASK);
+                logField(quote, "Ask Size", QuoteType.ASK_SIZE);
+                logField(quote, "Mark Price", QuoteType.MARK_PRICE);
+                logField(quote, "Underlying", QuoteType.UNDERLYING_PRICE);
+                logger.info("Timestamp: {}", quote.getTimeStamp());
+            } catch (Exception e) {
+                results.add(new Result(exchange, null, null, e.getMessage()));
+                logger.error("Failed to get L1 snapshot from {} for {}: {}", exchange, symbol, e.getMessage(), e);
+            }
+        }
+
+        System.out.println("\n========== L1 SNAPSHOT SUMMARY ==========");
+        System.out.printf("%-20s %-15s %12s %12s %12s %12s%n",
+                "EXCHANGE", "TICKER", "BID", "ASK", "MARK", "TIMESTAMP");
+        System.out.println("-".repeat(90));
+        for (Result r : results) {
+            if (r.error() != null) {
+                System.out.printf("%-20s %-15s  ERROR: %s%n", r.exchange().getExchangeName(), "", r.error());
+            } else {
+                ILevel1Quote q = r.quote();
+                System.out.printf("%-20s %-15s %12s %12s %12s %12s%n",
+                        r.exchange().getExchangeName(),
+                        r.ticker(),
+                        q.containsType(QuoteType.BID) ? q.getValue(QuoteType.BID) : "-",
+                        q.containsType(QuoteType.ASK) ? q.getValue(QuoteType.ASK) : "-",
+                        q.containsType(QuoteType.MARK_PRICE) ? q.getValue(QuoteType.MARK_PRICE) : "-",
+                        q.getTimeStamp() != null ? q.getTimeStamp() : "-");
+            }
+        }
+        System.out.println("=========================================");
     }
 
     private static Ticker resolveTicker(Exchange exchange, String symbol, InstrumentType instrumentType) {
@@ -63,11 +99,11 @@ public class Level1SnapshotExample {
         if (ticker == null) {
             ticker = registry.lookupByCommonSymbol(instrumentType, symbol);
         }
-        if (ticker == null) {
-            ticker = new Ticker(symbol)
-                    .setExchange(exchange)
-                    .setInstrumentType(instrumentType);
+
+        if( ticker == null) {
+            throw new IllegalArgumentException("Ticker not found for exchange=" + exchange + ", symbol=" + symbol);
         }
+
         return ticker;
     }
 

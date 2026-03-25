@@ -67,6 +67,16 @@
         </dependency>
         <dependency>
             <groupId>${project.groupId}</groupId>
+            <artifactId>lighter-market-data-impl</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>drift-market-data-impl</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
             <artifactId>aster-market-data-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
@@ -78,6 +88,11 @@
         <dependency>
             <groupId>${project.groupId}</groupId>
             <artifactId>binance-futures-market-data-impl</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>binance-spot-market-data-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>
