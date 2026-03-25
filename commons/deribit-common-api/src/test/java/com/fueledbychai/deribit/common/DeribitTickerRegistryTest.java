@@ -12,6 +12,7 @@ import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.deribit.common.api.IDeribitRestApi;
+import com.google.gson.JsonObject;
 
 class DeribitTickerRegistryTest {
 
@@ -70,6 +71,11 @@ class DeribitTickerRegistryTest {
         @Override
         public InstrumentDescriptor getInstrumentDescriptor(String symbol) {
             return null;
+        }
+
+        @Override
+        public JsonObject getTicker(String instrumentName) {
+            return new JsonObject();
         }
 
         @Override

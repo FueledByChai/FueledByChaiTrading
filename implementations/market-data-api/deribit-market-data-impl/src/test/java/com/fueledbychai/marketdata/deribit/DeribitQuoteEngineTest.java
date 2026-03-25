@@ -13,7 +13,10 @@ import org.junit.jupiter.api.Test;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.data.InstrumentDescriptor;
+import com.fueledbychai.deribit.common.api.IDeribitRestApi;
 import com.fueledbychai.deribit.common.api.IDeribitWebSocketApi;
+import com.google.gson.JsonObject;
 import com.fueledbychai.deribit.common.api.ws.listener.IDeribitOrderBookListener;
 import com.fueledbychai.deribit.common.api.ws.listener.IDeribitTickerListener;
 import com.fueledbychai.deribit.common.api.ws.listener.IDeribitTradeListener;
@@ -43,7 +46,7 @@ class DeribitQuoteEngineTest {
                 .setStrike(new BigDecimal("90000"))
                 .setRight(Ticker.Right.CALL);
         StubTickerRegistry tickerRegistry = new StubTickerRegistry(canonical);
-        DeribitQuoteEngine engine = new DeribitQuoteEngine(webSocketApi, tickerRegistry);
+        DeribitQuoteEngine engine = new DeribitQuoteEngine(new StubDeribitRestApi(), webSocketApi, tickerRegistry);
 
         try {
             CountDownLatch latch = new CountDownLatch(1);
@@ -73,6 +76,29 @@ class DeribitQuoteEngineTest {
         } finally {
             engine.stopEngine();
             engine.shutdownNow();
+        }
+    }
+
+    private static class StubDeribitRestApi implements IDeribitRestApi {
+
+        @Override
+        public InstrumentDescriptor[] getAllInstrumentsForType(InstrumentType instrumentType) {
+            return new InstrumentDescriptor[0];
+        }
+
+        @Override
+        public InstrumentDescriptor getInstrumentDescriptor(String symbol) {
+            return null;
+        }
+
+        @Override
+        public JsonObject getTicker(String instrumentName) {
+            return new JsonObject();
+        }
+
+        @Override
+        public boolean isPublicApiOnly() {
+            return true;
         }
     }
 
