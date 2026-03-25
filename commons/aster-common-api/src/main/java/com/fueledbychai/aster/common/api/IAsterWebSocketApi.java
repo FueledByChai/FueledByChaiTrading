@@ -42,6 +42,12 @@ public interface IAsterWebSocketApi {
     AsterWebSocketClient subscribeUserData(String listenKey, IWebSocketEventListener<JsonNode> listener);
 
     /**
+     * Disconnects only the user-data websocket stream, leaving market-data
+     * streams intact.
+     */
+    void disconnectUserData();
+
+    /**
      * Closes all managed websocket connections and cancels reconnect work.
      */
     void disconnectAll();

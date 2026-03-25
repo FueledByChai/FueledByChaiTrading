@@ -922,8 +922,7 @@ public class AsterBroker extends AbstractBasicBroker {
             return;
         }
         try {
-            webSocketApi.disconnectAll();
-            webSocketApi.connect();
+            webSocketApi.disconnectUserData();
             listenKey = restApi.startUserDataStream();
             webSocketApi.subscribeUserData(listenKey, this::onUserDataMessage);
         } catch (Exception e) {
