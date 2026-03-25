@@ -145,7 +145,7 @@ public class BybitTickerRegistry extends AbstractTickerRegistry implements ITick
             }
         }
         // Bare base symbol (e.g. "BTC") — append default quote currency
-        if (!normalized.contains("USDT") && !normalized.contains("USDC") && !normalized.contains("USD")) {
+        if (!normalized.endsWith("USDT") && !normalized.endsWith("USDC") && !normalized.endsWith("USD")) {
             return normalized + "USDT";
         }
         return normalized;
