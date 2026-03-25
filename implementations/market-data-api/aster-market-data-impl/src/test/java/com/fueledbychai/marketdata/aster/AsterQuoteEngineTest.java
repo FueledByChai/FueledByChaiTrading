@@ -279,6 +279,11 @@ class AsterQuoteEngineTest {
         public JsonNode getAccountInformation() {
             return null;
         }
+
+        @Override
+        public JsonNode getBookTicker(String symbol) {
+            return null;
+        }
     }
 
     private static final class StubWebSocketApi implements IAsterWebSocketApi {

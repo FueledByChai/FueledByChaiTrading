@@ -20,7 +20,8 @@
       "Bash(WORKTREE=/Users/robterpilowski/Code/JavaProjects/FueledByChaiTrading/.claude/worktrees/agent-a8b1afcf)",
       "Bash(mvn test-compile:*)",
       "Bash(git worktree:*)",
-      "Bash(git branch:*)"
+      "Bash(git branch:*)",
+      "Bash(mvn clean:*)"
     ]
   }
 }

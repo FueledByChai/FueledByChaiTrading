@@ -116,5 +116,10 @@ class AsterTickerRegistryTest {
         public JsonNode getAccountInformation() {
             return null;
         }
+
+        @Override
+        public JsonNode getBookTicker(String symbol) {
+            return null;
+        }
     }
 }
