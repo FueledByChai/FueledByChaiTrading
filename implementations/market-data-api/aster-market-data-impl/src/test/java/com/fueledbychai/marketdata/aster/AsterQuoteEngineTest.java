@@ -335,6 +335,10 @@ class AsterQuoteEngineTest {
         }
 
         @Override
+        public void disconnectUserData() {
+        }
+
+        @Override
         public void disconnectAll() {
             disconnectCount.incrementAndGet();
         }
