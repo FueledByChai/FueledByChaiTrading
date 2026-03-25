@@ -389,6 +389,9 @@ public class ParadexBroker extends AbstractBasicBroker {
         order.setCurrentStatus(status.getStatus());
         order.setFilledPrice(status.getFillPrice());
         order.setFilledSize(status.getFilled());
+        if (orderStatus.getPrice() != null) {
+            order.setLimitPrice(orderStatus.getPrice());
+        }
         // Can't set the order commission here, only on fill events.
 
         OrderEvent event = new OrderEvent(order, status);

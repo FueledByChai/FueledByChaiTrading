@@ -16,13 +16,14 @@ public class ParadoxOrderStatusUpdate implements IParadexOrderStatusUpdate {
     protected String cancelReasonString;
     protected CancelReason cancelReason;
     protected BigDecimal averageFillPrice;
+    protected BigDecimal price;
     protected OrderType orderType;
     protected Side side;
     protected long timestamp;
 
     public ParadoxOrderStatusUpdate(String tickerString, String orderId, String clientOrderId, BigDecimal remainingSize,
             BigDecimal originalSize, String status, String cancelReasonAsString, BigDecimal averageFillPrice,
-            String orderType, String side, long timestamp) {
+            BigDecimal price, String orderType, String side, long timestamp) {
         this.tickerString = tickerString;
         this.orderId = orderId;
         this.clientOrderId = clientOrderId;
@@ -41,6 +42,7 @@ public class ParadoxOrderStatusUpdate implements IParadexOrderStatusUpdate {
             this.cancelReason = CancelReason.NONE;
         }
         this.averageFillPrice = averageFillPrice;
+        this.price = price;
         this.orderType = OrderType.valueOf(orderType);
         this.side = Side.valueOf(side);
         this.timestamp = timestamp;
@@ -112,6 +114,11 @@ public class ParadoxOrderStatusUpdate implements IParadexOrderStatusUpdate {
     }
 
     @Override
+    public BigDecimal getPrice() {
+        return price;
+    }
+
+    @Override
     public OrderType getOrderType() {
         return orderType;
     }
@@ -146,7 +153,8 @@ public class ParadoxOrderStatusUpdate implements IParadexOrderStatusUpdate {
         return "ParadoxOrderStatus [tickerString=" + tickerString + ", orderId=" + orderId + ", originalSize="
                 + originalSize + ", remainingSize=" + remainingSize + ", status=" + status + ", cancelReasonString="
                 + cancelReasonString + ", cancelReason=" + cancelReason + ", averageFillPrice=" + averageFillPrice
-                + ", orderType=" + orderType + ", side=" + side + ", clientOrderId=" + clientOrderId + "]";
+                + ", price=" + price + ", orderType=" + orderType + ", side=" + side + ", clientOrderId="
+                + clientOrderId + "]";
     }
 
 }
