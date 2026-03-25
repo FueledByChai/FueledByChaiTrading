@@ -80,8 +80,9 @@ public class BinanceInstrumentLookup implements IInstrumentLookup {
         BigDecimal orderSizeIncrement = new BigDecimal(lotSizeFilter.getStepSize()).stripTrailingZeros();
         BigDecimal minOrderSize = new BigDecimal(lotSizeFilter.getMinQty()).stripTrailingZeros();
 
+        String commonSymbol = symbol.getBaseAsset() + "/" + symbol.getQuoteAsset();
         InstrumentDescriptor descriptor = new InstrumentDescriptor(InstrumentType.CRYPTO_SPOT, Exchange.BINANCE_SPOT,
-                symbol.getSymbol(), symbol.getSymbol(), symbol.getBaseAsset(), symbol.getQuoteAsset(),
+                commonSymbol, symbol.getSymbol(), symbol.getBaseAsset(), symbol.getQuoteAsset(),
                 orderSizeIncrement, priceTickSize, 0, minOrderSize, 0, BigDecimal.ZERO, 0, "");
 
         return descriptor;

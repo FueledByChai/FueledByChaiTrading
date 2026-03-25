@@ -194,6 +194,13 @@ public abstract class AbstractTickerRegistry implements ITickerTranslator, ITick
             if (direct != null) {
                 return direct;
             }
+            // Prefix search: bare base symbol (e.g. "BTC") matches "BTC/USDT", "BTC/USDT-PERP", etc.
+            String prefix = commonSymbol + "/";
+            for (Map.Entry<String, Ticker> entry : map.entrySet()) {
+                if (entry.getKey() != null && entry.getKey().startsWith(prefix)) {
+                    return entry.getValue();
+                }
+            }
         }
         String exchangeSymbol = commonSymbolToExchangeSymbol(instrumentType, commonSymbol);
         if (exchangeSymbol == null) {

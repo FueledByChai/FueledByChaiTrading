@@ -219,11 +219,8 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
         if (market == null || market.isBlank()) {
             throw new IllegalArgumentException("market is required");
         }
-        String path = "/bbo";
-        String url = baseUrl + path;
-        HttpUrl.Builder urlBuilder = HttpUrl.parse(url).newBuilder();
-        urlBuilder.addQueryParameter("market", market.trim());
-        String newUrl = urlBuilder.build().toString();
+        String path = "/bbo/" + market.trim();
+        String newUrl = baseUrl + path;
 
         Request request = new Request.Builder().url(newUrl).get().build();
         logger.info("Request: " + request);

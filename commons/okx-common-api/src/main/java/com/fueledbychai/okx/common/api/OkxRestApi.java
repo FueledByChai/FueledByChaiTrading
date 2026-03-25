@@ -151,7 +151,7 @@ public class OkxRestApi implements IOkxRestApi {
         }
         Map<String, String> params = new LinkedHashMap<>();
         params.put("instId", instrumentId.trim());
-        return executeGet("api/v5/market/ticker", params);
+        return executeGet("market/ticker", params);
     }
 
     @Override
