@@ -142,6 +142,41 @@ public class LighterRestApi extends BaseRestApi implements ILighterRestApi {
     }
 
     @Override
+    public JsonObject getOrderBookBBO(int marketId) {
+        if (marketId < 0) {
+            throw new IllegalArgumentException("marketId must be >= 0");
+        }
+        return executeWithRetry(() -> {
+            String path = "/orderBook";
+            String url = baseUrl + path;
+            HttpUrl.Builder urlBuilder = HttpUrl.parse(url).newBuilder();
+            urlBuilder.addQueryParameter("market_id", Integer.toString(marketId));
+            urlBuilder.addQueryParameter("depth", "1");
+            String newUrl = urlBuilder.build().toString();
+
+            Request request = new Request.Builder().url(newUrl).get().build();
+            logger.info("Request: {}", request);
+
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    String error = response.body() == null ? "" : response.body().string();
+                    logger.error("Error response: {}", error);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                            response.code());
+                }
+
+                String responseBody = response.body().string();
+                logger.info("Response output: {}", responseBody);
+                return JsonParser.parseString(responseBody).getAsJsonObject();
+
+            } catch (IOException e) {
+                logger.error(e.getMessage(), e);
+                throw new ResponseException("Network error getting Lighter order book BBO: " + e.getMessage(), e);
+            }
+        }, 3, 500);
+    }
+
+    @Override
     public InstrumentDescriptor getInstrumentDescriptor(String symbol) {
         return executeWithRetry(() -> {
             String path = "/markets";

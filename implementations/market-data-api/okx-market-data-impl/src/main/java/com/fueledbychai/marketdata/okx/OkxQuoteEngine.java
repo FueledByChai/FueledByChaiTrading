@@ -16,9 +16,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.Level1Quote;
 import com.fueledbychai.marketdata.Level1QuoteListener;
 import com.fueledbychai.marketdata.Level2Quote;
@@ -131,6 +134,34 @@ public class OkxQuoteEngine extends QuoteEngine {
         fundingRateSubscriptions.clear();
         orderBookSubscriptions.clear();
         orderFlowSubscriptions.clear();
+    }
+
+    public ILevel1Quote requestLevel1Snapshot(Ticker ticker) {
+        if (ticker == null) {
+            throw new IllegalArgumentException("ticker is required");
+        }
+        String instrumentId = ticker.getSymbol();
+        JsonObject response = restApi.getTicker(instrumentId);
+        if (response == null) {
+            throw new IllegalStateException("No ticker data returned for " + instrumentId);
+        }
+        JsonArray data = response.has("data") && response.get("data").isJsonArray()
+                ? response.getAsJsonArray("data") : null;
+        if (data == null || data.isEmpty() || !data.get(0).isJsonObject()) {
+            throw new IllegalStateException("No ticker data returned for " + instrumentId);
+        }
+        JsonObject tickerData = data.get(0).getAsJsonObject();
+        ZonedDateTime now = ZonedDateTime.now(UTC);
+        Level1Quote quote = new Level1Quote(ticker, now);
+        BigDecimal bidPrice = parseDecimal(tickerData, "bidPx");
+        BigDecimal bidSize = parseDecimal(tickerData, "bidSz");
+        BigDecimal askPrice = parseDecimal(tickerData, "askPx");
+        BigDecimal askSize = parseDecimal(tickerData, "askSz");
+        if (bidPrice != null) quote.addQuote(QuoteType.BID, bidPrice);
+        if (bidSize != null) quote.addQuote(QuoteType.BID_SIZE, bidSize);
+        if (askPrice != null) quote.addQuote(QuoteType.ASK, askPrice);
+        if (askSize != null) quote.addQuote(QuoteType.ASK_SIZE, askSize);
+        return quote;
     }
 
     @Override
@@ -590,6 +621,21 @@ public class OkxQuoteEngine extends QuoteEngine {
         }
         if (listener == null) {
             throw new IllegalArgumentException("listener is required");
+        }
+    }
+
+    protected BigDecimal parseDecimal(JsonObject object, String key) {
+        if (object == null || key == null || !object.has(key) || object.get(key).isJsonNull()) {
+            return null;
+        }
+        String value = object.get(key).getAsString();
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return new BigDecimal(value);
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 }

@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.lighter.common.api.ILighterRestApi;
 import com.fueledbychai.lighter.common.api.ILighterWebSocketApi;
 import com.fueledbychai.lighter.common.api.ws.model.LighterMarketStats;
 import com.fueledbychai.lighter.common.api.ws.model.LighterMarketStatsUpdate;
@@ -26,6 +27,7 @@ import com.fueledbychai.lighter.common.api.ws.model.LighterOrderBookLevel;
 import com.fueledbychai.lighter.common.api.ws.model.LighterOrderBookUpdate;
 import com.fueledbychai.lighter.common.api.ws.model.LighterTrade;
 import com.fueledbychai.lighter.common.api.ws.model.LighterTradesUpdate;
+import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.Level1Quote;
 import com.fueledbychai.marketdata.Level1QuoteListener;
 import com.fueledbychai.marketdata.Level2Quote;
@@ -35,9 +37,14 @@ import com.fueledbychai.marketdata.OrderFlow;
 import com.fueledbychai.marketdata.OrderFlowListener;
 import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.QuoteType;
+import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.ExchangeWebSocketApiFactory;
 import com.fueledbychai.util.ITickerRegistry;
 import com.fueledbychai.util.TickerRegistryFactory;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 
 public class LighterQuoteEngine extends QuoteEngine {
 
@@ -51,6 +58,7 @@ public class LighterQuoteEngine extends QuoteEngine {
             InstrumentType.PERPETUAL_FUTURES, InstrumentType.CRYPTO_SPOT
     };
 
+    protected final ILighterRestApi restApi;
     protected final ILighterWebSocketApi webSocketApi;
     protected final ITickerRegistry tickerRegistry;
     protected final Map<Integer, Ticker> marketStatsTickerByMarketId = new ConcurrentHashMap<>();
@@ -64,17 +72,23 @@ public class LighterQuoteEngine extends QuoteEngine {
     protected volatile boolean started;
 
     public LighterQuoteEngine() {
-        this(ExchangeWebSocketApiFactory.getApi(Exchange.LIGHTER, ILighterWebSocketApi.class),
+        this(ExchangeRestApiFactory.getPublicApi(Exchange.LIGHTER, ILighterRestApi.class),
+                ExchangeWebSocketApiFactory.getApi(Exchange.LIGHTER, ILighterWebSocketApi.class),
                 TickerRegistryFactory.getInstance(Exchange.LIGHTER));
     }
 
-    protected LighterQuoteEngine(ILighterWebSocketApi webSocketApi, ITickerRegistry tickerRegistry) {
+    protected LighterQuoteEngine(ILighterRestApi restApi, ILighterWebSocketApi webSocketApi,
+            ITickerRegistry tickerRegistry) {
+        if (restApi == null) {
+            throw new IllegalArgumentException("restApi is required");
+        }
         if (webSocketApi == null) {
             throw new IllegalArgumentException("webSocketApi is required");
         }
         if (tickerRegistry == null) {
             throw new IllegalArgumentException("tickerRegistry is required");
         }
+        this.restApi = restApi;
         this.webSocketApi = webSocketApi;
         this.tickerRegistry = tickerRegistry;
     }
@@ -125,6 +139,69 @@ public class LighterQuoteEngine extends QuoteEngine {
     @Override
     public void useDelayedData(boolean useDelayed) {
         logger.warn("useDelayedData() is not supported for Lighter market data");
+    }
+
+    @Override
+    public ILevel1Quote requestLevel1Snapshot(Ticker ticker) {
+        if (ticker == null) {
+            throw new IllegalArgumentException("ticker is required");
+        }
+        int marketId = resolveMarketId(ticker);
+        JsonObject response = restApi.getOrderBookBBO(marketId);
+        if (response == null) {
+            throw new IllegalStateException("No order book data returned for market " + marketId);
+        }
+        ZonedDateTime now = ZonedDateTime.now(UTC);
+        Level1Quote quote = new Level1Quote(ticker, now);
+        JsonArray bids = getJsonArray(response, "bids");
+        JsonArray asks = getJsonArray(response, "asks");
+        if (bids != null && !bids.isEmpty()) {
+            JsonElement firstBid = bids.get(0);
+            if (firstBid.isJsonObject()) {
+                JsonObject bidObj = firstBid.getAsJsonObject();
+                BigDecimal bidPrice = readBigDecimal(bidObj, "price");
+                BigDecimal bidSize = readBigDecimal(bidObj, "size");
+                if (bidPrice != null) {
+                    quote.addQuote(QuoteType.BID, ticker.formatPrice(bidPrice));
+                }
+                if (bidSize != null) {
+                    quote.addQuote(QuoteType.BID_SIZE, bidSize);
+                }
+            }
+        }
+        if (asks != null && !asks.isEmpty()) {
+            JsonElement firstAsk = asks.get(0);
+            if (firstAsk.isJsonObject()) {
+                JsonObject askObj = firstAsk.getAsJsonObject();
+                BigDecimal askPrice = readBigDecimal(askObj, "price");
+                BigDecimal askSize = readBigDecimal(askObj, "size");
+                if (askPrice != null) {
+                    quote.addQuote(QuoteType.ASK, ticker.formatPrice(askPrice));
+                }
+                if (askSize != null) {
+                    quote.addQuote(QuoteType.ASK_SIZE, askSize);
+                }
+            }
+        }
+        return quote;
+    }
+
+    protected JsonArray getJsonArray(JsonObject object, String key) {
+        if (object == null || key == null || !object.has(key) || object.get(key).isJsonNull()) {
+            return null;
+        }
+        return object.get(key).isJsonArray() ? object.getAsJsonArray(key) : null;
+    }
+
+    protected BigDecimal readBigDecimal(JsonObject object, String key) {
+        if (object == null || key == null || !object.has(key) || object.get(key).isJsonNull()) {
+            return null;
+        }
+        try {
+            return new BigDecimal(object.get(key).getAsString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @Override

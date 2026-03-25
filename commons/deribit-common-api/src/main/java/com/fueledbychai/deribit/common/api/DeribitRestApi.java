@@ -121,6 +121,16 @@ public class DeribitRestApi implements IDeribitRestApi {
     }
 
     @Override
+    public JsonObject getTicker(String instrumentName) {
+        if (instrumentName == null || instrumentName.isBlank()) {
+            throw new IllegalArgumentException("instrumentName is required");
+        }
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("instrument_name", instrumentName.trim());
+        return executeGet("public/ticker", params);
+    }
+
+    @Override
     public boolean isPublicApiOnly() {
         return publicApiOnly;
     }

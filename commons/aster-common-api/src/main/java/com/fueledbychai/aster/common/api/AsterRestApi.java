@@ -236,6 +236,15 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
         return signedRequest(futuresBaseUrl, "GET", "/fapi/v4/account", null);
     }
 
+    @Override
+    public JsonNode getBookTicker(String symbol) {
+        LinkedHashMap<String, String> params = new LinkedHashMap<>();
+        if (symbol != null && !symbol.isBlank()) {
+            params.put("symbol", symbol);
+        }
+        return publicRequest(futuresBaseUrl, "GET", "/fapi/v1/ticker/bookTicker", params);
+    }
+
     protected InstrumentDescriptor[] loadInstrumentsForType(InstrumentType instrumentType) {
         String path = instrumentType == InstrumentType.CRYPTO_SPOT ? "/api/v1/exchangeInfo" : "/fapi/v1/exchangeInfo";
         JsonNode root = publicRequest(baseUrlFor(instrumentType), "GET", path, null);

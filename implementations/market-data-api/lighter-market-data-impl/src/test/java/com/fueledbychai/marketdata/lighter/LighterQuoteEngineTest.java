@@ -28,6 +28,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.lighter.common.api.ILighterRestApi;
 import com.fueledbychai.lighter.common.api.ILighterWebSocketApi;
 import com.fueledbychai.lighter.common.api.ws.model.LighterMarketStats;
 import com.fueledbychai.lighter.common.api.ws.model.LighterMarketStatsUpdate;
@@ -49,6 +50,9 @@ import com.fueledbychai.util.ITickerRegistry;
 public class LighterQuoteEngineTest {
 
     @Mock
+    private ILighterRestApi restApi;
+
+    @Mock
     private ILighterWebSocketApi webSocketApi;
 
     @Mock
@@ -65,7 +69,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void startStopEngine() {
-        LighterQuoteEngine engine = new LighterQuoteEngine(webSocketApi, tickerRegistry);
+        LighterQuoteEngine engine = new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry);
 
         engine.startEngine();
         assertTrue(engine.started());
@@ -79,7 +83,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void subscribeLevel1SubscribesMarketStatsAndOrderBookOnlyOncePerMarket() {
-        LighterQuoteEngine engine = new LighterQuoteEngine(webSocketApi, tickerRegistry);
+        LighterQuoteEngine engine = new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry);
         Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES);
 
         engine.subscribeLevel1(ticker, level1Listener);
@@ -92,7 +96,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void subscribeMarketDepthSubscribesOrderBookOnlyOncePerMarket() {
-        LighterQuoteEngine engine = new LighterQuoteEngine(webSocketApi, tickerRegistry);
+        LighterQuoteEngine engine = new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry);
         Ticker ticker = createTicker("ETH/USDC", "2048", InstrumentType.CRYPTO_SPOT);
 
         engine.subscribeMarketDepth(ticker, level2Listener);
@@ -104,7 +108,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void subscribeOrderFlowSubscribesTradesOnlyOncePerMarket() {
-        LighterQuoteEngine engine = new LighterQuoteEngine(webSocketApi, tickerRegistry);
+        LighterQuoteEngine engine = new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry);
         Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES);
 
         engine.subscribeOrderFlow(ticker, orderFlowListener);
@@ -116,7 +120,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void subscribeLevel1AcceptsZeroMarketIdFromTicker() {
-        LighterQuoteEngine engine = new LighterQuoteEngine(webSocketApi, tickerRegistry);
+        LighterQuoteEngine engine = new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry);
         Ticker ticker = createTicker("ETH/USDC", "0", InstrumentType.CRYPTO_SPOT);
 
         engine.subscribeLevel1(ticker, level1Listener);
@@ -127,7 +131,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void subscribeLevel1ResolvesMarketIdFromTickerRegistry() {
-        LighterQuoteEngine engine = new LighterQuoteEngine(webSocketApi, tickerRegistry);
+        LighterQuoteEngine engine = new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry);
         Ticker inputTicker = createTicker("BTC/USDC", null, InstrumentType.PERPETUAL_FUTURES);
         Ticker canonicalTicker = createTicker("BTC", "7", InstrumentType.PERPETUAL_FUTURES)
                 .setMinimumTickSize(new BigDecimal("0.1"))
@@ -146,7 +150,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void subscribeLevel1ResolvesZeroMarketIdFromTickerRegistry() {
-        LighterQuoteEngine engine = new LighterQuoteEngine(webSocketApi, tickerRegistry);
+        LighterQuoteEngine engine = new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry);
         Ticker inputTicker = createTicker("ETH/USDC", null, InstrumentType.CRYPTO_SPOT);
         Ticker canonicalTicker = createTicker("ETH/USDC", "0", InstrumentType.CRYPTO_SPOT)
                 .setMinimumTickSize(new BigDecimal("0.01"))
@@ -164,7 +168,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void handleMarketStatsUpdateFiresLevel1Quote() {
-        LighterQuoteEngine engine = spy(new LighterQuoteEngine(webSocketApi, tickerRegistry));
+        LighterQuoteEngine engine = spy(new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry));
         AtomicReference<ILevel1Quote> capturedQuote = new AtomicReference<>();
         Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES).setFundingRateInterval(8);
         ZonedDateTime expectedTimestamp = ZonedDateTime.ofInstant(Instant.ofEpochMilli(1700000000123L),
@@ -208,7 +212,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void handleMarketStatsUpdateDoesNotUseLastFundingRateWhenCurrentMissing() {
-        LighterQuoteEngine engine = spy(new LighterQuoteEngine(webSocketApi, tickerRegistry));
+        LighterQuoteEngine engine = spy(new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry));
         AtomicReference<ILevel1Quote> capturedQuote = new AtomicReference<>();
         Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES).setFundingRateInterval(8);
 
@@ -235,7 +239,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void handleOrderBookUpdateFiresLevel1AndLevel2Quotes() {
-        LighterQuoteEngine engine = spy(new LighterQuoteEngine(webSocketApi, tickerRegistry));
+        LighterQuoteEngine engine = spy(new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry));
         AtomicReference<ILevel1Quote> capturedLevel1Quote = new AtomicReference<>();
         AtomicReference<ILevel2Quote> capturedLevel2Quote = new AtomicReference<>();
         Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES);
@@ -289,7 +293,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void handleOrderBookUpdateAppliesDeltaAfterSnapshot() {
-        LighterQuoteEngine engine = spy(new LighterQuoteEngine(webSocketApi, tickerRegistry));
+        LighterQuoteEngine engine = spy(new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry));
         AtomicReference<ILevel2Quote> capturedLevel2Quote = new AtomicReference<>();
         Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES);
 
@@ -338,7 +342,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void handleOrderBookUpdateRemovesLevelWhenSizeIsZero() {
-        LighterQuoteEngine engine = spy(new LighterQuoteEngine(webSocketApi, tickerRegistry));
+        LighterQuoteEngine engine = spy(new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry));
         AtomicReference<ILevel1Quote> capturedLevel1Quote = new AtomicReference<>();
         AtomicReference<ILevel2Quote> capturedLevel2Quote = new AtomicReference<>();
         Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES);
@@ -401,7 +405,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void handleOrderBookUpdateResetsStateOnNonceGap() {
-        LighterQuoteEngine engine = spy(new LighterQuoteEngine(webSocketApi, tickerRegistry));
+        LighterQuoteEngine engine = spy(new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry));
         AtomicReference<ILevel2Quote> capturedLevel2Quote = new AtomicReference<>();
         Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES);
 
@@ -450,7 +454,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void handleOrderBookUpdateSkipsStaleNonceUpdate() {
-        LighterQuoteEngine engine = spy(new LighterQuoteEngine(webSocketApi, tickerRegistry));
+        LighterQuoteEngine engine = spy(new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry));
         AtomicReference<ILevel2Quote> capturedLevel2Quote = new AtomicReference<>();
         Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES);
 
@@ -498,7 +502,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void handleOrderBookUpdateSkipsUnknownMarket() {
-        LighterQuoteEngine engine = spy(new LighterQuoteEngine(webSocketApi, tickerRegistry));
+        LighterQuoteEngine engine = spy(new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry));
 
         LighterOrderBookUpdate update = new LighterOrderBookUpdate(
                 "order_book/999",
@@ -518,7 +522,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void handleTradesUpdateFiresOrderFlow() {
-        LighterQuoteEngine engine = spy(new LighterQuoteEngine(webSocketApi, tickerRegistry));
+        LighterQuoteEngine engine = spy(new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry));
         AtomicReference<OrderFlow> capturedOrderFlow = new AtomicReference<>();
         Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES);
 
@@ -549,7 +553,7 @@ public class LighterQuoteEngineTest {
 
     @Test
     void handleTradesUpdateSkipsUnknownMarket() {
-        LighterQuoteEngine engine = spy(new LighterQuoteEngine(webSocketApi, tickerRegistry));
+        LighterQuoteEngine engine = spy(new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry));
 
         LighterTrade trade = new LighterTrade();
         trade.setMarketId(999);
