@@ -73,7 +73,7 @@ public class ParadexBrokerUtilTest {
                 .thenReturn(mockTicker);
 
         ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId,
-                remainingSize, originalSize, "NEW", "NONE", averageFillPrice, "LIMIT", "BUY", timestamp);
+                remainingSize, originalSize, "NEW", "NONE", averageFillPrice, null, "LIMIT", "BUY", timestamp);
 
         // Act
         OrderStatus result = translator.translateOrderStatus(orderUpdate);
@@ -105,7 +105,7 @@ public class ParadexBrokerUtilTest {
                 .thenReturn(mockTicker);
 
         ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId,
-                remainingSize, originalSize, "OPEN", "NONE", averageFillPrice, "MARKET", "SELL", timestamp);
+                remainingSize, originalSize, "OPEN", "NONE", averageFillPrice, null, "MARKET", "SELL", timestamp);
 
         // Act
         OrderStatus result = translator.translateOrderStatus(orderUpdate);
@@ -131,7 +131,7 @@ public class ParadexBrokerUtilTest {
                 .thenReturn(mockTicker);
 
         ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId,
-                remainingSize, originalSize, "CLOSED", "NONE", averageFillPrice, "LIMIT", "BUY", timestamp);
+                remainingSize, originalSize, "CLOSED", "NONE", averageFillPrice, null, "LIMIT", "BUY", timestamp);
 
         // Act
         OrderStatus result = translator.translateOrderStatus(orderUpdate);
@@ -157,7 +157,7 @@ public class ParadexBrokerUtilTest {
                 .thenReturn(mockTicker);
 
         ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId,
-                remainingSize, originalSize, "CLOSED", "USER_CANCELED", averageFillPrice, "STOP", "SELL", timestamp);
+                remainingSize, originalSize, "CLOSED", "USER_CANCELED", averageFillPrice, null, "STOP", "SELL", timestamp);
 
         // Act
         OrderStatus result = translator.translateOrderStatus(orderUpdate);
@@ -181,7 +181,7 @@ public class ParadexBrokerUtilTest {
                 .thenReturn(mockTicker);
 
         ParadoxOrderStatusUpdate orderUpdate = new ParadoxOrderStatusUpdate(tickerString, orderId, clientOrderId,
-                remainingSize, originalSize, "NEW", "NONE", averageFillPrice, "LIMIT", "BUY", 0L // Zero timestamp
+                remainingSize, originalSize, "NEW", "NONE", averageFillPrice, null, "LIMIT", "BUY", 0L // Zero timestamp
         );
 
         ZonedDateTime beforeCall = ZonedDateTime.now();
