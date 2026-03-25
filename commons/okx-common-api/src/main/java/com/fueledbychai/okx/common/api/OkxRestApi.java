@@ -145,6 +145,16 @@ public class OkxRestApi implements IOkxRestApi {
     }
 
     @Override
+    public JsonObject getTicker(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) {
+            throw new IllegalArgumentException("instrumentId is required");
+        }
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("instId", instrumentId.trim());
+        return executeGet("api/v5/market/ticker", params);
+    }
+
+    @Override
     public boolean isPublicApiOnly() {
         return publicApiOnly;
     }

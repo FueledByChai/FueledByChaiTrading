@@ -12,7 +12,9 @@ import java.util.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fueledbychai.binance.BinanceConfiguration;
+import com.fueledbychai.binance.IBinanceRestApi;
 import com.fueledbychai.binance.ws.BinanceWebSocketClient;
 import com.fueledbychai.binance.ws.BinanceWebSocketClientBuilder;
 import com.fueledbychai.binance.ws.aggtrade.AggTradeRecordProcessor;
@@ -25,6 +27,7 @@ import com.fueledbychai.binance.ws.symbolticker.SymbolTickerRecord;
 import com.fueledbychai.binance.ws.symbolticker.SymbolTickerRecordProcessor;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.Level1Quote;
 import com.fueledbychai.marketdata.Level1QuoteListener;
 import com.fueledbychai.marketdata.Level2Quote;
@@ -34,6 +37,7 @@ import com.fueledbychai.marketdata.OrderFlow;
 import com.fueledbychai.marketdata.OrderFlowListener;
 import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.QuoteType;
+import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.ITickerRegistry;
 import com.fueledbychai.util.TickerRegistryFactory;
 
@@ -51,16 +55,19 @@ public class BinanceQuoteEngine extends QuoteEngine {
     protected boolean includeFundingRate = true;
 
     protected ITickerRegistry tickerRegistry;
+    protected IBinanceRestApi restApi;
 
     public BinanceQuoteEngine() {
         this(BinanceConfiguration.getInstance().getWebSocketUrl(),
-                TickerRegistryFactory.getInstance(Exchange.BINANCE_SPOT));
+                TickerRegistryFactory.getInstance(Exchange.BINANCE_SPOT),
+                ExchangeRestApiFactory.getPublicApi(Exchange.BINANCE_SPOT, IBinanceRestApi.class));
     }
 
-    protected BinanceQuoteEngine(String wsUrl, ITickerRegistry tickerRegistry) {
+    protected BinanceQuoteEngine(String wsUrl, ITickerRegistry tickerRegistry, IBinanceRestApi restApi) {
         this.wsUrl = wsUrl;
         logger.info("Binance WebSocket URL: {}", wsUrl);
         this.tickerRegistry = tickerRegistry;
+        this.restApi = restApi;
     }
 
     @Override
@@ -102,6 +109,39 @@ public class BinanceQuoteEngine extends QuoteEngine {
     public void stopEngine() {
         started = false;
         // stopFundingRateUpdates();
+    }
+
+    public ILevel1Quote requestLevel1Snapshot(Ticker ticker) {
+        if (ticker == null) {
+            throw new IllegalArgumentException("ticker is required");
+        }
+        String symbol = ticker.getSymbol();
+        JsonNode response = restApi.getBookTicker(symbol);
+        if (response == null || response.isNull() || response.isMissingNode()) {
+            throw new IllegalStateException("No book ticker data returned for " + symbol);
+        }
+        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("UTC"));
+        Level1Quote quote = new Level1Quote(ticker, now);
+        BigDecimal bidPrice = decimalValue(response, "bidPrice");
+        BigDecimal bidQty = decimalValue(response, "bidQty");
+        BigDecimal askPrice = decimalValue(response, "askPrice");
+        BigDecimal askQty = decimalValue(response, "askQty");
+        if (bidPrice != null) quote.addQuote(QuoteType.BID, bidPrice);
+        if (bidQty != null) quote.addQuote(QuoteType.BID_SIZE, bidQty);
+        if (askPrice != null) quote.addQuote(QuoteType.ASK, askPrice);
+        if (askQty != null) quote.addQuote(QuoteType.ASK_SIZE, askQty);
+        return quote;
+    }
+
+    protected BigDecimal decimalValue(JsonNode message, String field) {
+        if (message == null || field == null) {
+            return null;
+        }
+        String value = message.path(field).asText("");
+        if (value.isBlank()) {
+            return null;
+        }
+        return new BigDecimal(value);
     }
 
     @Override

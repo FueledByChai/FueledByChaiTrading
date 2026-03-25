@@ -121,6 +121,18 @@ public class BinanceFuturesRestApi extends BaseRestApi implements IBinanceFuture
     }
 
     @Override
+    public JsonNode getBookTicker(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("symbol is required");
+        }
+        try {
+            return getJson(futuresBaseUrl, "/fapi/v1/ticker/bookTicker?symbol=" + symbol.trim());
+        } catch (IOException e) {
+            throw new RuntimeException("Unable to load book ticker for " + symbol, e);
+        }
+    }
+
+    @Override
     public boolean isPublicApiOnly() {
         return publicApiOnly;
     }

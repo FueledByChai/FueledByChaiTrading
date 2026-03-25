@@ -16,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fueledbychai.bybit.common.api.IBybitRestApi;
 import com.fueledbychai.bybit.common.api.IBybitWebSocketApi;
 import com.fueledbychai.bybit.common.api.ws.model.BybitOrderBookLevel;
 import com.fueledbychai.bybit.common.api.ws.model.BybitOrderBookUpdate;
@@ -31,11 +32,16 @@ import com.fueledbychai.marketdata.Level2QuoteListener;
 import com.fueledbychai.marketdata.OrderBook;
 import com.fueledbychai.marketdata.OrderFlow;
 import com.fueledbychai.marketdata.OrderFlowListener;
+import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.QuoteType;
+import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.ExchangeWebSocketApiFactory;
 import com.fueledbychai.util.ITickerRegistry;
 import com.fueledbychai.util.TickerRegistryFactory;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 
 public class BybitQuoteEngine extends QuoteEngine {
 
@@ -50,6 +56,7 @@ public class BybitQuoteEngine extends QuoteEngine {
     protected static final InstrumentType[] SUPPORTED_TYPES = new InstrumentType[] { InstrumentType.CRYPTO_SPOT,
             InstrumentType.PERPETUAL_FUTURES, InstrumentType.FUTURES, InstrumentType.OPTION };
 
+    protected final IBybitRestApi restApi;
     protected final IBybitWebSocketApi webSocketApi;
     protected final ITickerRegistry tickerRegistry;
 
@@ -64,17 +71,22 @@ public class BybitQuoteEngine extends QuoteEngine {
     protected volatile boolean started;
 
     public BybitQuoteEngine() {
-        this(ExchangeWebSocketApiFactory.getApi(Exchange.BYBIT, IBybitWebSocketApi.class),
+        this(ExchangeRestApiFactory.getPublicApi(Exchange.BYBIT, IBybitRestApi.class),
+                ExchangeWebSocketApiFactory.getApi(Exchange.BYBIT, IBybitWebSocketApi.class),
                 TickerRegistryFactory.getInstance(Exchange.BYBIT));
     }
 
-    protected BybitQuoteEngine(IBybitWebSocketApi webSocketApi, ITickerRegistry tickerRegistry) {
+    protected BybitQuoteEngine(IBybitRestApi restApi, IBybitWebSocketApi webSocketApi, ITickerRegistry tickerRegistry) {
+        if (restApi == null) {
+            throw new IllegalArgumentException("restApi is required");
+        }
         if (webSocketApi == null) {
             throw new IllegalArgumentException("webSocketApi is required");
         }
         if (tickerRegistry == null) {
             throw new IllegalArgumentException("tickerRegistry is required");
         }
+        this.restApi = restApi;
         this.webSocketApi = webSocketApi;
         this.tickerRegistry = tickerRegistry;
     }
@@ -125,6 +137,84 @@ public class BybitQuoteEngine extends QuoteEngine {
     @Override
     public void useDelayedData(boolean useDelayed) {
         logger.warn("useDelayedData() is not supported for Bybit market data");
+    }
+
+    @Override
+    public ILevel1Quote requestLevel1Snapshot(Ticker ticker) {
+        if (ticker == null) {
+            throw new IllegalArgumentException("ticker is required");
+        }
+        String symbol = ticker.getSymbol();
+        String category = resolveBybitCategory(ticker);
+        JsonObject response = restApi.getTicker(category, symbol);
+        if (response == null) {
+            throw new IllegalStateException("No ticker data returned for " + symbol);
+        }
+        JsonObject result = getJsonObject(response, "result");
+        JsonArray list = result == null ? null : getJsonArray(result, "list");
+        if (list == null || list.isEmpty()) {
+            throw new IllegalStateException("No ticker list in response for " + symbol);
+        }
+        JsonObject tickerData = list.get(0).getAsJsonObject();
+        ZonedDateTime now = ZonedDateTime.now(UTC);
+        Level1Quote quote = new Level1Quote(ticker, now);
+        BigDecimal bidPrice = getBigDecimalField(tickerData, "bid1Price");
+        BigDecimal bidSize = getBigDecimalField(tickerData, "bid1Size");
+        BigDecimal askPrice = getBigDecimalField(tickerData, "ask1Price");
+        BigDecimal askSize = getBigDecimalField(tickerData, "ask1Size");
+        if (bidPrice != null) {
+            quote.addQuote(QuoteType.BID, ticker.formatPrice(bidPrice));
+        }
+        if (bidSize != null) {
+            quote.addQuote(QuoteType.BID_SIZE, bidSize);
+        }
+        if (askPrice != null) {
+            quote.addQuote(QuoteType.ASK, ticker.formatPrice(askPrice));
+        }
+        if (askSize != null) {
+            quote.addQuote(QuoteType.ASK_SIZE, askSize);
+        }
+        return quote;
+    }
+
+    protected String resolveBybitCategory(Ticker ticker) {
+        if (ticker.getInstrumentType() == null) {
+            return "linear";
+        }
+        return switch (ticker.getInstrumentType()) {
+            case CRYPTO_SPOT -> "spot";
+            case OPTION -> "option";
+            default -> "linear";
+        };
+    }
+
+    protected JsonObject getJsonObject(JsonObject object, String key) {
+        if (object == null || key == null || !object.has(key) || object.get(key).isJsonNull()) {
+            return null;
+        }
+        return object.get(key).isJsonObject() ? object.getAsJsonObject(key) : null;
+    }
+
+    protected JsonArray getJsonArray(JsonObject object, String key) {
+        if (object == null || key == null || !object.has(key) || object.get(key).isJsonNull()) {
+            return null;
+        }
+        return object.get(key).isJsonArray() ? object.getAsJsonArray(key) : null;
+    }
+
+    protected BigDecimal getBigDecimalField(JsonObject object, String key) {
+        if (object == null || key == null || !object.has(key) || object.get(key).isJsonNull()) {
+            return null;
+        }
+        String value = object.get(key).getAsString();
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return new BigDecimal(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @Override

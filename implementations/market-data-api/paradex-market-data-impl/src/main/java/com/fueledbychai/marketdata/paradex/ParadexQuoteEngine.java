@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.paradex.common.api.IParadexRestApi;
 import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.IOrderBook;
 import com.fueledbychai.marketdata.Level1Quote;
@@ -26,8 +27,11 @@ import com.fueledbychai.marketdata.OrderFlow;
 import com.fueledbychai.marketdata.OrderFlowListener;
 import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.QuoteType;
+import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.ITickerRegistry;
 import com.fueledbychai.util.TickerRegistryFactory;
+
+import com.google.gson.JsonObject;
 
 public class ParadexQuoteEngine extends QuoteEngine
         implements OrderBookUpdateListener, TradesUpdateListener, MarketsSummaryUpdateListener {
@@ -37,16 +41,22 @@ public class ParadexQuoteEngine extends QuoteEngine
     protected Map<Ticker, MarketsSummaryWebSocketClient> marketsSummaryClients = new HashMap<>();
 
     protected boolean started = false;
+    protected final IParadexRestApi restApi;
     protected ITickerRegistry tickerRegistry;
 
     public ParadexQuoteEngine() {
-        this(TickerRegistryFactory.getInstance(Exchange.PARADEX));
+        this(ExchangeRestApiFactory.getPublicApi(Exchange.PARADEX, IParadexRestApi.class),
+                TickerRegistryFactory.getInstance(Exchange.PARADEX));
     }
 
-    protected ParadexQuoteEngine(ITickerRegistry tickerRegistry) {
+    protected ParadexQuoteEngine(IParadexRestApi restApi, ITickerRegistry tickerRegistry) {
+        if (restApi == null) {
+            throw new IllegalArgumentException("restApi is required");
+        }
         if (tickerRegistry == null) {
             throw new IllegalArgumentException("tickerRegistry is required");
         }
+        this.restApi = restApi;
         this.tickerRegistry = tickerRegistry;
     }
 
@@ -92,6 +102,48 @@ public class ParadexQuoteEngine extends QuoteEngine
     public void useDelayedData(boolean useDelayed) {
         // Not implemented for Paradex
 
+    }
+
+    @Override
+    public ILevel1Quote requestLevel1Snapshot(Ticker ticker) {
+        if (ticker == null) {
+            throw new IllegalArgumentException("ticker is required");
+        }
+        String market = ticker.getSymbol();
+        JsonObject response = restApi.getBBO(market);
+        if (response == null) {
+            throw new IllegalStateException("No BBO data returned for " + market);
+        }
+        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("UTC"));
+        Level1Quote quote = new Level1Quote(ticker, now);
+        BigDecimal bidPrice = getBigDecimalField(response, "bid");
+        BigDecimal bidSize = getBigDecimalField(response, "bid_size");
+        BigDecimal askPrice = getBigDecimalField(response, "ask");
+        BigDecimal askSize = getBigDecimalField(response, "ask_size");
+        if (bidPrice != null) {
+            quote.addQuote(QuoteType.BID, ticker.formatPrice(bidPrice));
+        }
+        if (bidSize != null) {
+            quote.addQuote(QuoteType.BID_SIZE, bidSize);
+        }
+        if (askPrice != null) {
+            quote.addQuote(QuoteType.ASK, ticker.formatPrice(askPrice));
+        }
+        if (askSize != null) {
+            quote.addQuote(QuoteType.ASK_SIZE, askSize);
+        }
+        return quote;
+    }
+
+    protected BigDecimal getBigDecimalField(JsonObject object, String key) {
+        if (object == null || key == null || !object.has(key) || object.get(key).isJsonNull()) {
+            return null;
+        }
+        try {
+            return new BigDecimal(object.get(key).getAsString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @Override

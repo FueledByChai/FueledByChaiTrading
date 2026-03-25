@@ -22,6 +22,7 @@ import com.fueledbychai.aster.common.api.IAsterWebSocketApi;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.Level1Quote;
 import com.fueledbychai.marketdata.Level1QuoteListener;
 import com.fueledbychai.marketdata.Level2Quote;
@@ -146,6 +147,35 @@ public class AsterQuoteEngine extends QuoteEngine {
         if (startStream) {
             startTradeStream(ticker);
         }
+    }
+
+    @Override
+    public ILevel1Quote requestLevel1Snapshot(Ticker ticker) {
+        requireTicker(ticker);
+        String symbol = ticker.getSymbol();
+        JsonNode response = restApi.getBookTicker(symbol);
+        if (response == null || response.isNull() || response.isMissingNode()) {
+            throw new IllegalStateException("No book ticker data returned for " + symbol);
+        }
+        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("UTC"));
+        Level1Quote quote = new Level1Quote(ticker, now);
+        BigDecimal bidPrice = decimalValue(response, "bidPrice");
+        BigDecimal bidQty = decimalValue(response, "bidQty");
+        BigDecimal askPrice = decimalValue(response, "askPrice");
+        BigDecimal askQty = decimalValue(response, "askQty");
+        if (bidPrice != null) {
+            quote.addQuote(QuoteType.BID, bidPrice);
+        }
+        if (bidQty != null) {
+            quote.addQuote(QuoteType.BID_SIZE, bidQty);
+        }
+        if (askPrice != null) {
+            quote.addQuote(QuoteType.ASK, askPrice);
+        }
+        if (askQty != null) {
+            quote.addQuote(QuoteType.ASK_SIZE, askQty);
+        }
+        return quote;
     }
 
     @Override

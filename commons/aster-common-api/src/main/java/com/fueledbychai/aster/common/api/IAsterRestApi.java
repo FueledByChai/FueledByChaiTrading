@@ -95,4 +95,12 @@ public interface IAsterRestApi {
      * margin totals.
      */
     JsonNode getAccountInformation();
+
+    /**
+     * Returns the current best bid/offer for a symbol.
+     *
+     * @param symbol the exchange symbol (e.g. "BTCUSDT")
+     * @return JSON with bidPrice, bidQty, askPrice, askQty
+     */
+    JsonNode getBookTicker(String symbol);
 }

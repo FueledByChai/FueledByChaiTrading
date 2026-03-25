@@ -22,6 +22,7 @@ import org.slf4j.LoggerFactory;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.deribit.common.api.IDeribitRestApi;
 import com.fueledbychai.deribit.common.api.IDeribitWebSocketApi;
 import com.fueledbychai.deribit.common.api.ws.model.DeribitBookLevel;
 import com.fueledbychai.deribit.common.api.ws.model.DeribitBookUpdate;
@@ -34,11 +35,15 @@ import com.fueledbychai.marketdata.Level2QuoteListener;
 import com.fueledbychai.marketdata.OrderBook;
 import com.fueledbychai.marketdata.OrderFlow;
 import com.fueledbychai.marketdata.OrderFlowListener;
+import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.QuoteType;
+import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.ExchangeWebSocketApiFactory;
 import com.fueledbychai.util.ITickerRegistry;
 import com.fueledbychai.util.TickerRegistryFactory;
+
+import com.google.gson.JsonObject;
 
 public class DeribitQuoteEngine extends QuoteEngine {
 
@@ -53,6 +58,7 @@ public class DeribitQuoteEngine extends QuoteEngine {
             InstrumentType.CRYPTO_SPOT, InstrumentType.PERPETUAL_FUTURES, InstrumentType.OPTION
     };
 
+    protected final IDeribitRestApi restApi;
     protected final IDeribitWebSocketApi webSocketApi;
     protected final ITickerRegistry tickerRegistry;
     protected final Map<String, Ticker> level1TickersBySymbol = new ConcurrentHashMap<>();
@@ -66,17 +72,23 @@ public class DeribitQuoteEngine extends QuoteEngine {
     protected volatile boolean started;
 
     public DeribitQuoteEngine() {
-        this(ExchangeWebSocketApiFactory.getApi(Exchange.DERIBIT, IDeribitWebSocketApi.class),
+        this(ExchangeRestApiFactory.getPublicApi(Exchange.DERIBIT, IDeribitRestApi.class),
+                ExchangeWebSocketApiFactory.getApi(Exchange.DERIBIT, IDeribitWebSocketApi.class),
                 TickerRegistryFactory.getInstance(Exchange.DERIBIT));
     }
 
-    protected DeribitQuoteEngine(IDeribitWebSocketApi webSocketApi, ITickerRegistry tickerRegistry) {
+    protected DeribitQuoteEngine(IDeribitRestApi restApi, IDeribitWebSocketApi webSocketApi,
+            ITickerRegistry tickerRegistry) {
+        if (restApi == null) {
+            throw new IllegalArgumentException("restApi is required");
+        }
         if (webSocketApi == null) {
             throw new IllegalArgumentException("webSocketApi is required");
         }
         if (tickerRegistry == null) {
             throw new IllegalArgumentException("tickerRegistry is required");
         }
+        this.restApi = restApi;
         this.webSocketApi = webSocketApi;
         this.tickerRegistry = tickerRegistry;
     }
@@ -127,6 +139,53 @@ public class DeribitQuoteEngine extends QuoteEngine {
     @Override
     public void useDelayedData(boolean useDelayed) {
         logger.warn("useDelayedData() is not supported for Deribit market data");
+    }
+
+    @Override
+    public ILevel1Quote requestLevel1Snapshot(Ticker ticker) {
+        if (ticker == null) {
+            throw new IllegalArgumentException("ticker is required");
+        }
+        String instrumentName = ticker.getSymbol();
+        JsonObject response = restApi.getTicker(instrumentName);
+        if (response == null) {
+            throw new IllegalStateException("No ticker data returned for " + instrumentName);
+        }
+        JsonObject result = response.has("result") && response.get("result").isJsonObject()
+                ? response.getAsJsonObject("result") : null;
+        if (result == null) {
+            throw new IllegalStateException("No result in ticker response for " + instrumentName);
+        }
+        ZonedDateTime now = ZonedDateTime.now(UTC);
+        Level1Quote quote = new Level1Quote(ticker, now);
+        BigDecimal bidPrice = getBigDecimalFromJson(result, "best_bid_price");
+        BigDecimal bidAmount = getBigDecimalFromJson(result, "best_bid_amount");
+        BigDecimal askPrice = getBigDecimalFromJson(result, "best_ask_price");
+        BigDecimal askAmount = getBigDecimalFromJson(result, "best_ask_amount");
+        if (bidPrice != null) {
+            quote.addQuote(QuoteType.BID, ticker.formatPrice(bidPrice));
+        }
+        if (bidAmount != null) {
+            quote.addQuote(QuoteType.BID_SIZE, bidAmount);
+        }
+        if (askPrice != null) {
+            quote.addQuote(QuoteType.ASK, ticker.formatPrice(askPrice));
+        }
+        if (askAmount != null) {
+            quote.addQuote(QuoteType.ASK_SIZE, askAmount);
+        }
+        return quote;
+    }
+
+    protected BigDecimal getBigDecimalFromJson(JsonObject object, String key) {
+        if (object == null || key == null || !object.has(key) || object.get(key).isJsonNull()) {
+            return null;
+        }
+        try {
+            return new BigDecimal(object.get(key).getAsString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @Override

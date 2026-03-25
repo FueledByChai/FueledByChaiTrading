@@ -4,7 +4,21 @@
       "Bash(mvn compiler:*)",
       "WebSearch",
       "WebFetch(domain:docs.asterdex.com)",
-      "Bash(mvn test-compile)"
+      "Bash(mvn test-compile)",
+      "Bash(mvn compile:*)",
+      "Bash(git merge:*)",
+      "Bash(git -C /Users/robterpilowski/Code/JavaProjects/FueledByChaiTrading/.claude/worktrees/agent-a28279d1 log --oneline -5)",
+      "Bash(git -C /Users/robterpilowski/Code/JavaProjects/FueledByChaiTrading/.claude/worktrees/agent-a28279d1 diff HEAD --stat)",
+      "Bash(WORKTREE=/Users/robterpilowski/Code/JavaProjects/FueledByChaiTrading/.claude/worktrees/agent-a28279d1)",
+      "Bash(MAIN=/Users/robterpilowski/Code/JavaProjects/FueledByChaiTrading)",
+      "Bash(git -C \"$WORKTREE\" diff HEAD --name-only)",
+      "Bash(while read:*)",
+      "Bash(do cp:*)",
+      "Bash(done)",
+      "Bash(git -C /Users/robterpilowski/Code/JavaProjects/FueledByChaiTrading/.claude/worktrees/agent-a8b1afcf diff HEAD --stat)",
+      "Bash(git -C /Users/robterpilowski/Code/JavaProjects/FueledByChaiTrading/.claude/worktrees/agent-a8b1afcf diff HEAD --name-only)",
+      "Bash(WORKTREE=/Users/robterpilowski/Code/JavaProjects/FueledByChaiTrading/.claude/worktrees/agent-a8b1afcf)",
+      "Bash(mvn test-compile:*)"
     ]
   }
 }

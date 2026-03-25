@@ -8,6 +8,7 @@ import java.time.format.DateTimeFormatter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fueledbychai.binance.model.BinanceInstrumentDescriptorResult;
 import com.fueledbychai.data.InstrumentType;
@@ -105,6 +106,32 @@ public class BinanceRestApi extends BaseRestApi implements IBinanceRestApi {
             logger.error(e.getMessage(), e);
 
             throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public JsonNode getBookTicker(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("symbol is required");
+        }
+        String path = "/ticker/bookTicker?symbol=" + symbol.trim();
+        String url = baseUrl + path;
+        HttpUrl parsedUrl = HttpUrl.parse(url);
+        if (parsedUrl == null) {
+            throw new IllegalArgumentException("Invalid URL for path " + path);
+        }
+        Request request = new Request.Builder().url(parsedUrl).get().build();
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                String body = response.body() != null ? response.body().string() : "";
+                throw new IOException("Unexpected Binance response " + response.code() + ": " + body);
+            }
+            if (response.body() == null) {
+                throw new IOException("Empty Binance response");
+            }
+            return objectMapper.readTree(response.body().string());
+        } catch (IOException e) {
+            throw new RuntimeException("Unable to load book ticker for " + symbol, e);
         }
     }
 

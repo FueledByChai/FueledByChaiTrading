@@ -18,14 +18,17 @@ import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.ILevel1Quote;
 import com.fueledbychai.marketdata.Level1QuoteListener;
 import com.fueledbychai.marketdata.QuoteType;
+import com.fueledbychai.paradex.common.api.IParadexRestApi;
 import com.fueledbychai.util.ITickerRegistry;
+
+import static org.mockito.Mockito.mock;
 
 class ParadexQuoteEngineTest {
 
     @Test
     void newSummaryUpdateSpotWithEmptyFundingRatePublishesQuote() throws Exception {
         Ticker spotTicker = newTicker("ETH-USD", InstrumentType.CRYPTO_SPOT, "0.01", 0);
-        ParadexQuoteEngine engine = new ParadexQuoteEngine(registryWith(null, spotTicker));
+        ParadexQuoteEngine engine = new ParadexQuoteEngine(mock(IParadexRestApi.class), registryWith(null, spotTicker));
         ILevel1Quote quote = captureNextLevel1Quote(engine, () -> engine.newSummaryUpdate(1771375190278L, "ETH-USD",
                 "1992.9", "1994.45", "1991.76", "1994.62", "0", "329825.6947310004", "1994.62", ""));
 
@@ -38,7 +41,7 @@ class ParadexQuoteEngineTest {
     @Test
     void newSummaryUpdatePerpWithFundingRatePublishesFundingQuotes() throws Exception {
         Ticker perpTicker = newTicker("ETH-USD-PERP", InstrumentType.PERPETUAL_FUTURES, "0.01", 8);
-        ParadexQuoteEngine engine = new ParadexQuoteEngine(registryWith(perpTicker, null));
+        ParadexQuoteEngine engine = new ParadexQuoteEngine(mock(IParadexRestApi.class), registryWith(perpTicker, null));
         ILevel1Quote quote = captureNextLevel1Quote(engine,
                 () -> engine.newSummaryUpdate(1771375190278L, "ETH-USD-PERP", "1992.9", "1994.45", "1991.76",
                         "1994.62", "12.5", "329825.6947310004", "1994.62", "0.0008"));

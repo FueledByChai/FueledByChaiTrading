@@ -1,5 +1,6 @@
 package com.fueledbychai.okx.common.api;
 
+import com.google.gson.JsonObject;
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.okx.common.api.ws.model.OkxFundingRateUpdate;
@@ -36,6 +37,14 @@ public interface IOkxRestApi {
      * @return the latest funding-rate snapshot, or {@code null} when unavailable
      */
     OkxFundingRateUpdate getFundingRate(String instrumentId);
+
+    /**
+     * Returns the ticker (BBO) data for the given instrument.
+     *
+     * @param instrumentId the OKX instrument id, for example {@code BTC-USDT-SWAP}
+     * @return the full JSON response envelope containing the ticker data
+     */
+    JsonObject getTicker(String instrumentId);
 
     /**
      * Indicates whether this API instance was created without private

@@ -397,4 +397,10 @@ public abstract class QuoteEngine implements IQuoteEngine {
     public boolean isShutdown() {
         return quoteExecutor == null || quoteExecutor.isShutdown();
     }
+
+    @Override
+    public ILevel1Quote requestLevel1Snapshot(Ticker ticker) {
+        throw new UnsupportedOperationException(
+                getDataProviderName() + " does not support requestLevel1Snapshot");
+    }
 }

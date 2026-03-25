@@ -2,6 +2,7 @@ package com.fueledbychai.deribit.common.api;
 
 import com.fueledbychai.data.InstrumentDescriptor;
 import com.fueledbychai.data.InstrumentType;
+import com.google.gson.JsonObject;
 
 /**
  * Public REST contract for the Deribit exchange integration.
@@ -27,6 +28,17 @@ public interface IDeribitRestApi {
      * @return the resolved descriptor, or {@code null} when unavailable
      */
     InstrumentDescriptor getInstrumentDescriptor(String symbol);
+
+    /**
+     * Returns the public ticker snapshot for the given instrument name.
+     *
+     * The response contains best bid/ask prices and amounts as well as other
+     * market statistics provided by the Deribit {@code public/ticker} endpoint.
+     *
+     * @param instrumentName the Deribit instrument name (e.g. {@code BTC-PERPETUAL})
+     * @return the parsed JSON response object
+     */
+    JsonObject getTicker(String instrumentName);
 
     /**
      * Indicates whether this API instance was created without private
