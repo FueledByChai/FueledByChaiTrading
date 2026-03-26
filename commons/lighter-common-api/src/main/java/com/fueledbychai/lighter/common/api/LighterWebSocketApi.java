@@ -2,6 +2,8 @@ package com.fueledbychai.lighter.common.api;
 
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -21,6 +23,7 @@ import org.slf4j.LoggerFactory;
 
 import com.fueledbychai.lighter.common.api.ws.listener.ILighterMarketStatsListener;
 import com.fueledbychai.lighter.common.api.ws.listener.ILighterOrderBookListener;
+import com.fueledbychai.lighter.common.api.ws.listener.ILighterTickerListener;
 import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountAllTradesListener;
 import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountOrdersListener;
 import com.fueledbychai.lighter.common.api.ws.listener.ILighterAccountStatsListener;
@@ -37,6 +40,8 @@ import com.fueledbychai.lighter.common.api.ws.processor.LighterAccountAllTradesW
 import com.fueledbychai.lighter.common.api.ws.processor.LighterAccountOrdersWebSocketProcessor;
 import com.fueledbychai.lighter.common.api.ws.processor.LighterAccountStatsWebSocketProcessor;
 import com.fueledbychai.lighter.common.api.ws.processor.LighterMarketStatsWebSocketProcessor;
+import com.fueledbychai.lighter.common.api.ws.processor.LighterMultiplexingProcessor;
+import com.fueledbychai.lighter.common.api.ws.processor.LighterTickerWebSocketProcessor;
 import com.fueledbychai.lighter.common.api.ws.processor.LighterOrderBookWebSocketProcessor;
 import com.fueledbychai.lighter.common.api.ws.processor.LighterTradesWebSocketProcessor;
 import com.fueledbychai.lighter.common.api.ws.client.LighterWSClientBuilder;
@@ -63,16 +68,18 @@ public class LighterWebSocketApi
     private static final long DEFAULT_TX_CONNECT_TIMEOUT_MILLIS = 5_000L;
     private static final long DEFAULT_SUBSCRIBE_TIMEOUT_MILLIS = 5_000L;
     private static final long DEFAULT_WS_AUTH_TOKEN_TTL_SECONDS = 600L;
-    private static final int DEFAULT_MAX_CONNECT_ATTEMPTS_PER_MINUTE = 50;
+    private static final int DEFAULT_MAX_CONNECT_ATTEMPTS_PER_MINUTE = 80;
     private static final long DEFAULT_CONNECT_ATTEMPT_WINDOW_MILLIS = 60_000L;
+    private static final int MAX_SUBSCRIPTIONS_PER_SHARED_CLIENT = 99;
 
     protected enum ChannelType {
-        MARKET_STATS, ORDER_BOOK, TRADE, ACCOUNT_ALL_TRADES, ACCOUNT_ORDERS, ACCOUNT_STATS
+        MARKET_STATS, TICKER, ORDER_BOOK, TRADE, ACCOUNT_ALL_TRADES, ACCOUNT_ORDERS, ACCOUNT_STATS
     }
 
     private final String webSocketUrl;
     private final Map<String, LighterWebSocketClient> channelClients = new ConcurrentHashMap<>();
     private final Map<String, LighterMarketStatsWebSocketProcessor> marketStatsProcessors = new ConcurrentHashMap<>();
+    private final Map<String, LighterTickerWebSocketProcessor> tickerProcessors = new ConcurrentHashMap<>();
     private final Map<String, LighterOrderBookWebSocketProcessor> orderBookProcessors = new ConcurrentHashMap<>();
     private final Map<String, LighterTradesWebSocketProcessor> tradeProcessors = new ConcurrentHashMap<>();
     private final Map<String, LighterAccountAllTradesWebSocketProcessor> accountAllTradesProcessors = new ConcurrentHashMap<>();
@@ -101,21 +108,30 @@ public class LighterWebSocketApi
     private volatile ScheduledFuture<?> txReconnectTask;
     private final AtomicInteger txReconnectAttempts = new AtomicInteger(0);
     private volatile boolean maintainTxConnection;
+    private final boolean dedicatedMode;
+    private final List<SharedClientSlot> sharedClientSlots = new ArrayList<>();
+    private final Map<String, SharedClientSlot> channelToSharedSlot = new ConcurrentHashMap<>();
 
     public LighterWebSocketApi() {
-        this(LighterConfiguration.getInstance().getWebSocketUrl(), null);
+        this(LighterConfiguration.getInstance().getWebSocketUrl(), null,
+                LighterConfiguration.getInstance().isDedicatedWebSocketMode());
     }
 
     public LighterWebSocketApi(String webSocketUrl) {
-        this(webSocketUrl, null);
+        this(webSocketUrl, null, false);
     }
 
     public LighterWebSocketApi(String webSocketUrl, ILighterTransactionSigner orderSigner) {
+        this(webSocketUrl, orderSigner, false);
+    }
+
+    public LighterWebSocketApi(String webSocketUrl, ILighterTransactionSigner orderSigner, boolean dedicatedMode) {
         if (webSocketUrl == null || webSocketUrl.isBlank()) {
             throw new IllegalArgumentException("webSocketUrl is required");
         }
         this.webSocketUrl = webSocketUrl;
         this.orderSigner = orderSigner;
+        this.dedicatedMode = dedicatedMode;
     }
 
     @Override
@@ -130,6 +146,15 @@ public class LighterWebSocketApi
     @Override
     public LighterWebSocketClient subscribeAllMarketStats(ILighterMarketStatsListener listener) {
         return subscribeMarketStats(LighterWSClientBuilder.WS_TYPE_MARKET_STATS_ALL, listener);
+    }
+
+    @Override
+    public LighterWebSocketClient subscribeTicker(int marketId, ILighterTickerListener listener) {
+        if (marketId < 0) {
+            throw new IllegalArgumentException("marketId must be >= 0");
+        }
+        String channel = LighterWSClientBuilder.getTickerChannel(marketId);
+        return subscribeTicker(channel, listener);
     }
 
     @Override
@@ -283,12 +308,30 @@ public class LighterWebSocketApi
         LighterMarketStatsWebSocketProcessor processor = marketStatsProcessors.get(channel);
         if (processor == null) {
             processor = createMarketStatsProcessor(channel);
-            LighterWebSocketClient client = createClient(channel, processor);
             marketStatsProcessors.put(channel, processor);
-            channelClients.put(channel, client);
-            logger.info("Connecting to Lighter websocket channel: {} using {}", channel, webSocketUrl);
-            acquireConnectAttemptSlot("market stats/" + channel);
-            client.connect();
+            connectChannelProcessor(channel, processor, "market stats");
+        }
+
+        processor.addEventListener(listener);
+        return channelClients.get(channel);
+    }
+
+    protected synchronized LighterWebSocketClient subscribeTicker(String channel, ILighterTickerListener listener) {
+        if (channel == null || channel.isBlank()) {
+            throw new IllegalArgumentException("channel is required");
+        }
+        if (listener == null) {
+            throw new IllegalArgumentException("listener is required");
+        }
+        manualCloseChannels.remove(channel);
+        channelSubscribeAuth.remove(channel);
+        cancelReconnectTask(channel);
+
+        LighterTickerWebSocketProcessor processor = tickerProcessors.get(channel);
+        if (processor == null) {
+            processor = createTickerProcessor(channel);
+            tickerProcessors.put(channel, processor);
+            connectChannelProcessor(channel, processor, "ticker");
         }
 
         processor.addEventListener(listener);
@@ -309,16 +352,28 @@ public class LighterWebSocketApi
         LighterOrderBookWebSocketProcessor processor = orderBookProcessors.get(channel);
         if (processor == null) {
             processor = createOrderBookProcessor(channel);
-            LighterWebSocketClient client = createClient(channel, processor);
             orderBookProcessors.put(channel, processor);
-            channelClients.put(channel, client);
-            logger.info("Connecting to Lighter websocket channel: {} using {}", channel, webSocketUrl);
-            acquireConnectAttemptSlot("order book/" + channel);
-            client.connect();
+            connectChannelProcessor(channel, processor, "order book");
         }
 
         processor.addEventListener(listener);
         return channelClients.get(channel);
+    }
+
+    /**
+     * Connects a channel processor using either shared mode (multiple channels
+     * per socket, up to 99) or dedicated mode (one socket per channel).
+     */
+    protected void connectChannelProcessor(String channel, IWebSocketProcessor processor, String channelType) {
+        if (dedicatedMode) {
+            LighterWebSocketClient client = createClient(channel, processor);
+            channelClients.put(channel, client);
+            logger.info("Connecting to Lighter websocket channel: {} using {}", channel, webSocketUrl);
+            acquireConnectAttemptSlot(channelType + "/" + channel);
+            client.connect();
+        } else {
+            acquireSharedSlot(channel, processor);
+        }
     }
 
     protected synchronized LighterWebSocketClient subscribeTrades(String channel, ILighterTradeListener listener) {
@@ -549,6 +604,18 @@ public class LighterWebSocketApi
         accountOrdersChannelAccountIndex.clear();
         pendingChannelSubscribeResults.clear();
         wsAuthSigner = null;
+        for (SharedClientSlot slot : sharedClientSlots) {
+            if (slot.client != null) {
+                try {
+                    slot.client.close();
+                } catch (Exception e) {
+                    logger.error("Error closing shared websocket client", e);
+                }
+            }
+            slot.channels.clear();
+        }
+        sharedClientSlots.clear();
+        channelToSharedSlot.clear();
         manualCloseChannels.clear();
         recentConnectAttemptTimestamps.clear();
     }
@@ -556,6 +623,12 @@ public class LighterWebSocketApi
     protected LighterMarketStatsWebSocketProcessor createMarketStatsProcessor(String channel) {
         return new LighterMarketStatsWebSocketProcessor(() -> {
             handleChannelClosed(channel, ChannelType.MARKET_STATS);
+        });
+    }
+
+    protected LighterTickerWebSocketProcessor createTickerProcessor(String channel) {
+        return new LighterTickerWebSocketProcessor(() -> {
+            handleChannelClosed(channel, ChannelType.TICKER);
         });
     }
 
@@ -862,6 +935,7 @@ public class LighterWebSocketApi
     protected IWebSocketProcessor getProcessor(String channel, ChannelType type) {
         return switch (type) {
             case MARKET_STATS -> marketStatsProcessors.get(channel);
+            case TICKER -> tickerProcessors.get(channel);
             case ORDER_BOOK -> orderBookProcessors.get(channel);
             case TRADE -> tradeProcessors.get(channel);
             case ACCOUNT_ALL_TRADES -> accountAllTradesProcessors.get(channel);
@@ -1197,5 +1271,131 @@ public class LighterWebSocketApi
 
     protected ILighterTransactionSigner createOrderSigner(LighterConfiguration configuration) {
         return new LighterNativeTransactionSigner(configuration);
+    }
+
+    // ---- Shared-mode WebSocket pooling ----
+
+    protected synchronized SharedClientSlot acquireSharedSlot(String channel, IWebSocketProcessor processor) {
+        // Check if already assigned
+        SharedClientSlot existing = channelToSharedSlot.get(channel);
+        if (existing != null) {
+            return existing;
+        }
+
+        // Find a slot with capacity
+        for (SharedClientSlot slot : sharedClientSlots) {
+            if (slot.channels.size() < MAX_SUBSCRIPTIONS_PER_SHARED_CLIENT) {
+                slot.channels.add(channel);
+                slot.multiplexor.addProcessor(processor);
+                channelToSharedSlot.put(channel, slot);
+                channelClients.put(channel, slot.client);
+                sendSubscribeOnSharedClient(slot, channel);
+                return slot;
+            }
+        }
+
+        // No capacity — create a new shared client
+        SharedClientSlot slot = createSharedClientSlot();
+        slot.channels.add(channel);
+        slot.multiplexor.addProcessor(processor);
+        channelToSharedSlot.put(channel, slot);
+        sharedClientSlots.add(slot);
+        channelClients.put(channel, slot.client);
+        logger.info("Opening shared WebSocket #{} for channel: {} using {}", sharedClientSlots.size(), channel,
+                webSocketUrl);
+        acquireConnectAttemptSlot("shared/" + sharedClientSlots.size());
+        slot.client.connect();
+        return slot;
+    }
+
+    protected SharedClientSlot createSharedClientSlot() {
+        SharedClientSlot slot = new SharedClientSlot();
+        slot.multiplexor = new LighterMultiplexingProcessor(() -> handleSharedClientClosed(slot));
+        try {
+            slot.client = new LighterWebSocketClient(webSocketUrl, null, null, slot.multiplexor, false,
+                    () -> onSharedClientConnected(slot));
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to create shared Lighter websocket client", e);
+        }
+        return slot;
+    }
+
+    protected void onSharedClientConnected(SharedClientSlot slot) {
+        resetSharedSlotReconnectAttempts(slot);
+        for (String channel : slot.channels) {
+            try {
+                String msg = LighterWebSocketClient.buildSubscribeMessage(channel, null);
+                if (msg != null) {
+                    slot.client.send(msg);
+                }
+            } catch (Exception e) {
+                logger.warn("Failed to subscribe channel {} on shared client", channel, e);
+            }
+        }
+    }
+
+    protected void sendSubscribeOnSharedClient(SharedClientSlot slot, String channel) {
+        if (slot.client != null && slot.client.isOpen()) {
+            try {
+                String msg = LighterWebSocketClient.buildSubscribeMessage(channel, null);
+                if (msg != null) {
+                    slot.client.send(msg);
+                }
+            } catch (Exception e) {
+                logger.warn("Failed to send subscribe for channel {} on shared client", channel, e);
+            }
+        }
+    }
+
+    protected void handleSharedClientClosed(SharedClientSlot slot) {
+        logger.warn("Shared Lighter websocket closed with {} channels", slot.channels.size());
+        if (slot.channels.isEmpty() || manualCloseChannels.containsAll(slot.channels)) {
+            return;
+        }
+        scheduleSharedClientReconnect(slot);
+    }
+
+    protected void scheduleSharedClientReconnect(SharedClientSlot slot) {
+        int attempt = slot.reconnectAttempts.incrementAndGet();
+        long delay = calculateReconnectDelayMillis(attempt);
+        reconnectScheduler.schedule(() -> reconnectSharedClient(slot), delay, TimeUnit.MILLISECONDS);
+        logger.warn("Scheduled shared client reconnect (attempt {}) in {} ms for {} channels", attempt, delay,
+                slot.channels.size());
+    }
+
+    protected synchronized void reconnectSharedClient(SharedClientSlot slot) {
+        if (slot.channels.isEmpty() || manualCloseChannels.containsAll(slot.channels)) {
+            return;
+        }
+        try {
+            LighterWebSocketClient oldClient = slot.client;
+            if (oldClient != null) {
+                try {
+                    oldClient.close();
+                } catch (Exception ignored) {
+                }
+            }
+            slot.client = new LighterWebSocketClient(webSocketUrl, null, null, slot.multiplexor, false,
+                    () -> onSharedClientConnected(slot));
+            for (String ch : slot.channels) {
+                channelClients.put(ch, slot.client);
+            }
+            acquireConnectAttemptSlot("shared-reconnect");
+            slot.client.connect();
+        } catch (Exception e) {
+            logger.error("Shared client reconnect failed", e);
+            scheduleSharedClientReconnect(slot);
+        }
+    }
+
+    protected void resetSharedSlotReconnectAttempts(SharedClientSlot slot) {
+        slot.reconnectAttempts.set(0);
+    }
+
+    protected static class SharedClientSlot {
+        volatile LighterWebSocketClient client;
+        LighterMultiplexingProcessor multiplexor;
+        final Set<String> channels = ConcurrentHashMap.newKeySet();
+        final AtomicInteger reconnectAttempts = new AtomicInteger(0);
     }
 }

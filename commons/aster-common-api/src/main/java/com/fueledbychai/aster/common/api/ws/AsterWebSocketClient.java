@@ -52,11 +52,26 @@ public class AsterWebSocketClient extends AbstractWebSocketClient {
         }
     }
 
-    void sendCommand(String method, String param) {
+    public void sendCommand(String method, String param) {
         JsonObject commandJson = new JsonObject();
         commandJson.addProperty("method", method);
         JsonArray paramsArray = new JsonArray();
         paramsArray.add(param);
+        commandJson.add("params", paramsArray);
+        commandJson.addProperty("id", idCounter++);
+        send(commandJson.toString());
+    }
+
+    public void sendCommand(String method, java.util.Collection<String> params) {
+        if (params == null || params.isEmpty()) {
+            return;
+        }
+        JsonObject commandJson = new JsonObject();
+        commandJson.addProperty("method", method);
+        JsonArray paramsArray = new JsonArray();
+        for (String param : params) {
+            paramsArray.add(param);
+        }
         commandJson.add("params", paramsArray);
         commandJson.addProperty("id", idCounter++);
         send(commandJson.toString());

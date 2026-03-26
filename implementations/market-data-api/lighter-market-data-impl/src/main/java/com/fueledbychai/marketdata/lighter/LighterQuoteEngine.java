@@ -25,6 +25,7 @@ import com.fueledbychai.lighter.common.api.ws.model.LighterMarketStats;
 import com.fueledbychai.lighter.common.api.ws.model.LighterMarketStatsUpdate;
 import com.fueledbychai.lighter.common.api.ws.model.LighterOrderBookLevel;
 import com.fueledbychai.lighter.common.api.ws.model.LighterOrderBookUpdate;
+import com.fueledbychai.lighter.common.api.ws.model.LighterTickerUpdate;
 import com.fueledbychai.lighter.common.api.ws.model.LighterTrade;
 import com.fueledbychai.lighter.common.api.ws.model.LighterTradesUpdate;
 import com.fueledbychai.marketdata.ILevel1Quote;
@@ -66,9 +67,11 @@ public class LighterQuoteEngine extends QuoteEngine {
     protected final Map<Integer, Ticker> orderFlowTickerByMarketId = new ConcurrentHashMap<>();
     protected final Map<Integer, MarketOrderBookState> orderBookStateByMarketId = new ConcurrentHashMap<>();
     protected final Set<Integer> marketStatsSubscriptions = ConcurrentHashMap.newKeySet();
+    protected final Set<Integer> tickerSubscriptions = ConcurrentHashMap.newKeySet();
     protected final Set<Integer> orderBookSubscriptions = ConcurrentHashMap.newKeySet();
     protected final Set<Integer> orderFlowSubscriptions = ConcurrentHashMap.newKeySet();
 
+    protected volatile boolean allMarketStatsSubscribed;
     protected volatile boolean started;
 
     public LighterQuoteEngine() {
@@ -126,8 +129,10 @@ public class LighterQuoteEngine extends QuoteEngine {
     @Override
     public synchronized void stopEngine() {
         started = false;
+        allMarketStatsSubscribed = false;
         webSocketApi.disconnectAll();
         marketStatsSubscriptions.clear();
+        tickerSubscriptions.clear();
         orderBookSubscriptions.clear();
         orderFlowSubscriptions.clear();
         marketStatsTickerByMarketId.clear();
@@ -209,13 +214,13 @@ public class LighterQuoteEngine extends QuoteEngine {
         validateTickerAndListener(ticker, listener);
         int marketId = resolveMarketId(ticker);
         marketStatsTickerByMarketId.put(marketId, ticker);
-        orderBookTickerByMarketId.put(marketId, ticker);
 
-        if (marketStatsSubscriptions.add(marketId)) {
-            webSocketApi.subscribeMarketStats(marketId, this::handleMarketStatsUpdate);
+        if (!allMarketStatsSubscribed) {
+            allMarketStatsSubscribed = true;
+            webSocketApi.subscribeAllMarketStats(this::handleMarketStatsUpdate);
         }
-        if (orderBookSubscriptions.add(marketId)) {
-            webSocketApi.subscribeOrderBook(marketId, this::handleOrderBookUpdate);
+        if (tickerSubscriptions.add(marketId)) {
+            webSocketApi.subscribeTicker(marketId, this::handleTickerUpdate);
         }
         super.subscribeLevel1(ticker, listener);
     }
@@ -278,6 +283,33 @@ public class LighterQuoteEngine extends QuoteEngine {
         }
     }
 
+    protected void handleTickerUpdate(LighterTickerUpdate update) {
+        if (update == null || update.getMarketId() == null) {
+            return;
+        }
+        Ticker ticker = marketStatsTickerByMarketId.get(update.getMarketId());
+        if (ticker == null || !hasLevel1Listeners(ticker)) {
+            return;
+        }
+        ZonedDateTime timestamp = toZonedDateTime(update.getTimestamp());
+        Level1Quote quote = new Level1Quote(ticker, timestamp);
+        if (update.getBestBidPrice() != null) {
+            quote.addQuote(QuoteType.BID, ticker.formatPrice(update.getBestBidPrice()));
+        }
+        if (update.getBestBidQuantity() != null) {
+            quote.addQuote(QuoteType.BID_SIZE, update.getBestBidQuantity());
+        }
+        if (update.getBestAskPrice() != null) {
+            quote.addQuote(QuoteType.ASK, ticker.formatPrice(update.getBestAskPrice()));
+        }
+        if (update.getBestAskQuantity() != null) {
+            quote.addQuote(QuoteType.ASK_SIZE, update.getBestAskQuantity());
+        }
+        if (quote.hasUpdates()) {
+            fireLevel1Quote(quote);
+        }
+    }
+
     protected void handleOrderBookUpdate(LighterOrderBookUpdate update) {
         if (update == null) {
             return;
@@ -299,12 +331,6 @@ public class LighterQuoteEngine extends QuoteEngine {
 
         if (hasLevel2Listeners(ticker)) {
             fireMarketDepthQuote(new Level2Quote(ticker, orderBook, timestamp));
-        }
-        if (hasLevel1Listeners(ticker)) {
-            Level1Quote topOfBookQuote = buildTopOfBookQuote(ticker, orderBook, timestamp);
-            if (topOfBookQuote.hasUpdates()) {
-                fireLevel1Quote(topOfBookQuote);
-            }
         }
     }
 
