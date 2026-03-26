@@ -195,22 +195,11 @@ public abstract class AbstractTickerRegistry implements ITickerTranslator, ITick
                 return direct;
             }
             // Prefix search: bare base symbol (e.g. "BTC") matches "BTC/USDT", "BTC/USDT-PERP", etc.
-            // To avoid dependence on Map iteration order (e.g. HashMap), deterministically select
-            // the lexicographically smallest matching key.
+            // Prefer common quote currencies in order: USDT, USDC, USD.
             String prefix = commonSymbol + "/";
-            String bestKey = null;
-            Ticker bestTicker = null;
-            for (Map.Entry<String, Ticker> entry : map.entrySet()) {
-                String key = entry.getKey();
-                if (key != null && key.startsWith(prefix)) {
-                    if (bestKey == null || key.compareTo(bestKey) < 0) {
-                        bestKey = key;
-                        bestTicker = entry.getValue();
-                    }
-                }
-            }
-            if (bestTicker != null) {
-                return bestTicker;
+            Ticker prefixMatch = findPreferredPrefixMatch(map, prefix);
+            if (prefixMatch != null) {
+                return prefixMatch;
             }
         }
         String exchangeSymbol = commonSymbolToExchangeSymbol(instrumentType, commonSymbol);
@@ -218,6 +207,25 @@ public abstract class AbstractTickerRegistry implements ITickerTranslator, ITick
             return null;
         }
         return lookupByBrokerSymbol(instrumentType, exchangeSymbol);
+    }
+
+    protected Ticker findPreferredPrefixMatch(Map<String, Ticker> map, String prefix) {
+        // Try preferred quote currencies first
+        String[] preferredSuffixes = { "USDT", "USDT-PERP", "USDC", "USDC-PERP", "USD", "USD-PERP" };
+        for (String suffix : preferredSuffixes) {
+            Ticker ticker = map.get(prefix + suffix);
+            if (ticker != null) {
+                return ticker;
+            }
+        }
+        // Fall back to first prefix match
+        for (Map.Entry<String, Ticker> entry : map.entrySet()) {
+            String key = entry.getKey();
+            if (key != null && key.startsWith(prefix)) {
+                return entry.getValue();
+            }
+        }
+        return null;
     }
 
     protected void sortTickers(List<Ticker> tickers) {

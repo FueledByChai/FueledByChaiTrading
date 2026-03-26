@@ -8,6 +8,8 @@ import com.fueledbychai.websocket.IWebSocketProcessor;
 
 public class LighterWebSocketClient extends BaseCryptoWebSocketClient {
 
+    protected static final long DEFAULT_KEEPALIVE_INTERVAL_SECONDS = 55L;
+
     private final String subscribeAuth;
     private final boolean autoSubscribeOnOpen;
     private final Runnable onConnectedListener;
@@ -27,6 +29,7 @@ public class LighterWebSocketClient extends BaseCryptoWebSocketClient {
         this.subscribeAuth = subscribeAuth;
         this.autoSubscribeOnOpen = autoSubscribeOnOpen;
         this.onConnectedListener = onConnectedListener;
+        disableBuiltInLostConnectionDetection();
     }
 
     @Override
@@ -46,6 +49,16 @@ public class LighterWebSocketClient extends BaseCryptoWebSocketClient {
             return null;
         }
         return buildSubscribeMessage(channel, subscribeAuth);
+    }
+
+    @Override
+    protected long getPingIntervalSeconds() {
+        return DEFAULT_KEEPALIVE_INTERVAL_SECONDS;
+    }
+
+    @Override
+    protected boolean useNativePingFrames() {
+        return true;
     }
 
     public static String buildSubscribeMessage(String channel, String subscribeAuth) {
@@ -78,6 +91,12 @@ public class LighterWebSocketClient extends BaseCryptoWebSocketClient {
         }
         logger.info("WS: {} Sending message: {}", super.getURI().getHost(), message);
         send(message);
+    }
+
+    protected void disableBuiltInLostConnectionDetection() {
+        // Lighter requires clients to send a frame every 2 minutes, but its public
+        // streams do not reliably satisfy Java-WebSocket's lost-pong watchdog.
+        setConnectionLostTimeout(0);
     }
 
     @Override

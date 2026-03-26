@@ -55,6 +55,7 @@ public class LighterConfiguration {
     public static final String LIGHTER_ACCOUNT_INDEX = "lighter.account.index";
     public static final String LIGHTER_API_KEY_INDEX = "lighter.api.key.index";
     public static final String LIGHTER_SIGNER_LIBRARY_PATH = "lighter.signer.library.path";
+    public static final String LIGHTER_WS_DEDICATED_MODE = "lighter.ws.dedicated.mode";
 
     private static final String DEFAULT_ENVIRONMENT = "prod";
     private static final String DEFAULT_MAINNET_REST_URL = "https://mainnet.zklighter.elliot.ai/api/v1";
@@ -233,6 +234,14 @@ public class LighterConfiguration {
 
     public String getSignerLibraryPath() {
         return properties.getProperty(LIGHTER_SIGNER_LIBRARY_PATH);
+    }
+
+    /**
+     * Returns true if dedicated (one-socket-per-channel) mode is enabled.
+     * Default is false (shared mode: multiple channels per socket).
+     */
+    public boolean isDedicatedWebSocketMode() {
+        return Boolean.parseBoolean(properties.getProperty(LIGHTER_WS_DEDICATED_MODE, "false"));
     }
 
     public boolean isWebSocketReadonlyEnabled() {

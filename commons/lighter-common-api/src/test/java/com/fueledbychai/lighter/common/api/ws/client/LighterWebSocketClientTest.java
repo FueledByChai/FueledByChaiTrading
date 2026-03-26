@@ -30,7 +30,23 @@ public class LighterWebSocketClientTest {
         assertNull(subscribe.opt("auth"));
     }
 
+    @Test
+    void lighterDisablesBuiltInLostConnectionDetection() throws Exception {
+        TestableLighterWebSocketClient client = new TestableLighterWebSocketClient("wss://example.test/stream",
+                "trade/1", null);
+        assertEquals(0, client.getConnectionLostTimeout());
+    }
+
+    @Test
+    void lighterKeepaliveUsesNativePingFrames() throws Exception {
+        TestableLighterWebSocketClient client = new TestableLighterWebSocketClient("wss://example.test/stream",
+                "trade/1", null);
+        client.sendKeepaliveFrameForTest();
+        assertEquals(1, client.getPingCount());
+    }
+
     private static class TestableLighterWebSocketClient extends LighterWebSocketClient {
+        private int pingCount;
 
         TestableLighterWebSocketClient(String serverUri, String channel, String subscribeAuth) throws Exception {
             super(serverUri, channel, subscribeAuth, new NoopWebSocketProcessor());
@@ -38,6 +54,19 @@ public class LighterWebSocketClientTest {
 
         String buildSubscribeMessageForTest() {
             return super.buildSubscribeMessage();
+        }
+
+        void sendKeepaliveFrameForTest() {
+            super.sendKeepaliveFrame();
+        }
+
+        int getPingCount() {
+            return pingCount;
+        }
+
+        @Override
+        public void sendPing() {
+            pingCount++;
         }
     }
 

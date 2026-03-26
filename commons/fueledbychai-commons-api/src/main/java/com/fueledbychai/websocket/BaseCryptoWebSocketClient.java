@@ -63,14 +63,35 @@ public abstract class BaseCryptoWebSocketClient extends AbstractWebSocketClient 
         return 0;
     }
 
+    protected boolean useNativePingFrames() {
+        return false;
+    }
+
+    protected void sendKeepaliveFrame() {
+        if (useNativePingFrames()) {
+            logger.info("Sending ping for {}", getProviderName());
+            sendPing();
+            return;
+        }
+
+        String pingMessage = buildPingMessage();
+        if (pingMessage == null || pingMessage.isBlank()) {
+            return;
+        }
+
+        logger.info("Sending ping for {}", getProviderName());
+        send(pingMessage);
+    }
+
     protected long getAuthSubscribeDelayMillis() {
         return 0;
     }
 
     protected void startPingTask() {
         long pingIntervalSeconds = getPingIntervalSeconds();
-        String pingMessage = buildPingMessage();
-        if (pingIntervalSeconds <= 0 || pingMessage == null || pingMessage.isBlank()) {
+        boolean useNativePingFrames = useNativePingFrames();
+        String pingMessage = useNativePingFrames ? null : buildPingMessage();
+        if (pingIntervalSeconds <= 0 || (!useNativePingFrames && (pingMessage == null || pingMessage.isBlank()))) {
             return;
         }
 
@@ -83,8 +104,7 @@ public abstract class BaseCryptoWebSocketClient extends AbstractWebSocketClient 
         pingTask = pingScheduler.scheduleAtFixedRate(() -> {
             try {
                 if (isOpen()) {
-                    logger.info("Sending ping for {}", getProviderName());
-                    send(pingMessage);
+                    sendKeepaliveFrame();
                 } else if (pingTask != null && !pingTask.isCancelled()) {
                     pingTask.cancel(false);
                 }

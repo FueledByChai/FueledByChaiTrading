@@ -19,8 +19,8 @@ import com.fueledbychai.util.TickerRegistryFactory;
 public class AsterMarketDataExample {
 
     protected static final Logger logger = LoggerFactory.getLogger(AsterMarketDataExample.class);
-    protected static final String DEFAULT_SYMBOL = "BTCUSDT";
-    protected static final InstrumentType DEFAULT_TYPE = InstrumentType.PERPETUAL_FUTURES;
+    protected static final String DEFAULT_SYMBOL = "BTC";
+    protected static final InstrumentType DEFAULT_TYPE = InstrumentType.CRYPTO_SPOT;
     protected static final Duration RUN_DURATION = Duration.ofMinutes(1);
 
     public void start(String symbol, InstrumentType instrumentType) throws InterruptedException {
@@ -81,6 +81,7 @@ public class AsterMarketDataExample {
     }
 
     public static void main(String[] args) throws Exception {
+        System.setProperty("fueledbychai.run.proxy", "true");
         String symbol = args.length > 0 ? args[0] : DEFAULT_SYMBOL;
         InstrumentType instrumentType = args.length > 1 ? InstrumentType.valueOf(args[1].trim().toUpperCase())
                 : DEFAULT_TYPE;

@@ -34,6 +34,7 @@ import com.fueledbychai.lighter.common.api.ws.model.LighterMarketStats;
 import com.fueledbychai.lighter.common.api.ws.model.LighterMarketStatsUpdate;
 import com.fueledbychai.lighter.common.api.ws.model.LighterOrderBookLevel;
 import com.fueledbychai.lighter.common.api.ws.model.LighterOrderBookUpdate;
+import com.fueledbychai.lighter.common.api.ws.model.LighterTickerUpdate;
 import com.fueledbychai.lighter.common.api.ws.model.LighterTrade;
 import com.fueledbychai.lighter.common.api.ws.model.LighterTradesUpdate;
 import com.fueledbychai.marketdata.ILevel1Quote;
@@ -82,7 +83,7 @@ public class LighterQuoteEngineTest {
     }
 
     @Test
-    void subscribeLevel1SubscribesMarketStatsAndOrderBookOnlyOncePerMarket() {
+    void subscribeLevel1SubscribesAllMarketStatsAndTickerOnlyOncePerMarket() {
         LighterQuoteEngine engine = new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry);
         Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES);
 
@@ -90,8 +91,9 @@ public class LighterQuoteEngineTest {
         engine.subscribeLevel1(ticker, quote -> {
         });
 
-        verify(webSocketApi, times(1)).subscribeMarketStats(eq(1), any());
-        verify(webSocketApi, times(1)).subscribeOrderBook(eq(1), any());
+        verify(webSocketApi, times(1)).subscribeAllMarketStats(any());
+        verify(webSocketApi, times(1)).subscribeTicker(eq(1), any());
+        verify(webSocketApi, never()).subscribeOrderBook(eq(1), any());
     }
 
     @Test
@@ -125,8 +127,8 @@ public class LighterQuoteEngineTest {
 
         engine.subscribeLevel1(ticker, level1Listener);
 
-        verify(webSocketApi).subscribeMarketStats(eq(0), any());
-        verify(webSocketApi).subscribeOrderBook(eq(0), any());
+        verify(webSocketApi).subscribeAllMarketStats(any());
+        verify(webSocketApi).subscribeTicker(eq(0), any());
     }
 
     @Test
@@ -143,7 +145,8 @@ public class LighterQuoteEngineTest {
 
         engine.subscribeLevel1(inputTicker, level1Listener);
 
-        verify(webSocketApi).subscribeMarketStats(eq(7), any());
+        verify(webSocketApi).subscribeAllMarketStats(any());
+        verify(webSocketApi).subscribeTicker(eq(7), any());
         assertEquals("7", inputTicker.getId());
         assertEquals(new BigDecimal("0.1"), inputTicker.getMinimumTickSize());
     }
@@ -160,8 +163,8 @@ public class LighterQuoteEngineTest {
 
         engine.subscribeLevel1(inputTicker, level1Listener);
 
-        verify(webSocketApi).subscribeMarketStats(eq(0), any());
-        verify(webSocketApi).subscribeOrderBook(eq(0), any());
+        verify(webSocketApi).subscribeAllMarketStats(any());
+        verify(webSocketApi).subscribeTicker(eq(0), any());
         assertEquals("0", inputTicker.getId());
         assertEquals(new BigDecimal("0.01"), inputTicker.getMinimumTickSize());
     }
@@ -238,24 +241,18 @@ public class LighterQuoteEngineTest {
     }
 
     @Test
-    void handleOrderBookUpdateFiresLevel1AndLevel2Quotes() {
+    void handleOrderBookUpdateFiresLevel2QuoteOnly() {
         LighterQuoteEngine engine = spy(new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry));
-        AtomicReference<ILevel1Quote> capturedLevel1Quote = new AtomicReference<>();
         AtomicReference<ILevel2Quote> capturedLevel2Quote = new AtomicReference<>();
         Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES);
         ZonedDateTime expectedTimestamp = ZonedDateTime.ofInstant(Instant.ofEpochMilli(1700000000000L),
             ZoneId.of("UTC"));
 
         doAnswer(invocation -> {
-            capturedLevel1Quote.set(invocation.getArgument(0));
-            return null;
-        }).when(engine).fireLevel1Quote(any(ILevel1Quote.class));
-        doAnswer(invocation -> {
             capturedLevel2Quote.set(invocation.getArgument(0));
             return null;
         }).when(engine).fireMarketDepthQuote(any(ILevel2Quote.class));
 
-        engine.subscribeLevel1(ticker, level1Listener);
         engine.subscribeMarketDepth(ticker, level2Listener);
 
         LighterOrderBookUpdate update = new LighterOrderBookUpdate(
@@ -272,13 +269,7 @@ public class LighterQuoteEngineTest {
 
         engine.handleOrderBookUpdate(update);
 
-        ILevel1Quote level1Quote = capturedLevel1Quote.get();
-        assertNotNull(level1Quote);
-        assertEquals(expectedTimestamp, level1Quote.getTimeStamp());
-        assertEquals(new BigDecimal("100.50"), level1Quote.getValue(QuoteType.BID));
-        assertEquals(new BigDecimal("3.0"), level1Quote.getValue(QuoteType.BID_SIZE));
-        assertEquals(new BigDecimal("101.00"), level1Quote.getValue(QuoteType.ASK));
-        assertEquals(new BigDecimal("2.5"), level1Quote.getValue(QuoteType.ASK_SIZE));
+        verify(engine, never()).fireLevel1Quote(any(ILevel1Quote.class));
 
         ILevel2Quote level2Quote = capturedLevel2Quote.get();
         assertNotNull(level2Quote);
@@ -343,20 +334,14 @@ public class LighterQuoteEngineTest {
     @Test
     void handleOrderBookUpdateRemovesLevelWhenSizeIsZero() {
         LighterQuoteEngine engine = spy(new LighterQuoteEngine(restApi, webSocketApi, tickerRegistry));
-        AtomicReference<ILevel1Quote> capturedLevel1Quote = new AtomicReference<>();
         AtomicReference<ILevel2Quote> capturedLevel2Quote = new AtomicReference<>();
         Ticker ticker = createTicker("BTC", "1", InstrumentType.PERPETUAL_FUTURES);
 
-        doAnswer(invocation -> {
-            capturedLevel1Quote.set(invocation.getArgument(0));
-            return null;
-        }).when(engine).fireLevel1Quote(any(ILevel1Quote.class));
         doAnswer(invocation -> {
             capturedLevel2Quote.set(invocation.getArgument(0));
             return null;
         }).when(engine).fireMarketDepthQuote(any(ILevel2Quote.class));
 
-        engine.subscribeLevel1(ticker, level1Listener);
         engine.subscribeMarketDepth(ticker, level2Listener);
 
         LighterOrderBookUpdate snapshot = new LighterOrderBookUpdate(
@@ -384,15 +369,6 @@ public class LighterQuoteEngineTest {
 
         engine.handleOrderBookUpdate(snapshot);
         engine.handleOrderBookUpdate(delta);
-
-        ILevel1Quote level1Quote = capturedLevel1Quote.get();
-        assertNotNull(level1Quote);
-        assertEquals(new BigDecimal("100.50"), level1Quote.getValue(QuoteType.BID));
-        assertEquals(new BigDecimal("3.0"), level1Quote.getValue(QuoteType.BID_SIZE));
-        assertFalse(level1Quote.containsType(QuoteType.ASK));
-        assertFalse(level1Quote.containsType(QuoteType.ASK_SIZE));
-        assertTrue(level1Quote.isCleared(QuoteType.ASK));
-        assertTrue(level1Quote.isCleared(QuoteType.ASK_SIZE));
 
         ILevel2Quote level2Quote = capturedLevel2Quote.get();
         assertNotNull(level2Quote);

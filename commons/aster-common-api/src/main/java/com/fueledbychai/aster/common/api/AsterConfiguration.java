@@ -138,6 +138,12 @@ public class AsterConfiguration {
         return apiKey != null && !apiKey.isBlank() && apiSecret != null && !apiSecret.isBlank();
     }
 
+    public boolean isDedicatedWebSocketMode() {
+        String value = System.getProperty("aster.ws.dedicated.mode",
+                System.getenv("ASTER_WS_DEDICATED_MODE"));
+        return Boolean.parseBoolean(value);
+    }
+
     public boolean isProductionEnvironment() {
         return isProductionEnvironment(environment);
     }

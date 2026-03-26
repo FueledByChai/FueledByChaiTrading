@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import com.fueledbychai.aster.common.api.ws.AsterJsonProcessor;
 import com.fueledbychai.aster.common.api.ws.AsterWebSocketClient;
+import com.fueledbychai.websocket.IWebSocketProcessor;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
@@ -76,11 +77,11 @@ class AsterWebSocketApiTest {
         private String lastChannel;
 
         private RecordingAsterWebSocketApi(String futuresWebSocketUrl, String spotWebSocketUrl) {
-            super(futuresWebSocketUrl, spotWebSocketUrl);
+            super(futuresWebSocketUrl, spotWebSocketUrl, true);
         }
 
         @Override
-        protected AsterWebSocketClient newClient(String streamUrl, String channel, AsterJsonProcessor processor) {
+        protected AsterWebSocketClient newClient(String streamUrl, String channel, IWebSocketProcessor processor) {
             this.lastStreamUrl = streamUrl;
             this.lastChannel = channel;
             try {
@@ -92,7 +93,7 @@ class AsterWebSocketApiTest {
     }
 
     private static final class NoOpAsterWebSocketClient extends AsterWebSocketClient {
-        private NoOpAsterWebSocketClient(String serverUri, String channel, AsterJsonProcessor processor)
+        private NoOpAsterWebSocketClient(String serverUri, String channel, IWebSocketProcessor processor)
                 throws Exception {
             super(serverUri, channel, processor);
         }

@@ -671,7 +671,7 @@ public class LighterWebSocketApiTest {
         }
 
         TestableLighterWebSocketApi(String url, ILighterTransactionSigner signer) {
-            super(url, signer);
+            super(url, signer, true);
             this.providedSigner = signer;
         }
 
