@@ -10,6 +10,14 @@ public class DriftConfiguration {
     public static final String DRIFT_GATEWAY_REST_URL = "drift.gateway.rest.url";
     public static final String DRIFT_GATEWAY_WS_URL = "drift.gateway.ws.url";
     public static final String DRIFT_SUB_ACCOUNT_ID = "drift.sub.account.id";
+    public static final String DRIFT_GATEWAY_AUTO_START = "drift.gateway.auto.start";
+    public static final String DRIFT_GATEWAY_KEY = "drift.gateway.key";
+    public static final String DRIFT_GATEWAY_RPC_URL = "drift.gateway.rpc.url";
+    public static final String DRIFT_GATEWAY_MARKETS = "drift.gateway.markets";
+    public static final String DRIFT_GATEWAY_IMAGE = "drift.gateway.image";
+    public static final String DRIFT_GATEWAY_CONTAINER_NAME = "drift.gateway.container.name";
+    public static final String DRIFT_GATEWAY_REST_PORT = "drift.gateway.rest.port";
+    public static final String DRIFT_GATEWAY_WS_PORT = "drift.gateway.ws.port";
 
     public static final String DEFAULT_ENVIRONMENT = "mainnet";
     public static final String DEFAULT_DATA_REST_URL = "https://data.api.drift.trade";
@@ -19,6 +27,11 @@ public class DriftConfiguration {
     public static final String DEFAULT_GATEWAY_REST_URL = "http://127.0.0.1:8080";
     public static final String DEFAULT_GATEWAY_WS_URL = "ws://127.0.0.1:1337";
     public static final int DEFAULT_SUB_ACCOUNT_ID = 0;
+    public static final boolean DEFAULT_GATEWAY_AUTO_START = false;
+    public static final String DEFAULT_GATEWAY_IMAGE = "ghcr.io/drift-labs/gateway:latest";
+    public static final String DEFAULT_GATEWAY_CONTAINER_NAME = "drift-gateway";
+    public static final int DEFAULT_GATEWAY_REST_PORT = 8080;
+    public static final int DEFAULT_GATEWAY_WS_PORT = 1337;
 
     private static volatile DriftConfiguration instance;
     private static final Object LOCK = new Object();
@@ -76,5 +89,40 @@ public class DriftConfiguration {
         String restUrl = getGatewayRestUrl();
         String wsUrl = getGatewayWebSocketUrl();
         return restUrl != null && !restUrl.isBlank() && wsUrl != null && !wsUrl.isBlank();
+    }
+
+    public boolean isGatewayAutoStart() {
+        return Boolean.parseBoolean(System.getProperty(DRIFT_GATEWAY_AUTO_START,
+                String.valueOf(DEFAULT_GATEWAY_AUTO_START)));
+    }
+
+    public String getGatewayKey() {
+        return System.getProperty(DRIFT_GATEWAY_KEY);
+    }
+
+    public String getGatewayRpcUrl() {
+        return System.getProperty(DRIFT_GATEWAY_RPC_URL);
+    }
+
+    public String getGatewayMarkets() {
+        return System.getProperty(DRIFT_GATEWAY_MARKETS);
+    }
+
+    public String getGatewayImage() {
+        return System.getProperty(DRIFT_GATEWAY_IMAGE, DEFAULT_GATEWAY_IMAGE);
+    }
+
+    public String getGatewayContainerName() {
+        return System.getProperty(DRIFT_GATEWAY_CONTAINER_NAME, DEFAULT_GATEWAY_CONTAINER_NAME);
+    }
+
+    public int getGatewayRestPort() {
+        return Integer.parseInt(System.getProperty(DRIFT_GATEWAY_REST_PORT,
+                String.valueOf(DEFAULT_GATEWAY_REST_PORT)));
+    }
+
+    public int getGatewayWsPort() {
+        return Integer.parseInt(System.getProperty(DRIFT_GATEWAY_WS_PORT,
+                String.valueOf(DEFAULT_GATEWAY_WS_PORT)));
     }
 }

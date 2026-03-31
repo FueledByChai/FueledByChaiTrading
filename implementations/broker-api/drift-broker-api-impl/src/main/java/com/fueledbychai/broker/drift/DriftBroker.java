@@ -25,6 +25,7 @@ import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.data.Exchange;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.drift.common.api.DriftConfiguration;
+import com.fueledbychai.drift.common.api.DriftGatewayManager;
 import com.fueledbychai.drift.common.api.IDriftRestApi;
 import com.fueledbychai.drift.common.api.IDriftWebSocketApi;
 import com.fueledbychai.drift.common.api.model.DriftGatewayCancelRequest;
@@ -57,21 +58,29 @@ public class DriftBroker extends AbstractBasicBroker {
     protected final AtomicLong nextClientOrderId = new AtomicLong(System.currentTimeMillis());
 
     protected final int subAccountId;
+    protected final DriftGatewayManager gatewayManager;
     protected volatile boolean connected;
 
     public DriftBroker() {
         this(ExchangeRestApiFactory.getPrivateApi(Exchange.DRIFT, IDriftRestApi.class),
                 ExchangeWebSocketApiFactory.getApi(Exchange.DRIFT, IDriftWebSocketApi.class),
-                TickerRegistryFactory.getInstance(Exchange.DRIFT), DriftConfiguration.getInstance().getSubAccountId());
+                TickerRegistryFactory.getInstance(Exchange.DRIFT), DriftConfiguration.getInstance().getSubAccountId(),
+                new DriftGatewayManager());
 
         DriftConfiguration configuration = DriftConfiguration.getInstance();
         logger.info("DriftBroker initialized with configuration: environment={}, dataRestUrl={}, gatewayRestUrl={}, "
-                + "gatewayWsUrl={}, subAccountId={}", configuration.getEnvironment(), configuration.getDataRestUrl(),
-                configuration.getGatewayRestUrl(), configuration.getGatewayWebSocketUrl(), subAccountId);
+                + "gatewayWsUrl={}, subAccountId={}, gatewayAutoStart={}", configuration.getEnvironment(),
+                configuration.getDataRestUrl(), configuration.getGatewayRestUrl(),
+                configuration.getGatewayWebSocketUrl(), subAccountId, configuration.isGatewayAutoStart());
     }
 
     public DriftBroker(IDriftRestApi restApi, IDriftWebSocketApi webSocketApi, ITickerRegistry tickerRegistry,
             int subAccountId) {
+        this(restApi, webSocketApi, tickerRegistry, subAccountId, new DriftGatewayManager());
+    }
+
+    public DriftBroker(IDriftRestApi restApi, IDriftWebSocketApi webSocketApi, ITickerRegistry tickerRegistry,
+            int subAccountId, DriftGatewayManager gatewayManager) {
         if (restApi == null) {
             throw new IllegalArgumentException("restApi is required");
         }
@@ -86,6 +95,7 @@ public class DriftBroker extends AbstractBasicBroker {
         this.tickerRegistry = tickerRegistry;
         this.translator = new DriftTranslator(tickerRegistry);
         this.subAccountId = subAccountId;
+        this.gatewayManager = gatewayManager;
     }
 
     @Override
@@ -286,6 +296,10 @@ public class DriftBroker extends AbstractBasicBroker {
     public void connect() {
         if (connected) {
             return;
+        }
+
+        if (DriftConfiguration.getInstance().isGatewayAutoStart()) {
+            gatewayManager.ensureRunning();
         }
 
         webSocketApi.subscribeGatewayEvents(subAccountId, this::handleGatewayEvent);
