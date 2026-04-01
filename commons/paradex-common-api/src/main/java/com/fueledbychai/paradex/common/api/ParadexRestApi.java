@@ -428,8 +428,12 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
             try (var s = Span.start("PD_CANCEL_ORDER_BY_CLIENT_ID_REST_CALL", clientOrderId, LATENCY_LOGGER)) {
                 response = client.newCall(request).execute();
                 if (!response.isSuccessful()) {
-                    logger.error("Error response: " + response.body().string());
-                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                    String body = "";
+                    if (response.body() != null) {
+                        body = response.body().string();
+                    }
+                    logger.error("Error response: " + body);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + body,
                             response.code());
                 }
             }
