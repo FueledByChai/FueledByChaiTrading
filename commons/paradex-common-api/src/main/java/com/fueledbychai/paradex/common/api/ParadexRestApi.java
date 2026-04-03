@@ -5,6 +5,7 @@ import java.lang.reflect.Type;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.Proxy;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -125,7 +126,12 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
         if (proxy != null && proxy != Proxy.NO_PROXY) {
             builder.proxy(proxy);
         }
-        return builder.build();
+        return builder
+                .connectTimeout(Duration.ofSeconds(15))
+                .readTimeout(Duration.ofSeconds(15))
+                .writeTimeout(Duration.ofSeconds(15))
+                .callTimeout(Duration.ofSeconds(15))
+                .build();
     }
 
     @Override
@@ -197,8 +203,12 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
 
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
-                    logger.error("Error response: " + response.body().string());
-                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                    String body = "";
+                    if (response.body() != null) {
+                        body = response.body().string();
+                    }
+                    logger.error("Error response: " + body);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + body,
                             response.code());
                 }
 
@@ -229,7 +239,7 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
             if (!response.isSuccessful()) {
                 String errorBody = response.body() == null ? "" : response.body().string();
                 logger.error("Error response: " + errorBody);
-                throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                throw new ResponseException("Unexpected code " + response.code() + ": " + errorBody,
                         response.code());
             }
 
@@ -257,8 +267,12 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
 
         try (Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                logger.error("Error response: " + response.body().string());
-                throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                String body = "";
+                if (response.body() != null) {
+                    body = response.body().string();
+                }
+                logger.error("Error response: " + body);
+                throw new ResponseException("Unexpected code " + response.code() + ": " + body,
                         response.code());
             }
 
@@ -315,8 +329,12 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
 
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
-                    logger.error("Error response: " + response.body().string());
-                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                    String body = "";
+                    if (response.body() != null) {
+                        body = response.body().string();
+                    }
+                    logger.error("Error response: " + body);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + body,
                             response.code());
                 }
 
@@ -358,8 +376,12 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
 
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
-                    logger.error("Error response: " + response.body().string());
-                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                    String body = "";
+                    if (response.body() != null) {
+                        body = response.body().string();
+                    }
+                    logger.error("Error response: " + body);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + body,
                             response.code());
                 }
 
@@ -466,8 +488,12 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
 
             Response response = client.newCall(request).execute();
             if (!response.isSuccessful()) {
-                logger.error("Error response: " + response.body().string());
-                throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                String body = "";
+                if (response.body() != null) {
+                    body = response.body().string();
+                }
+                logger.error("Error response: " + body);
+                throw new ResponseException("Unexpected code " + response.code() + ": " + body,
                         response.code());
             }
 
@@ -533,8 +559,12 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
 
         try (Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                logger.error("Error response: " + response.body().string());
-                throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                String body = "";
+                if (response.body() != null) {
+                    body = response.body().string();
+                }
+                logger.error("Error response: " + body);
+                throw new ResponseException("Unexpected code " + response.code() + ": " + body,
                         response.code());
             }
 
@@ -565,8 +595,12 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
 
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
-                    logger.error("Error response: " + response.body().string());
-                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                    String body = "";
+                    if (response.body() != null) {
+                        body = response.body().string();
+                    }
+                    logger.error("Error response: " + body);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + body,
                             response.code());
                 }
 
@@ -632,8 +666,12 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
         try (var s = Span.start("PD_SEND_PLACE_ORDER_REST_REQUEST", order.getClientId(), LATENCY_LOGGER)) {
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
-                    logger.error("Error response: " + response.body().string());
-                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                    String body = "";
+                    if (response.body() != null) {
+                        body = response.body().string();
+                    }
+                    logger.error("Error response: " + body);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + body,
                             response.code());
                 }
 
@@ -693,10 +731,13 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
         try (var s = Span.start("PD_SEND_MODIFY_ORDER_REST_REQUEST", order.getClientId(), LATENCY_LOGGER)) {
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
-                    String responseBody = response.body().string();
-                    logger.error("Error response: " + responseBody);
+                    String body = "";
+                    if (response.body() != null) {
+                        body = response.body().string();
+                    }
+                    logger.error("Error response: " + body);
                     throw new ResponseException(
-                            "Unexpected code " + response.code() + ": " + response.message() + ", " + responseBody,
+                            "Unexpected code " + response.code() + ": " + body,
                             response.code());
                 }
 
@@ -744,8 +785,12 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
 
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
-                    logger.error("Error response: " + response.body().string());
-                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                    String body = "";
+                    if (response.body() != null) {
+                        body = response.body().string();
+                    }
+                    logger.error("Error response: " + body);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + body,
                             response.code());
                 }
 
@@ -779,8 +824,12 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
 
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
-                    logger.error("Error response: " + response.body().string());
-                    throw new ResponseException("Unexpected code " + response.code() + ": " + response.message(),
+                    String body = "";
+                    if (response.body() != null) {
+                        body = response.body().string();
+                    }
+                    logger.error("Error response: " + body);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + body,
                             response.code());
                 }
 
