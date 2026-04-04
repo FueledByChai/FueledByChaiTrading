@@ -11,8 +11,16 @@ public class AsterConfiguration {
     public static final String ASTER_SPOT_MAINNET_WS_URL = "aster.spot.mainnet.ws.url";
     public static final String ASTER_SPOT_TESTNET_REST_URL = "aster.spot.testnet.rest.url";
     public static final String ASTER_SPOT_TESTNET_WS_URL = "aster.spot.testnet.ws.url";
-    public static final String ASTER_API_KEY = "aster.api.key";
+    public static final String ASTER_L1_ACCOUNT = "aster.l1.account";
     public static final String ASTER_API_SECRET = "aster.api.secret";
+    public static final String ASTER_API_WALLET = "aster.api.wallet";
+
+    /** @deprecated Use {@link #ASTER_L1_ACCOUNT} */
+    @Deprecated
+    public static final String ASTER_API_KEY = ASTER_L1_ACCOUNT;
+    /** @deprecated Use {@link #ASTER_API_WALLET} */
+    @Deprecated
+    public static final String ASTER_API_SIGNER = ASTER_API_WALLET;
     public static final String ASTER_RECV_WINDOW = "aster.recv.window";
 
     private static final String DEFAULT_ENVIRONMENT = "prod";
@@ -36,6 +44,7 @@ public class AsterConfiguration {
     private final String spotWebSocketUrl;
     private final String apiKey;
     private final String apiSecret;
+    private final String apiSigner;
     private final long recvWindow;
 
     public static AsterConfiguration getInstance() {
@@ -66,8 +75,9 @@ public class AsterConfiguration {
                 : read(ASTER_SPOT_TESTNET_REST_URL, DEFAULT_SPOT_TESTNET_REST_URL);
         this.spotWebSocketUrl = production ? read(ASTER_SPOT_MAINNET_WS_URL, DEFAULT_SPOT_MAINNET_WS_URL)
                 : read(ASTER_SPOT_TESTNET_WS_URL, DEFAULT_SPOT_TESTNET_WS_URL);
-        this.apiKey = read(ASTER_API_KEY, null);
+        this.apiKey = read(ASTER_L1_ACCOUNT, null);
         this.apiSecret = read(ASTER_API_SECRET, null);
+        this.apiSigner = read(ASTER_API_WALLET, null);
         this.recvWindow = readLong(ASTER_RECV_WINDOW, DEFAULT_RECV_WINDOW);
     }
 
@@ -126,6 +136,10 @@ public class AsterConfiguration {
         return recvWindow;
     }
 
+    public String getApiSigner() {
+        return apiSigner;
+    }
+
     public String getAccountAddress() {
         return apiKey;
     }
@@ -135,7 +149,9 @@ public class AsterConfiguration {
     }
 
     public boolean hasPrivateKeyConfiguration() {
-        return apiKey != null && !apiKey.isBlank() && apiSecret != null && !apiSecret.isBlank();
+        return apiKey != null && !apiKey.isBlank()
+                && apiSecret != null && !apiSecret.isBlank()
+                && apiSigner != null && !apiSigner.isBlank();
     }
 
     public boolean isDedicatedWebSocketMode() {
