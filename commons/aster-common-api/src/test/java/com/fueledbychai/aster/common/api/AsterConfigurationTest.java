@@ -14,8 +14,9 @@ class AsterConfigurationTest {
         String wsUrlKey = AsterConfiguration.ASTER_TESTNET_WS_URL;
         String spotRestUrlKey = AsterConfiguration.ASTER_SPOT_TESTNET_REST_URL;
         String spotWsUrlKey = AsterConfiguration.ASTER_SPOT_TESTNET_WS_URL;
-        String apiKey = AsterConfiguration.ASTER_API_KEY;
+        String apiKey = AsterConfiguration.ASTER_L1_ACCOUNT;
         String apiSecret = AsterConfiguration.ASTER_API_SECRET;
+        String apiSignerKey = AsterConfiguration.ASTER_API_WALLET;
         String recvWindowKey = AsterConfiguration.ASTER_RECV_WINDOW;
 
         String previousEnvironment = System.getProperty(environmentKey);
@@ -25,6 +26,7 @@ class AsterConfigurationTest {
         String previousSpotWsUrl = System.getProperty(spotWsUrlKey);
         String previousApiKey = System.getProperty(apiKey);
         String previousApiSecret = System.getProperty(apiSecret);
+        String previousApiSigner = System.getProperty(apiSignerKey);
         String previousRecvWindow = System.getProperty(recvWindowKey);
 
         try {
@@ -35,6 +37,7 @@ class AsterConfigurationTest {
             System.setProperty(spotWsUrlKey, "wss://spot-ws.unit.test");
             System.setProperty(apiKey, "unit-api-key");
             System.setProperty(apiSecret, "unit-api-secret");
+            System.setProperty(apiSignerKey, "unit-api-signer");
             System.setProperty(recvWindowKey, "12345");
 
             AsterConfiguration.reset();
@@ -47,6 +50,7 @@ class AsterConfigurationTest {
             assertEquals("wss://spot-ws.unit.test", config.getSpotWebSocketUrl());
             assertEquals("unit-api-key", config.getApiKey());
             assertEquals("unit-api-secret", config.getApiSecret());
+            assertEquals("unit-api-signer", config.getApiSigner());
             assertEquals(12345L, config.getRecvWindow());
             assertTrue(config.hasPrivateKeyConfiguration());
         } finally {
@@ -57,6 +61,7 @@ class AsterConfigurationTest {
             restoreProperty(spotWsUrlKey, previousSpotWsUrl);
             restoreProperty(apiKey, previousApiKey);
             restoreProperty(apiSecret, previousApiSecret);
+            restoreProperty(apiSignerKey, previousApiSigner);
             restoreProperty(recvWindowKey, previousRecvWindow);
             AsterConfiguration.reset();
         }

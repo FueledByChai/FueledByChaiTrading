@@ -144,7 +144,7 @@ class AsterRestApiTest {
     }
 
     @Test
-    void accountInformationUsesSignedV4AccountEndpoint() throws Exception {
+    void accountInformationUsesSignedV3AccountEndpoint() throws Exception {
         JsonNode accountInfo = json("""
                 {
                   "totalMarginBalance": "150.25",
@@ -157,7 +157,7 @@ class AsterRestApiTest {
 
         assertSame(accountInfo, response);
         assertEquals("GET", api.lastMethod);
-        assertEquals("/fapi/v4/account", api.lastPath);
+        assertEquals("/fapi/v3/account", api.lastPath);
     }
 
     private static JsonNode json(String value) throws Exception {
@@ -192,7 +192,10 @@ class AsterRestApiTest {
         private String lastPath;
 
         private PrivateTestableAsterRestApi(JsonNode accountInfo) {
-            super("https://fapi.unit.test", "https://sapi.unit.test", "key", "secret");
+            super("https://fapi.unit.test", "https://sapi.unit.test",
+                    "0x1111111111111111111111111111111111111111",
+                    "0x2222222222222222222222222222222222222222",
+                    "0x0000000000000000000000000000000000000000000000000000000000000001");
             this.accountInfo = accountInfo;
         }
 
