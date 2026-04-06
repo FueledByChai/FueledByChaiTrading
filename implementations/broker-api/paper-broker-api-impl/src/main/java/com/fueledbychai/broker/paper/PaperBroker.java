@@ -1013,6 +1013,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
             try {
                 delayWebSocketCall();
                 super.fireAccountEquityUpdated(getNetAccountValue()); // Notify the listeners with the account update
+                super.fireAvailableFundsUpdated(currentAccountBalance); // Notify listeners with available funds
             } catch (Exception e) {
                 logger.error(e.getMessage(), e);
             }
