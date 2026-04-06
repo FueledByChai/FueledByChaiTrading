@@ -38,7 +38,7 @@ public class AsterTradingExample {
 
     public void executeTrade(String symbol) throws Exception {
         if (!AsterConfiguration.getInstance().hasPrivateKeyConfiguration()) {
-            throw new IllegalStateException("Aster trading requires aster.api.key and aster.api.secret.");
+            throw new IllegalStateException("Aster trading requires aster.l1.account, aster.api.secret, and aster.api.wallet.");
         }
 
         ITickerRegistry registry = TickerRegistryFactory.getInstance(Exchange.ASTER);
@@ -146,8 +146,9 @@ public class AsterTradingExample {
     public static void main(String[] args) throws Exception {
         // Optional overrides:
         // System.setProperty(AsterConfiguration.ASTER_ENVIRONMENT, "testnet");
-        // System.setProperty(AsterConfiguration.ASTER_API_KEY, "your-api-key");
-        // System.setProperty(AsterConfiguration.ASTER_API_SECRET, "your-api-secret");
+        // System.setProperty(AsterConfiguration.ASTER_L1_ACCOUNT, "your-l1-wallet-address");
+        // System.setProperty(AsterConfiguration.ASTER_API_SECRET, "your-signer-private-key");
+        // System.setProperty(AsterConfiguration.ASTER_API_WALLET, "your-api-wallet-address");
         String symbol = args.length > 0 ? args[0] : DEFAULT_SYMBOL;
 
         new AsterTradingExample().executeTrade(symbol);

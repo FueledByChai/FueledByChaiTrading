@@ -14,9 +14,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fueledbychai.data.Exchange;
@@ -40,15 +37,15 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
 
     static final int DEFAULT_FUNDING_PERIOD_HOURS = 8;
     static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(15L);
-    static final String API_KEY_HEADER = "X-MBX-APIKEY";
     static final MediaType FORM_MEDIA_TYPE = MediaType.parse("application/x-www-form-urlencoded");
 
     protected final String futuresBaseUrl;
     protected final String spotBaseUrl;
-    protected final String apiKey;
-    protected final String apiSecret;
+    protected final String user;
+    protected final String signer;
+    protected final String privateKey;
     protected final boolean publicApiOnly;
-    protected final long recvWindow;
+    protected final AsterEip712Signer eip712Signer;
     protected final OkHttpClient client;
     protected final ObjectMapper objectMapper;
     protected final Map<InstrumentType, InstrumentDescriptor[]> descriptorsByType = new EnumMap<>(InstrumentType.class);
@@ -58,26 +55,18 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
             InstrumentType.class);
 
     public AsterRestApi(String baseUrl) {
-        this(baseUrl, deriveSpotBaseUrl(baseUrl), null, null, AsterConfiguration.getInstance().getRecvWindow());
+        this(baseUrl, deriveSpotBaseUrl(baseUrl), null, null, null);
     }
 
     public AsterRestApi(String futuresBaseUrl, String spotBaseUrl) {
-        this(futuresBaseUrl, spotBaseUrl, null, null, AsterConfiguration.getInstance().getRecvWindow());
+        this(futuresBaseUrl, spotBaseUrl, null, null, null);
     }
 
-    public AsterRestApi(String baseUrl, String apiKey, String apiSecret) {
-        this(baseUrl, deriveSpotBaseUrl(baseUrl), apiKey, apiSecret, AsterConfiguration.getInstance().getRecvWindow());
+    public AsterRestApi(String baseUrl, String user, String signer, String privateKey) {
+        this(baseUrl, deriveSpotBaseUrl(baseUrl), user, signer, privateKey);
     }
 
-    public AsterRestApi(String futuresBaseUrl, String spotBaseUrl, String apiKey, String apiSecret) {
-        this(futuresBaseUrl, spotBaseUrl, apiKey, apiSecret, AsterConfiguration.getInstance().getRecvWindow());
-    }
-
-    public AsterRestApi(String baseUrl, String apiKey, String apiSecret, long recvWindow) {
-        this(baseUrl, deriveSpotBaseUrl(baseUrl), apiKey, apiSecret, recvWindow);
-    }
-
-    public AsterRestApi(String futuresBaseUrl, String spotBaseUrl, String apiKey, String apiSecret, long recvWindow) {
+    public AsterRestApi(String futuresBaseUrl, String spotBaseUrl, String user, String signer, String privateKey) {
         if (futuresBaseUrl == null || futuresBaseUrl.isBlank()) {
             throw new IllegalArgumentException("futuresBaseUrl is required");
         }
@@ -86,10 +75,12 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
         }
         this.futuresBaseUrl = normalizeBaseUrl(futuresBaseUrl);
         this.spotBaseUrl = normalizeBaseUrl(spotBaseUrl);
-        this.apiKey = apiKey;
-        this.apiSecret = apiSecret;
-        this.recvWindow = recvWindow <= 0 ? AsterConfiguration.getInstance().getRecvWindow() : recvWindow;
-        this.publicApiOnly = apiKey == null || apiSecret == null || apiKey.isBlank() || apiSecret.isBlank();
+        this.user = user;
+        this.signer = signer;
+        this.privateKey = privateKey;
+        this.publicApiOnly = user == null || signer == null || privateKey == null
+                || user.isBlank() || signer.isBlank() || privateKey.isBlank();
+        this.eip712Signer = publicApiOnly ? null : new AsterEip712Signer(privateKey);
         this.client = OkHttpClientFactory.create(REQUEST_TIMEOUT);
         this.objectMapper = new ObjectMapper();
     }
@@ -146,26 +137,26 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
     @Override
     public String startUserDataStream() {
         requirePrivateApi();
-        JsonNode root = apiKeyRequest(futuresBaseUrl, "POST", "/fapi/v1/listenKey");
+        JsonNode root = apiKeyRequest(futuresBaseUrl, "POST", "/fapi/v3/listenKey");
         return root.path("listenKey").asText("");
     }
 
     @Override
     public void keepAliveUserDataStream(String listenKey) {
         requirePrivateApi();
-        apiKeyRequest(futuresBaseUrl, "PUT", "/fapi/v1/listenKey");
+        apiKeyRequest(futuresBaseUrl, "PUT", "/fapi/v3/listenKey");
     }
 
     @Override
     public void closeUserDataStream(String listenKey) {
         requirePrivateApi();
-        apiKeyRequest(futuresBaseUrl, "DELETE", "/fapi/v1/listenKey");
+        apiKeyRequest(futuresBaseUrl, "DELETE", "/fapi/v3/listenKey");
     }
 
     @Override
     public JsonNode placeOrder(Map<String, String> params) {
         requirePrivateApi();
-        return signedRequest(futuresBaseUrl, "POST", "/fapi/v1/order", params);
+        return signedRequest(futuresBaseUrl, "POST", "/fapi/v3/order", params);
     }
 
     @Override
@@ -182,7 +173,7 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
         if (!params.containsKey("orderId") && !params.containsKey("origClientOrderId")) {
             throw new IllegalArgumentException("orderId or origClientOrderId is required");
         }
-        return signedRequest(futuresBaseUrl, "DELETE", "/fapi/v1/order", params);
+        return signedRequest(futuresBaseUrl, "DELETE", "/fapi/v3/order", params);
     }
 
     @Override
@@ -190,7 +181,7 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
         requirePrivateApi();
         LinkedHashMap<String, String> params = new LinkedHashMap<>();
         params.put("symbol", required(symbol, "symbol"));
-        return signedRequest(futuresBaseUrl, "DELETE", "/fapi/v1/allOpenOrders", params);
+        return signedRequest(futuresBaseUrl, "DELETE", "/fapi/v3/allOpenOrders", params);
     }
 
     @Override
@@ -207,7 +198,7 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
         if (!params.containsKey("orderId") && !params.containsKey("origClientOrderId")) {
             throw new IllegalArgumentException("orderId or origClientOrderId is required");
         }
-        return signedRequest(futuresBaseUrl, "GET", "/fapi/v1/order", params);
+        return signedRequest(futuresBaseUrl, "GET", "/fapi/v3/order", params);
     }
 
     @Override
@@ -217,7 +208,7 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
         if (symbol != null && !symbol.isBlank()) {
             params.put("symbol", symbol);
         }
-        return signedRequest(futuresBaseUrl, "GET", "/fapi/v1/openOrders", params);
+        return signedRequest(futuresBaseUrl, "GET", "/fapi/v3/openOrders", params);
     }
 
     @Override
@@ -227,13 +218,13 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
         if (symbol != null && !symbol.isBlank()) {
             params.put("symbol", symbol);
         }
-        return signedRequest(futuresBaseUrl, "GET", "/fapi/v2/positionRisk", params);
+        return signedRequest(futuresBaseUrl, "GET", "/fapi/v3/positionRisk", params);
     }
 
     @Override
     public JsonNode getAccountInformation() {
         requirePrivateApi();
-        return signedRequest(futuresBaseUrl, "GET", "/fapi/v4/account", null);
+        return signedRequest(futuresBaseUrl, "GET", "/fapi/v3/account", null);
     }
 
     @Override
@@ -355,9 +346,8 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
 
     protected JsonNode publicRequest(String baseUrl, String method, String path, Map<String, String> params) {
         HttpUrl url = buildUrl(baseUrl, path, params);
-        Request.Builder builder = new Request.Builder().url(url);
-        applyMethod(builder, method);
-        return execute(builder.build());
+        Request request = new Request.Builder().url(url).get().build();
+        return execute(request);
     }
 
     protected JsonNode apiKeyRequest(String method, String path) {
@@ -365,11 +355,8 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
     }
 
     protected JsonNode apiKeyRequest(String baseUrl, String method, String path) {
-        Request.Builder builder = new Request.Builder()
-                .url(buildUrl(baseUrl, path, null))
-                .addHeader(API_KEY_HEADER, apiKey);
-        applyMethod(builder, method);
-        return execute(builder.build());
+        // v3 API: listenKey endpoints are now signed requests with empty params
+        return signedRequest(baseUrl, method, path, null);
     }
 
     protected JsonNode signedRequest(String method, String path, Map<String, String> params) {
@@ -381,24 +368,31 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
         if (params != null) {
             signedParams.putAll(params);
         }
-        if (!signedParams.containsKey("recvWindow")) {
-            signedParams.put("recvWindow", Long.toString(recvWindow));
-        }
-        signedParams.put("timestamp", Long.toString(System.currentTimeMillis()));
+        signedParams.put("nonce", Long.toString(eip712Signer.getNonce()));
+        signedParams.put("user", user);
+        signedParams.put("signer", signer);
 
-        String queryString = toQueryString(signedParams);
-        String signature = sign(queryString);
-        HttpUrl.Builder urlBuilder = buildUrl(baseUrl, path, null).newBuilder();
-        if (!queryString.isBlank()) {
-            urlBuilder.encodedQuery(queryString + "&signature=" + signature);
+        String encodedParams = toQueryString(signedParams);
+        String signature = eip712Signer.sign(encodedParams);
+        signedParams.put("signature", signature);
+
+        String normalizedMethod = method == null ? "GET" : method.toUpperCase(Locale.US);
+        Request.Builder builder;
+        if ("POST".equals(normalizedMethod) || "DELETE".equals(normalizedMethod)) {
+            String body = toQueryString(signedParams);
+            builder = new Request.Builder()
+                    .url(buildUrl(baseUrl, path, null))
+                    .addHeader("Content-Type", "application/x-www-form-urlencoded")
+                    .addHeader("User-Agent", "FueledByChai/1.0");
+            if ("POST".equals(normalizedMethod)) {
+                builder.post(RequestBody.create(body.getBytes(StandardCharsets.UTF_8), FORM_MEDIA_TYPE));
+            } else {
+                builder.delete(RequestBody.create(body.getBytes(StandardCharsets.UTF_8), FORM_MEDIA_TYPE));
+            }
         } else {
-            urlBuilder.addQueryParameter("signature", signature);
+            builder = new Request.Builder()
+                    .url(buildUrl(baseUrl, path, signedParams));
         }
-
-        Request.Builder builder = new Request.Builder()
-                .url(urlBuilder.build())
-                .addHeader(API_KEY_HEADER, apiKey);
-        applyMethod(builder, method);
         return execute(builder.build());
     }
 
@@ -419,17 +413,6 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
         return builder.build();
     }
 
-    protected void applyMethod(Request.Builder builder, String method) {
-        String normalizedMethod = method == null ? "GET" : method.toUpperCase(Locale.US);
-        switch (normalizedMethod) {
-            case "GET" -> builder.get();
-            case "POST" -> builder.post(RequestBody.create(new byte[0], FORM_MEDIA_TYPE));
-            case "PUT" -> builder.put(RequestBody.create(new byte[0], FORM_MEDIA_TYPE));
-            case "DELETE" -> builder.delete(RequestBody.create(new byte[0], FORM_MEDIA_TYPE));
-            default -> throw new IllegalArgumentException("Unsupported HTTP method: " + method);
-        }
-    }
-
     protected JsonNode execute(Request request) {
         try (Response response = client.newCall(request).execute()) {
             String body = response.body() == null ? "" : response.body().string();
@@ -442,21 +425,6 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
             return objectMapper.readTree(body);
         } catch (IOException e) {
             throw new RuntimeException("Aster request failed: " + e.getMessage(), e);
-        }
-    }
-
-    protected String sign(String payload) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(apiSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            byte[] signatureBytes = mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
-            StringBuilder builder = new StringBuilder(signatureBytes.length * 2);
-            for (byte b : signatureBytes) {
-                builder.append(String.format(Locale.US, "%02x", b));
-            }
-            return builder.toString();
-        } catch (Exception e) {
-            throw new IllegalStateException("Unable to sign Aster request", e);
         }
     }
 
@@ -490,7 +458,7 @@ public class AsterRestApi extends BaseRestApi implements IAsterRestApi {
 
     protected void requirePrivateApi() {
         if (publicApiOnly) {
-            throw new IllegalStateException("Aster private API requires apiKey/apiSecret configuration.");
+            throw new IllegalStateException("Aster private API requires user/signer/privateKey configuration.");
         }
     }
 

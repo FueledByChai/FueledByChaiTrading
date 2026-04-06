@@ -39,9 +39,9 @@ public class AsterRestApiProvider implements ExchangeRestApiProvider<IAsterRestA
     public IAsterRestApi getPrivateApi() {
         AsterConfiguration config = AsterConfiguration.getInstance();
         if (!config.hasPrivateKeyConfiguration()) {
-            throw new IllegalStateException("Aster private API requires api key and api secret configuration.");
+            throw new IllegalStateException("Aster private API requires user, signer, and private key configuration.");
         }
         return new AsterRestApi(config.getRestUrl(), config.getSpotRestUrl(), config.getApiKey(),
-                config.getApiSecret(), config.getRecvWindow());
+                config.getApiSigner(), config.getApiSecret());
     }
 }
