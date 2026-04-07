@@ -73,6 +73,10 @@ public interface IQuoteEngine {
 
     abstract void unsubscribeOrderFlow(Ticker ticker, OrderFlowListener listener);
 
+    abstract void subscribeGlobalOrderFlow(OrderFlowListener listener);
+
+    abstract void unsubscribeGlobalOrderFlow(OrderFlowListener listener);
+
     /**
      * Start the quote engine.
      */
