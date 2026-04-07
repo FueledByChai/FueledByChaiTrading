@@ -471,6 +471,113 @@ class ParadexRestApiTest {
         });
     }
 
+    @Test
+    void testParseInstrumentDescriptors_Option() {
+        // Given - Real Paradex option response shape (BTC-USD-26JUN26-67000-C)
+        // expiry_at = 1782460800000 → 2026-06-26 UTC
+        String optionJson = "{\n" + "    \"results\": [\n" + "        {\n"
+                + "            \"symbol\": \"BTC-USD-26JUN26-67000-C\",\n"
+                + "            \"base_currency\": \"BTC\",\n" + "            \"quote_currency\": \"USD\",\n"
+                + "            \"settlement_currency\": \"USDC\",\n"
+                + "            \"order_size_increment\": \"0.001\",\n"
+                + "            \"price_tick_size\": \"0.01\",\n" + "            \"min_notional\": \"20\",\n"
+                + "            \"expiry_at\": 1782460800000,\n" + "            \"asset_kind\": \"OPTION\",\n"
+                + "            \"option_type\": \"CALL\",\n" + "            \"strike_price\": \"67000\",\n"
+                + "            \"funding_period_hours\": 0\n" + "        }\n" + "    ]\n" + "}";
+
+        // When
+        InstrumentDescriptor[] result = paradexRestApi.parseInstrumentDescriptors(InstrumentType.OPTION, optionJson);
+
+        // Then
+        assertNotNull(result);
+        assertEquals(1, result.length);
+        InstrumentDescriptor descriptor = result[0];
+        assertEquals(InstrumentType.OPTION, descriptor.getInstrumentType());
+        assertEquals(Exchange.PARADEX, descriptor.getExchange());
+        assertEquals("BTC-USD-26JUN26-67000-C", descriptor.getExchangeSymbol());
+        // Common symbol encodes strike, expiry, right so the translator can decode it.
+        assertEquals("BTC/USD-20260626-67000-C", descriptor.getCommonSymbol());
+        assertEquals("BTC", descriptor.getBaseCurrency());
+        assertEquals("USD", descriptor.getQuoteCurrency());
+        assertEquals(new BigDecimal("0.001"), descriptor.getOrderSizeIncrement());
+        assertEquals(new BigDecimal("0.01"), descriptor.getPriceTickSize());
+    }
+
+    @Test
+    void testParseInstrumentDescriptors_OptionPut() {
+        // expiry_at = 1782460800000 → 2026-06-26 UTC
+        String optionJson = "{\n" + "    \"results\": [\n" + "        {\n"
+                + "            \"symbol\": \"BTC-USD-26JUN26-67000-P\",\n"
+                + "            \"base_currency\": \"BTC\",\n" + "            \"quote_currency\": \"USD\",\n"
+                + "            \"order_size_increment\": \"0.001\",\n"
+                + "            \"price_tick_size\": \"0.01\",\n" + "            \"min_notional\": \"20\",\n"
+                + "            \"expiry_at\": 1782460800000,\n" + "            \"asset_kind\": \"OPTION\",\n"
+                + "            \"option_type\": \"PUT\",\n" + "            \"strike_price\": \"67000.00\",\n"
+                + "            \"funding_period_hours\": 0\n" + "        }\n" + "    ]\n" + "}";
+
+        InstrumentDescriptor[] result = paradexRestApi.parseInstrumentDescriptors(InstrumentType.OPTION, optionJson);
+
+        assertNotNull(result);
+        assertEquals(1, result.length);
+        // Strike is normalized via stripTrailingZeros() so 67000.00 → 67000
+        assertEquals("BTC/USD-20260626-67000-P", result[0].getCommonSymbol());
+    }
+
+    // ============= Tests for getBBO URL building =============
+
+    @Test
+    void testBuildBBOUrl_PerpExchangeSymbol() {
+        String url = paradexRestApi.buildBBOUrl("BTC-USD-PERP");
+        assertEquals("https://api.testnet.paradex.trade/v1/bbo/BTC-USD-PERP", url);
+    }
+
+    @Test
+    void testBuildBBOUrl_OptionExchangeSymbol() {
+        String url = paradexRestApi.buildBBOUrl("BTC-USD-26JUN26-67000-C");
+        assertEquals("https://api.testnet.paradex.trade/v1/bbo/BTC-USD-26JUN26-67000-C", url);
+    }
+
+    @Test
+    void testBuildBBOUrl_EncodesSlashInMarket() {
+        // A slash in the market must be percent-encoded so it doesn't split
+        // the path and trigger Paradex's auth-protected /bbo handler.
+        String url = paradexRestApi.buildBBOUrl("BTC/USD");
+        assertEquals("https://api.testnet.paradex.trade/v1/bbo/BTC%2FUSD", url);
+    }
+
+    @Test
+    void testBuildBBOUrl_EncodesSlashInOptionCommonSymbol() {
+        String url = paradexRestApi.buildBBOUrl("BTC/USD-20260626-67000-C");
+        assertEquals("https://api.testnet.paradex.trade/v1/bbo/BTC%2FUSD-20260626-67000-C", url);
+    }
+
+    @Test
+    void testGetBBO_RejectsBlankMarket() {
+        assertThrows(IllegalArgumentException.class, () -> paradexRestApi.getBBO(""));
+        assertThrows(IllegalArgumentException.class, () -> paradexRestApi.getBBO("   "));
+        assertThrows(IllegalArgumentException.class, () -> paradexRestApi.getBBO(null));
+    }
+
+    @Test
+    void testParseInstrumentDescriptors_OptionMissingExpiry() {
+        // Given - Option JSON missing expiry_at
+        String optionJson = "{\n" + "    \"results\": [\n" + "        {\n"
+                + "            \"symbol\": \"BTC-USD-26JUN26-67000-C\",\n"
+                + "            \"base_currency\": \"BTC\",\n" + "            \"quote_currency\": \"USD\",\n"
+                + "            \"order_size_increment\": \"0.001\",\n"
+                + "            \"price_tick_size\": \"0.01\",\n" + "            \"min_notional\": \"20\",\n"
+                + "            \"asset_kind\": \"OPTION\",\n" + "            \"option_type\": \"CALL\",\n"
+                + "            \"strike_price\": \"67000\",\n" + "            \"funding_period_hours\": 0\n"
+                + "        }\n" + "    ]\n" + "}";
+
+        // When - Missing option metadata should cause the option to be skipped
+        InstrumentDescriptor[] result = paradexRestApi.parseInstrumentDescriptors(InstrumentType.OPTION, optionJson);
+
+        // Then
+        assertNotNull(result);
+        assertEquals(0, result.length);
+    }
+
     // ============= Tests for isValidAssetKindForInstrumentType method
     // =============
 
