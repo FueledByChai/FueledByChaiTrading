@@ -105,6 +105,33 @@ public class ParadexTickerRegistryTest {
     }
 
     @Test
+    public void testCommonSymbolToExchangeSymbol_OptionStructuredCommonSymbol() {
+        // Common-symbol form produced by parseInstrumentDescriptors:
+        // BASE/QUOTE-YYYYMMDD-STRIKE-RIGHT
+        String result = tickerRegistry.commonSymbolToExchangeSymbol(InstrumentType.OPTION,
+                "BTC/USD-20260626-67000-C");
+        assertEquals("BTC-USD-26JUN26-67000-C", result);
+    }
+
+    @Test
+    public void testCommonSymbolToExchangeSymbol_OptionSlashSeparatedExchangeSymbol() {
+        // Slash-separated mirror of the exchange symbol
+        // (BASE/QUOTE/DDMonYY/STRIKE/RIGHT). This is the form some upstream
+        // services pass because '/' is more URL-/path-friendly. The registry
+        // should normalise it back to the proper Paradex exchange symbol.
+        String result = tickerRegistry.commonSymbolToExchangeSymbol(InstrumentType.OPTION,
+                "BTC/USD/24APR26/75000/C");
+        assertEquals("BTC-USD-24APR26-75000-C", result);
+    }
+
+    @Test
+    public void testCommonSymbolToExchangeSymbol_OptionSlashSeparatedSingleDigitDay() {
+        String result = tickerRegistry.commonSymbolToExchangeSymbol(InstrumentType.OPTION,
+                "BTC/USD/9APR26/69000/P");
+        assertEquals("BTC-USD-9APR26-69000-P", result);
+    }
+
+    @Test
     public void testInitializeRegistersPerpAndSpotDescriptors() {
         InstrumentDescriptor perpDescriptor = new InstrumentDescriptor(InstrumentType.PERPETUAL_FUTURES,
                 Exchange.PARADEX, "BTC", "BTC-USD-PERP", "BTC", "USD", new BigDecimal("0.001"), new BigDecimal("0.1"),

@@ -109,30 +109,70 @@ public class ParadexQuoteEngine extends QuoteEngine
         if (ticker == null) {
             throw new IllegalArgumentException("ticker is required");
         }
-        String market = ticker.getSymbol();
-        JsonObject response = restApi.getBBO(market);
+        Ticker canonical = canonicalize(ticker);
+        JsonObject response = restApi.getBBO(canonical.getSymbol());
         if (response == null) {
-            throw new IllegalStateException("No BBO data returned for " + market);
+            throw new IllegalStateException("No BBO data returned for " + canonical.getSymbol());
         }
         ZonedDateTime now = ZonedDateTime.now(ZoneId.of("UTC"));
-        Level1Quote quote = new Level1Quote(ticker, now);
+        Level1Quote quote = new Level1Quote(canonical, now);
         BigDecimal bidPrice = getBigDecimalField(response, "bid");
         BigDecimal bidSize = getBigDecimalField(response, "bid_size");
         BigDecimal askPrice = getBigDecimalField(response, "ask");
         BigDecimal askSize = getBigDecimalField(response, "ask_size");
         if (bidPrice != null) {
-            quote.addQuote(QuoteType.BID, ticker.formatPrice(bidPrice));
+            quote.addQuote(QuoteType.BID, canonical.formatPrice(bidPrice));
         }
         if (bidSize != null) {
             quote.addQuote(QuoteType.BID_SIZE, bidSize);
         }
         if (askPrice != null) {
-            quote.addQuote(QuoteType.ASK, ticker.formatPrice(askPrice));
+            quote.addQuote(QuoteType.ASK, canonical.formatPrice(askPrice));
         }
         if (askSize != null) {
             quote.addQuote(QuoteType.ASK_SIZE, askSize);
         }
         return quote;
+    }
+
+    /**
+     * Returns the canonical {@link Ticker} for the given input by resolving it
+     * through the ticker registry. If the input ticker's symbol already
+     * matches a registered Paradex exchange symbol it is returned as-is;
+     * otherwise the registry is consulted (first by broker symbol, then by
+     * common symbol) to find the canonical Ticker. This protects callers that
+     * hand the engine tickers built from user-friendly forms — e.g. an option
+     * carrying {@code BTC/USD/24APR26/75000/C} or {@code BTC/USD-20260424-75000-C}
+     * instead of Paradex's {@code BTC-USD-24APR26-75000-C} — by returning the
+     * registry-cached canonical Ticker so all downstream calls (REST URLs,
+     * WebSocket channel names, OrderBookRegistry keys) use a consistent symbol.
+     * If lookup fails the original ticker is returned unchanged.
+     */
+    protected Ticker canonicalize(Ticker ticker) {
+        if (ticker == null) {
+            return null;
+        }
+        String symbol = ticker.getSymbol();
+        if (symbol == null) {
+            return ticker;
+        }
+        InstrumentType instrumentType = ticker.getInstrumentType();
+        if (instrumentType == null) {
+            return ticker;
+        }
+        // Fast path: a symbol that already matches a registered broker symbol
+        // (no slash in it, in practice) maps directly to its cached Ticker.
+        Ticker direct = tickerRegistry.lookupByBrokerSymbol(instrumentType, symbol);
+        if (direct != null) {
+            return direct;
+        }
+        // Otherwise treat the input as a common-symbol form and let the
+        // registry's commonSymbolToExchangeSymbol logic translate it.
+        Ticker viaCommon = tickerRegistry.lookupByCommonSymbol(instrumentType, symbol);
+        if (viaCommon != null) {
+            return viaCommon;
+        }
+        return ticker;
     }
 
     protected BigDecimal getBigDecimalField(JsonObject object, String key) {
@@ -148,34 +188,52 @@ public class ParadexQuoteEngine extends QuoteEngine
 
     @Override
     public void subscribeMarketDepth(Ticker ticker, Level2QuoteListener listener) {
-        logger.debug("Subscribing to market depth for ticker: {} Listener: {}", ticker.getSymbol(), listener);
-        super.subscribeMarketDepth(ticker, listener);
-        OrderBookRegistry.getInstance().getOrderBook(ticker).addOrderBookUpdateListener(this);
+        Ticker canonical = canonicalize(ticker);
+        logger.debug("Subscribing to market depth for ticker: {} Listener: {}", canonical.getSymbol(), listener);
+        super.subscribeMarketDepth(canonical, listener);
+        OrderBookRegistry.getInstance().getOrderBook(canonical).addOrderBookUpdateListener(this);
+    }
+
+    @Override
+    public void unsubscribeMarketDepth(Ticker ticker, Level2QuoteListener listener) {
+        super.unsubscribeMarketDepth(canonicalize(ticker), listener);
     }
 
     @Override
     public void subscribeLevel1(Ticker ticker, Level1QuoteListener listener) {
-        super.subscribeLevel1(ticker, listener);
-        OrderBookRegistry.getInstance().getOrderBook(ticker).addOrderBookUpdateListener(this);
-        MarketsSummaryWebSocketClient marketsSummaryClient = marketsSummaryClients.get(ticker);
+        Ticker canonical = canonicalize(ticker);
+        super.subscribeLevel1(canonical, listener);
+        OrderBookRegistry.getInstance().getOrderBook(canonical).addOrderBookUpdateListener(this);
+        MarketsSummaryWebSocketClient marketsSummaryClient = marketsSummaryClients.get(canonical);
         if (marketsSummaryClient == null) {
             marketsSummaryClient = new MarketsSummaryWebSocketClient();
-            marketsSummaryClients.put(ticker, marketsSummaryClient);
-            marketsSummaryClient.startMarketsSummaryWSClient(ticker, this);
+            marketsSummaryClients.put(canonical, marketsSummaryClient);
+            marketsSummaryClient.startMarketsSummaryWSClient(canonical, this);
         }
 
     }
 
     @Override
+    public void unsubscribeLevel1(Ticker ticker, Level1QuoteListener listener) {
+        super.unsubscribeLevel1(canonicalize(ticker), listener);
+    }
+
+    @Override
     public void subscribeOrderFlow(Ticker ticker, OrderFlowListener listener) {
-        super.subscribeOrderFlow(ticker, listener);
-        TradesWebSocketClient tradesClient = tradesClients.get(ticker);
+        Ticker canonical = canonicalize(ticker);
+        super.subscribeOrderFlow(canonical, listener);
+        TradesWebSocketClient tradesClient = tradesClients.get(canonical);
         if (tradesClient == null) {
             tradesClient = new TradesWebSocketClient();
-            tradesClients.put(ticker, tradesClient);
-            tradesClient.startTradesWSClient(ticker, this);
+            tradesClients.put(canonical, tradesClient);
+            tradesClient.startTradesWSClient(canonical, this);
         }
 
+    }
+
+    @Override
+    public void unsubscribeOrderFlow(Ticker ticker, OrderFlowListener listener) {
+        super.unsubscribeOrderFlow(canonicalize(ticker), listener);
     }
 
     @Override
@@ -220,10 +278,20 @@ public class ParadexQuoteEngine extends QuoteEngine
             return;
         }
 
-        // Format the price according to the ticker's minimum tick size precision
-        BigDecimal formattedPrice = ticker.formatPrice(price);
+        BigDecimal sizeDecimal = parseBigDecimal(size);
+        if (sizeDecimal == null) {
+            logger.debug("Skipping trade update for '{}' with missing/blank size", market);
+            return;
+        }
 
-        OrderFlow orderFlow = new OrderFlow(ticker, formattedPrice, new BigDecimal(size), OrderFlow.Side.valueOf(side),
+        // Format the price according to the ticker's minimum tick size precision
+        BigDecimal formattedPrice = ticker.formatPrice(parseBigDecimal(price));
+        if (formattedPrice == null) {
+            logger.debug("Skipping trade update for '{}' with missing/blank price", market);
+            return;
+        }
+
+        OrderFlow orderFlow = new OrderFlow(ticker, formattedPrice, sizeDecimal, OrderFlow.Side.valueOf(side),
                 convertToZonedDateTime(createdAtTimestamp));
         super.fireOrderFlow(orderFlow);
     }
@@ -238,32 +306,68 @@ public class ParadexQuoteEngine extends QuoteEngine
             return;
         }
 
-        BigDecimal volumeNotional = ticker.formatPrice(lastPrice).multiply(new BigDecimal(volume24h));
-        BigDecimal openInterestBigDecimal = new BigDecimal(openInterest);
-        BigDecimal openInterestNotional = ticker.formatPrice(lastPrice).multiply(openInterestBigDecimal);
+        // Paradex sends empty strings for fields that have no value yet
+        // (common for newly-listed options without trading activity). Parse
+        // each field defensively and only populate the corresponding quote
+        // entry when we actually have a number.
+        BigDecimal lastPriceDecimal = ticker.formatPrice(parseBigDecimal(lastPrice));
+        BigDecimal markPriceDecimal = ticker.formatPrice(parseBigDecimal(markPrice));
+        BigDecimal openInterestDecimal = parseBigDecimal(openInterest);
+        BigDecimal volume24hDecimal = parseBigDecimal(volume24h);
+        BigDecimal underlyingPriceDecimal = ticker.formatPrice(parseBigDecimal(underlyingPrice));
 
         // The bid and the ask from this market summary websocket aren't reliably
-        // upddated, better to use thee
-        // top of the order book.
+        // updated, better to use the top of the order book.
         Map<QuoteType, BigDecimal> quoteValues = new HashMap<>();
-        quoteValues.put(QuoteType.LAST, ticker.formatPrice(lastPrice));
-        quoteValues.put(QuoteType.MARK_PRICE, ticker.formatPrice(markPrice));
-        quoteValues.put(QuoteType.OPEN_INTEREST, new BigDecimal(openInterest));
-        quoteValues.put(QuoteType.VOLUME, new BigDecimal(volume24h));
-        quoteValues.put(QuoteType.OPEN_INTEREST, openInterestBigDecimal);
-        quoteValues.put(QuoteType.OPEN_INTEREST_NOTIONAL, openInterestNotional);
-        quoteValues.put(QuoteType.VOLUME_NOTIONAL, volumeNotional);
-        quoteValues.put(QuoteType.UNDERLYING_PRICE, ticker.formatPrice(underlyingPrice));
+        putIfNotNull(quoteValues, QuoteType.LAST, lastPriceDecimal);
+        putIfNotNull(quoteValues, QuoteType.MARK_PRICE, markPriceDecimal);
+        putIfNotNull(quoteValues, QuoteType.OPEN_INTEREST, openInterestDecimal);
+        putIfNotNull(quoteValues, QuoteType.VOLUME, volume24hDecimal);
+        putIfNotNull(quoteValues, QuoteType.UNDERLYING_PRICE, underlyingPriceDecimal);
+        if (lastPriceDecimal != null && volume24hDecimal != null) {
+            quoteValues.put(QuoteType.VOLUME_NOTIONAL, lastPriceDecimal.multiply(volume24hDecimal));
+        }
+        if (lastPriceDecimal != null && openInterestDecimal != null) {
+            quoteValues.put(QuoteType.OPEN_INTEREST_NOTIONAL, lastPriceDecimal.multiply(openInterestDecimal));
+        }
         addFundingRateQuotes(ticker, fundingRate, quoteValues);
 
         ILevel1Quote quote = new Level1Quote(ticker, convertToZonedDateTime(createdAtTimestamp), quoteValues);
         super.fireLevel1Quote(quote);
     }
 
+    /**
+     * Parses a possibly blank/null string into a {@link BigDecimal}, returning
+     * {@code null} for blank inputs and unparseable values. Paradex's WebSocket
+     * feeds send empty strings for fields with no value yet (common for
+     * newly-listed options without activity), so callers must guard against
+     * these instead of letting them throw {@link NumberFormatException}.
+     */
+    protected BigDecimal parseBigDecimal(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return new BigDecimal(value);
+        } catch (NumberFormatException e) {
+            logger.debug("Could not parse BigDecimal from value '{}'", value);
+            return null;
+        }
+    }
+
+    private static void putIfNotNull(Map<QuoteType, BigDecimal> map, QuoteType key, BigDecimal value) {
+        if (value != null) {
+            map.put(key, value);
+        }
+    }
+
     protected Ticker resolveTicker(String symbol) {
         Ticker ticker = tickerRegistry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, symbol);
         if (ticker == null) {
             ticker = tickerRegistry.lookupByBrokerSymbol(InstrumentType.CRYPTO_SPOT, symbol);
+        }
+        if (ticker == null) {
+            ticker = tickerRegistry.lookupByBrokerSymbol(InstrumentType.OPTION, symbol);
         }
         return ticker;
     }
