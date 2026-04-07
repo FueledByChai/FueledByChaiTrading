@@ -147,6 +147,9 @@ public abstract class QuoteEngine implements IQuoteEngine {
     protected Map<Ticker, List<OrderFlowListener>> orderFlowListenerMap = Collections
             .synchronizedMap(new HashMap<Ticker, List<OrderFlowListener>>());
 
+    protected List<OrderFlowListener> globalOrderFlowListenerList = Collections
+            .synchronizedList(new ArrayList<OrderFlowListener>());
+
     public QuoteEngine() {
         this(500); // Default to 500 threads
     }
@@ -254,6 +257,20 @@ public abstract class QuoteEngine implements IQuoteEngine {
     }
 
     @Override
+    public void subscribeGlobalOrderFlow(OrderFlowListener listener) {
+        synchronized (globalOrderFlowListenerList) {
+            globalOrderFlowListenerList.add(listener);
+        }
+    }
+
+    @Override
+    public void unsubscribeGlobalOrderFlow(OrderFlowListener listener) {
+        synchronized (globalOrderFlowListenerList) {
+            globalOrderFlowListenerList.remove(listener);
+        }
+    }
+
+    @Override
     public void fireLevel1Quote(final ILevel1Quote quote) {
         synchronized (level1ListenerMap) {
             // Fire to global listeners
@@ -325,6 +342,23 @@ public abstract class QuoteEngine implements IQuoteEngine {
     @Override
     public void fireOrderFlow(OrderFlow orderFlow) {
         synchronized (orderFlowListenerMap) {
+            // Fire to global listeners
+            if (globalOrderFlowListenerList != null) {
+                for (final OrderFlowListener listener : globalOrderFlowListenerList) {
+                    try {
+                        quoteExecutor.submit(() -> {
+                            try {
+                                listener.orderflowReceived(orderFlow);
+                            } catch (Exception ex) {
+                                logger.warn("Error processing OrderFlow for global listener", ex);
+                            }
+                        });
+                    } catch (Exception ex) {
+                        logger.warn("Error submitting OrderFlow task for global listener", ex);
+                    }
+                }
+            }
+
             List<OrderFlowListener> listeners = orderFlowListenerMap.get(orderFlow.getTicker());
             if (listeners == null) {
                 return;
