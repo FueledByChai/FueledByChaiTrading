@@ -6,13 +6,17 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.Proxy;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import org.json.JSONObject;
@@ -229,8 +233,7 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
         if (market == null || market.isBlank()) {
             throw new IllegalArgumentException("market is required");
         }
-        String path = "/bbo/" + market.trim();
-        String newUrl = baseUrl + path;
+        String newUrl = buildBBOUrl(market.trim());
 
         Request request = new Request.Builder().url(newUrl).get().build();
         logger.info("Request: " + request);
@@ -251,6 +254,23 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
             logger.error(e.getMessage(), e);
             throw new ResponseException("Network error getting Paradex BBO: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Builds the BBO request URL for the given market. Uses
+     * {@link HttpUrl.Builder#addPathSegment(String)} so the market is always
+     * treated as a single, properly-encoded path segment. Without this, a
+     * slash in the market value (e.g. a common-symbol form like
+     * {@code BTC/USD-20260626-67000-C}) would split the URL into extra path
+     * segments and Paradex would route the request to a different
+     * (auth-protected) handler, returning a misleading 401 INVALID_TOKEN error.
+     */
+    protected String buildBBOUrl(String market) {
+        HttpUrl base = HttpUrl.parse(baseUrl + "/bbo");
+        if (base == null) {
+            throw new ResponseException("Invalid baseUrl for Paradex BBO request: " + baseUrl, 0);
+        }
+        return base.newBuilder().addPathSegment(market).build().toString();
     }
 
     @Override
@@ -1240,8 +1260,20 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
                 String baseCurrency = instrumentObj.get("base_currency").getAsString();
                 String quoteCurrency = instrumentObj.get("quote_currency").getAsString();
 
-                // Create common symbol (without exchange-specific suffix)
-                String commonSymbol = symbol.split("-")[0];
+                // Create common symbol. For OPTION instruments we encode the
+                // strike, expiry, and right into the common symbol so the
+                // ParadexTickerTranslator can decode them. For everything else
+                // we strip the exchange-specific suffix.
+                String commonSymbol;
+                if (instrumentType == InstrumentType.OPTION) {
+                    commonSymbol = buildOptionCommonSymbol(instrumentObj, baseCurrency, quoteCurrency);
+                    if (commonSymbol == null) {
+                        logger.warn("Skipping option instrument '{}' due to missing/invalid option metadata", symbol);
+                        continue;
+                    }
+                } else {
+                    commonSymbol = symbol.split("-")[0];
+                }
                 String exchangeSymbol = symbol;
 
                 // Parse tick size and order size increment from the JSON
@@ -1266,6 +1298,65 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
             logger.error("Error parsing instrument descriptors: " + e.getMessage(), e);
             throw new FueledByChaiException(e);
         }
+    }
+
+    /**
+     * Builds a structured common symbol for an option instrument in the form
+     * {@code BASE/QUOTE-YYYYMMDD-STRIKE-RIGHT}, e.g.
+     * {@code BTC/USD-20260626-67000-C}. The {@link ParadexTickerTranslator}
+     * decodes this format to populate the option-specific fields on the
+     * resulting {@link Ticker}.
+     *
+     * @return the encoded common symbol, or {@code null} if any required
+     *         option metadata is missing or invalid.
+     */
+    protected String buildOptionCommonSymbol(JsonObject instrumentObj, String baseCurrency, String quoteCurrency) {
+        if (baseCurrency == null || quoteCurrency == null) {
+            return null;
+        }
+        if (!instrumentObj.has("option_type") || instrumentObj.get("option_type").isJsonNull()) {
+            return null;
+        }
+        if (!instrumentObj.has("strike_price") || instrumentObj.get("strike_price").isJsonNull()) {
+            return null;
+        }
+        if (!instrumentObj.has("expiry_at") || instrumentObj.get("expiry_at").isJsonNull()) {
+            return null;
+        }
+
+        String optionType = instrumentObj.get("option_type").getAsString();
+        String rightLetter;
+        if ("CALL".equalsIgnoreCase(optionType)) {
+            rightLetter = "C";
+        } else if ("PUT".equalsIgnoreCase(optionType)) {
+            rightLetter = "P";
+        } else {
+            return null;
+        }
+
+        String strikePrice;
+        try {
+            strikePrice = new BigDecimal(instrumentObj.get("strike_price").getAsString()).stripTrailingZeros()
+                    .toPlainString();
+        } catch (NumberFormatException e) {
+            return null;
+        }
+
+        long expiryMillis;
+        try {
+            expiryMillis = instrumentObj.get("expiry_at").getAsLong();
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        if (expiryMillis <= 0L) {
+            return null;
+        }
+
+        LocalDate expiryDate = Instant.ofEpochMilli(expiryMillis).atZone(ZoneOffset.UTC).toLocalDate();
+        String expiryToken = String.format(Locale.US, "%04d%02d%02d", expiryDate.getYear(), expiryDate.getMonthValue(),
+                expiryDate.getDayOfMonth());
+
+        return baseCurrency + "/" + quoteCurrency + "-" + expiryToken + "-" + strikePrice + "-" + rightLetter;
     }
 
     /**

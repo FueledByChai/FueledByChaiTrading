@@ -389,7 +389,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
     public BrokerRequestResult placeOrder(OrderTicket order) {
         order.setOrderEntryTime(getCurrentTime());
         delayRestCall();
-        String orderId = System.currentTimeMillis() + "-" + (int) (Math.random() * 10000);
+        String orderId = UUID.randomUUID().toString();
         order.setOrderId(orderId);
 
         Ticker ticker = order.getTicker();
@@ -742,7 +742,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
 
             fill = new Fill();
             fill.setCommission(BigDecimal.valueOf(fee));
-            fill.setFillId(System.currentTimeMillis() + "-" + (int) (Math.random() * 10000));
+            fill.setFillId(UUID.randomUUID().toString());
             fill.setOrderId(orderId);
             fill.setClientOrderId(fillableOrder.getClientOrderId());
             fill.setPrice(averageFillPrice);
@@ -1190,11 +1190,16 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
         if (outputDir == null || outputDir.isBlank()) {
             return filename;
         }
-        File dir = new File(outputDir);
-        if (!dir.exists()) {
-            dir.mkdirs();
+        java.nio.file.Path outputPath = Paths.get(outputDir);
+        if (Files.exists(outputPath) && !Files.isDirectory(outputPath)) {
+            throw new IllegalStateException("Output path exists but is not a directory: " + outputDir);
         }
-        return Paths.get(outputDir, filename).toString();
+        try {
+            Files.createDirectories(outputPath);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to create output directory: " + outputDir, e);
+        }
+        return outputPath.resolve(filename).toString();
     }
 
     protected String sanitizeFilenameComponent(String value) {
