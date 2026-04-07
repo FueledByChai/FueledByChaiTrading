@@ -39,7 +39,7 @@ public class OrderStatus implements Serializable {
     };
 
     public enum CancelReason {
-        NONE, POST_ONLY_WOULD_CROSS, USER_CANCELED, UNKNOWN
+        NONE, POST_ONLY_WOULD_CROSS, USER_CANCELED, NO_MARKET_DATA, UNKNOWN
     }
 
     protected Status status;
