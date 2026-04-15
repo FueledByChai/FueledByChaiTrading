@@ -58,6 +58,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     <module>bybit-market-data-impl</module>
     <module>aster-market-data-impl</module>
     <module>drift-market-data-impl</module>
+    <module>hibachi-market-data-impl</module>
   </modules>
   
 </project>
