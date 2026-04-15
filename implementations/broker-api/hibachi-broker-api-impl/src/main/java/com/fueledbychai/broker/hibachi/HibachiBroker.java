@@ -1,6 +1,5 @@
 package com.fueledbychai.broker.hibachi;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -26,7 +25,6 @@ import com.fueledbychai.util.ExchangeRestApiFactory;
 public class HibachiBroker extends AbstractBasicBroker {
 
     private static final Logger logger = LoggerFactory.getLogger(HibachiBroker.class);
-    private static final BigDecimal DEFAULT_MAX_FEES_PERCENT = new BigDecimal("0.5");
 
     protected final IHibachiRestApi restApi;
     protected final HibachiConfiguration config;
@@ -119,7 +117,7 @@ public class HibachiBroker extends AbstractBasicBroker {
             }
             long nonce = nextNonce();
             HibachiTranslator.SignedRequest request = translator.translatePlace(
-                    order, contract, accountId, nonce, DEFAULT_MAX_FEES_PERCENT, signer);
+                    order, contract, accountId, nonce, config.getOrderMaxFeesPercent(), signer);
             JsonNode response = tradeWs.placeOrder(request.params, request.signature);
             return interpretResponse(response, "placeOrder");
         } catch (Exception e) {
@@ -144,7 +142,7 @@ public class HibachiBroker extends AbstractBasicBroker {
             }
             long nonce = nextNonce();
             HibachiTranslator.SignedRequest request = translator.translateModify(
-                    order, contract, accountId, nonce, DEFAULT_MAX_FEES_PERCENT, signer);
+                    order, contract, accountId, nonce, config.getOrderMaxFeesPercent(), signer);
             JsonNode response = tradeWs.modifyOrder(request.params, request.signature);
             return interpretResponse(response, "modifyOrder");
         } catch (Exception e) {

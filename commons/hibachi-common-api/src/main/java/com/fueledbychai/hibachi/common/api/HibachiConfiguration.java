@@ -1,5 +1,7 @@
 package com.fueledbychai.hibachi.common.api;
 
+import java.math.BigDecimal;
+
 public class HibachiConfiguration {
 
     public static final String HIBACHI_ENVIRONMENT = "hibachi.environment";
@@ -20,6 +22,7 @@ public class HibachiConfiguration {
     public static final String HIBACHI_PRIVATE_KEY = "hibachi.private.key";
     public static final String HIBACHI_CLIENT = "hibachi.client";
     public static final String HIBACHI_ACCOUNT_WS_PING_SECONDS = "hibachi.account.ws.ping.seconds";
+    public static final String HIBACHI_ORDER_MAX_FEES_PERCENT = "hibachi.order.max.fees.percent";
 
     private static final String DEFAULT_ENVIRONMENT = "prod";
     private static final String DEFAULT_PROD_REST_URL = "https://api.hibachi.xyz";
@@ -34,6 +37,9 @@ public class HibachiConfiguration {
     private static final String DEFAULT_TESTNET_WS_TRADE_URL = "wss://api-test.hibachi.xyz/ws/trade";
     private static final String DEFAULT_CLIENT = "FueledByChaiJavaSDK";
     private static final long DEFAULT_ACCOUNT_WS_PING_SECONDS = 14L;
+    // Hibachi fee schedule (as of the integration work): maker = 0 bps, taker = 5 bps.
+    // maxFeesPercent is a cap, so default to the taker rate (0.05% = 5 bps) to cover both sides.
+    private static final BigDecimal DEFAULT_ORDER_MAX_FEES_PERCENT = new BigDecimal("0.05");
 
     private static volatile HibachiConfiguration instance;
     private static final Object LOCK = new Object();
@@ -51,6 +57,7 @@ public class HibachiConfiguration {
     private final String privateKey;
     private final String client;
     private final long accountWsPingSeconds;
+    private final BigDecimal orderMaxFeesPercent;
 
     public static HibachiConfiguration getInstance() {
         if (instance == null) {
@@ -89,6 +96,7 @@ public class HibachiConfiguration {
         this.privateKey = read(HIBACHI_PRIVATE_KEY, null);
         this.client = read(HIBACHI_CLIENT, DEFAULT_CLIENT);
         this.accountWsPingSeconds = readLong(HIBACHI_ACCOUNT_WS_PING_SECONDS, DEFAULT_ACCOUNT_WS_PING_SECONDS);
+        this.orderMaxFeesPercent = readBigDecimal(HIBACHI_ORDER_MAX_FEES_PERCENT, DEFAULT_ORDER_MAX_FEES_PERCENT);
     }
 
     private static String read(String key, String defaultValue) {
@@ -114,6 +122,18 @@ public class HibachiConfiguration {
         }
     }
 
+    private static BigDecimal readBigDecimal(String key, BigDecimal defaultValue) {
+        String value = read(key, null);
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return new BigDecimal(value);
+        } catch (NumberFormatException ignored) {
+            return defaultValue;
+        }
+    }
+
     public String getEnvironment() { return environment; }
     public String getRestUrl() { return restUrl; }
     public String getDataRestUrl() { return dataRestUrl; }
@@ -127,6 +147,7 @@ public class HibachiConfiguration {
     public String getPrivateKey() { return privateKey; }
     public String getClient() { return client; }
     public long getAccountWsPingSeconds() { return accountWsPingSeconds; }
+    public BigDecimal getOrderMaxFeesPercent() { return orderMaxFeesPercent; }
 
     public boolean hasPrivateApiConfiguration() {
         return apiKey != null && !apiKey.isBlank()
