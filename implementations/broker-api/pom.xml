@@ -46,5 +46,6 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
         <module>bybit-broker-api-impl</module>
         <module>drift-broker-api-impl</module>
         <module>aster-broker-api-impl</module>
+        <module>hibachi-broker-api-impl</module>
     </modules>
 </project>
