@@ -42,6 +42,9 @@ public interface IHibachiRestApi {
     /** Top-of-book and ticker stats per symbol. */
     JsonNode getMarketStats();
 
+    /** 24h stats (high, low, volume) for a single symbol. */
+    JsonNode getMarketStats(String symbol);
+
     /** Recent trades for a symbol. */
     JsonNode getRecentTrades(String symbol);
 

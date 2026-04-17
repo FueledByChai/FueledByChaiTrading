@@ -222,10 +222,11 @@ public class HibachiBroker extends AbstractBasicBroker {
     public BrokerRequestResult cancelAllOrders() {
         checkConnected();
         try {
+            long nonce = nextNonce();
             byte[] bytes = com.fueledbychai.hibachi.common.api.signer.HibachiPayloadPacker
-                    .packCancelAll(nextNonce());
+                    .packCancelAll(nonce);
             String signature = signer.sign(bytes);
-            JsonNode response = tradeWs.cancelAll(nextNonce(), signature);
+            JsonNode response = tradeWs.cancelAll(nonce, signature);
             return interpretResponse(response, "cancelAllOrders");
         } catch (Exception e) {
             logger.error("Hibachi cancelAllOrders failed", e);

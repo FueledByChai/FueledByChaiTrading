@@ -16,7 +16,10 @@ public final class HibachiTopicRouter {
     public static final String TOPIC_ASK_BID_PRICE = "ask_bid_price";
 
     /** Topics that compose the framework's Level1 snapshot for Hibachi. */
-    public static final String[] LEVEL1_TOPICS = { TOPIC_ASK_BID_PRICE, TOPIC_MARK_PRICE };
+    public static final String[] LEVEL1_TOPICS = {
+            TOPIC_ASK_BID_PRICE, TOPIC_MARK_PRICE,
+            TOPIC_FUNDING_RATE_ESTIMATION, TOPIC_TRADES
+    };
 
     /** Topic that drives the framework's Level2 (order book) feed. */
     public static final String LEVEL2_TOPIC = TOPIC_ORDERBOOK;

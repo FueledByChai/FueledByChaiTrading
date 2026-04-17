@@ -15,6 +15,7 @@ import com.fueledbychai.marketdata.QuoteEngine;
 import com.fueledbychai.marketdata.QuoteType;
 import com.fueledbychai.util.ITickerRegistry;
 import com.fueledbychai.util.TickerRegistryFactory;
+import com.fueledbychai.websocket.ProxyConfig;
 
 /**
  * Subscribes to Hibachi L1, L2, and order-flow streams for a single perp.
@@ -33,6 +34,9 @@ public class HibachiMarketDataExample {
     protected static final Duration RUN_DURATION = Duration.ofMinutes(1);
 
     public void start(String symbol, InstrumentType instrumentType) throws InterruptedException {
+        ProxyConfig.getInstance().setRunningLocally(true);
+        logger.info("Proxy config: {}", ProxyConfig.getInstance().getProxy());
+
         ITickerRegistry registry = TickerRegistryFactory.getInstance(Exchange.HIBACHI);
         Ticker ticker = registry.lookupByBrokerSymbol(instrumentType, symbol);
         if (ticker == null) {
@@ -59,13 +63,18 @@ public class HibachiMarketDataExample {
     }
 
     protected void onLevel1(ILevel1Quote quote) {
-        logger.info("L1 {} bid={} bidSize={} ask={} askSize={} mark={}",
+        logger.info("L1 {} bid={} bidSize={} ask={} askSize={} mark={} last={} lastSize={} vol={} volNotional={} funding={}",
                 quote.getTicker().getSymbol(),
                 value(quote, QuoteType.BID),
                 value(quote, QuoteType.BID_SIZE),
                 value(quote, QuoteType.ASK),
                 value(quote, QuoteType.ASK_SIZE),
-                value(quote, QuoteType.MARK_PRICE));
+                value(quote, QuoteType.MARK_PRICE),
+                value(quote, QuoteType.LAST),
+                value(quote, QuoteType.LAST_SIZE),
+                value(quote, QuoteType.VOLUME),
+                value(quote, QuoteType.VOLUME_NOTIONAL),
+                value(quote, QuoteType.FUNDING_RATE_APR));
     }
 
     protected void onLevel2(ILevel2Quote quote) {

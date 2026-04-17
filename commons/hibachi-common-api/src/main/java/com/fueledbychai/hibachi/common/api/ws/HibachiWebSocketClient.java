@@ -40,6 +40,9 @@ public class HibachiWebSocketClient extends AbstractWebSocketClient {
         for (Map.Entry<String, String> e : headers.entrySet()) {
             super.addHeader(e.getKey(), e.getValue());
         }
+        // Hibachi's public stream does not reliably satisfy Java-WebSocket's
+        // lost-pong watchdog, which closes the socket after ~60s of no pong.
+        setConnectionLostTimeout(0);
     }
 
     public static HibachiWebSocketClient createMarket(String serverUri,
@@ -60,10 +63,18 @@ public class HibachiWebSocketClient extends AbstractWebSocketClient {
 
     @Override
     public void onOpen(ServerHandshake handshakedata) {
+        logger.info("Hibachi WS onOpen status={} message={}",
+                handshakedata.getHttpStatus(), handshakedata.getHttpStatusMessage());
         processor.connectionOpened();
         if (subscribeMessage != null && !subscribeMessage.isBlank()) {
             send(subscribeMessage);
         }
+    }
+
+    @Override
+    public void onMessage(String message) {
+        logger.debug("Hibachi WS raw recv: {}", message);
+        super.onMessage(message);
     }
 
     @Override
@@ -72,6 +83,12 @@ public class HibachiWebSocketClient extends AbstractWebSocketClient {
         if (processor != null) {
             processor.connectionError(ex);
         }
+    }
+
+    @Override
+    public void onClose(int code, String reason, boolean remote) {
+        logger.info("Hibachi WS onClose code={} remote={} reason={}", code, remote, reason);
+        super.onClose(code, reason, remote);
     }
 
     private static URI buildUri(String serverUri, String hibachiClient) {
