@@ -40,7 +40,37 @@
       "WebFetch(domain:docs.lighter.xyz)",
       "WebFetch(domain:docs.aster.finance)",
       "WebFetch(domain:hyperliquid.gitbook.io)",
-      "WebFetch(domain:drift-labs.github.io)"
+      "WebFetch(domain:drift-labs.github.io)",
+      "WebFetch(domain:api-doc.hibachi.xyz)",
+      "Bash(curl -sS -A \"Mozilla/5.0\" -o /tmp/hibachi_docs.html -w \"%{http_code}\\\\n\" https://api-doc.hibachi.xyz/)",
+      "Bash(curl -sS -A \"Mozilla/5.0\" -o /tmp/hibachi_collection.json -w \"%{http_code}\\\\n\" \"https://api-doc.hibachi.xyz/api/collections/38930884/2sAXxQfD4P?environment=38930884-e5245e24-69ae-4eb4-bb10-aaa4447be197&segregateAuth=true&versionTag=latest\")",
+      "Bash(curl -sS -A \"Mozilla/5.0\" -o /tmp/hibachi_ws_page.html -w \"%{http_code}\\\\n\" \"https://www.postman.com/hibachi-xyz/hibachi-public/collection/6707f03b7c82ad6d2f10477c\")",
+      "Bash(curl -sS -A \"Mozilla/5.0\" \"https://www.postman.com/_api/workspace/public/info?handle=hibachi-xyz&slug=hibachi-public\")",
+      "Bash(curl -sS -A \"Mozilla/5.0\" \"https://www.postman.com/_api/collection/6707f03b7c82ad6d2f10477c\")",
+      "Bash(curl -sS -A \"Mozilla/5.0\" \"https://www.postman.com/_api/collection/6707f03b7c82ad6d2f10477c?owner=38930884\" -o /tmp/hibachi_ws.json -w \"%{http_code}\\\\n\")",
+      "Bash(curl -sS -A \"Mozilla/5.0\" \"https://www.postman.com/_api/collection/6707f03b7c82ad6d2f10477c/summary?user_id=38930884\" -o /tmp/ws_summary.json -w \"%{http_code}\\\\n\")",
+      "WebFetch(domain:github.com)",
+      "Bash(gh api:*)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(x['type'],x['path']\\) for x in d]\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(x['path']\\) for x in d.get\\('tree',[]\\) if x['type']=='blob']\")",
+      "Bash(curl -sS \"https://api.github.com/repos/hibachi-xyz/hibachi_sdk/git/trees/main?recursive=1\" -o /tmp/sdk_tree.json -w \"%{http_code}\\\\n\")",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('/tmp/sdk_tree.json'\\)\\); [print\\(x['path']\\) for x in d.get\\('tree',[]\\) if x['type']=='blob']\")",
+      "Bash(curl -sS https://raw.githubusercontent.com/hibachi-xyz/hibachi_sdk/main/python/hibachi_xyz/__TRACKED_VAR__ -o /tmp/hibachi_sdk/__TRACKED_VAR__ -w '__TRACKED_VAR__: %{http_code}\\\\n')",
+      "Bash(curl -sS https://raw.githubusercontent.com/hibachi-xyz/hibachi_sdk/main/python/examples/__TRACKED_VAR__ -o /tmp/hibachi_sdk/__TRACKED_VAR__ -w '__TRACKED_VAR__: %{http_code}\\\\n')",
+      "Bash(python3 -c ':*)",
+      "Bash(ls -lat /Users/robterpilowski/.claude/projects/-Users-robterpilowski-Code-JavaProjects-FueledByChaiTrading/*.jsonl)",
+      "Bash(grep -v \"^$\")",
+      "Bash(mvn -pl commons/hibachi-common-api -am test -q)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(mvn install *)",
+      "Bash(mvn -pl commons/hibachi-common-api,implementations/market-data-api/hibachi-market-data-impl,implementations/broker-api/hibachi-broker-api-impl test -am)",
+      "Bash(mvn -q -pl commons/hibachi-common-api -am compile -DskipTests)",
+      "Bash(mvn -pl implementations/market-data-api/hibachi-market-data-impl -am compile -DskipTests -q)",
+      "Bash(mvn -pl examples/CryptoExamples -am compile -DskipTests -q)"
+    ],
+    "additionalDirectories": [
+      "/Users/robicemilowski/Code/JavaProjects/FueledByChaiTrading/commons/hibachi-common-api/src/main/java/com/fueledbychai/hibachi/common/api/ws/market"
     ]
   }
 }
