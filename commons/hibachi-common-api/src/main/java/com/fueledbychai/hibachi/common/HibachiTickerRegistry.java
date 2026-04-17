@@ -64,6 +64,9 @@ public class HibachiTickerRegistry extends AbstractTickerRegistry implements ITi
         if (normalized.endsWith("-P")) {
             return normalized;
         }
+        if (normalized.endsWith("/P")) {
+            return normalized.substring(0, normalized.length() - 2) + "-P";
+        }
         if (normalized.contains("/")) {
             return normalized + "-P";
         }

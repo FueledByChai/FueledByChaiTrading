@@ -133,6 +133,11 @@ public class HibachiRestApi extends BaseRestApi implements IHibachiRestApi {
     }
 
     @Override
+    public JsonNode getMarketStats(String symbol) {
+        return publicRequest(dataBaseUrl, "/market/data/stats", symbolParams(symbol));
+    }
+
+    @Override
     public JsonNode getRecentTrades(String symbol) {
         return publicRequest(dataBaseUrl, "/market/data/trades", symbolParams(symbol));
     }

@@ -11,6 +11,10 @@ import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +57,10 @@ public class HibachiQuoteEngine extends QuoteEngine {
 
     private static final Logger logger = LoggerFactory.getLogger(HibachiQuoteEngine.class);
     private static final ZoneId UTC = ZoneId.of("UTC");
+    private static final java.math.MathContext MC = java.math.MathContext.DECIMAL64;
+    private static final BigDecimal HOURS_PER_YEAR = BigDecimal.valueOf(24L * 365L);
+    private static final BigDecimal PERCENT_MULTIPLIER = BigDecimal.valueOf(100);
+    private static final BigDecimal BPS_MULTIPLIER = BigDecimal.valueOf(10000);
 
     protected final IHibachiRestApi restApi;
     protected final ITickerRegistry tickerRegistry;
@@ -62,6 +70,10 @@ public class HibachiQuoteEngine extends QuoteEngine {
     protected volatile HibachiWebSocketClient marketClient;
     protected volatile HibachiJsonProcessor marketProcessor;
     protected volatile boolean started = false;
+
+    protected final Set<String> volumePollingSymbols = ConcurrentHashMap.newKeySet();
+    protected volatile ScheduledExecutorService volumeScheduler;
+    protected volatile ScheduledFuture<?> volumeTask;
 
     public HibachiQuoteEngine() {
         this(ExchangeRestApiFactory.getPublicApi(Exchange.HIBACHI, IHibachiRestApi.class),
@@ -118,6 +130,15 @@ public class HibachiQuoteEngine extends QuoteEngine {
     public void stopEngine() {
         started = false;
         activeSubscriptions.clear();
+        volumePollingSymbols.clear();
+        if (volumeTask != null) {
+            volumeTask.cancel(false);
+            volumeTask = null;
+        }
+        if (volumeScheduler != null) {
+            volumeScheduler.shutdownNow();
+            volumeScheduler = null;
+        }
         HibachiWebSocketClient client = marketClient;
         marketClient = null;
         HibachiJsonProcessor processor = marketProcessor;
@@ -138,6 +159,7 @@ public class HibachiQuoteEngine extends QuoteEngine {
         for (String topic : HibachiTopicRouter.LEVEL1_TOPICS) {
             subscribeTopic(ticker, topic);
         }
+        startVolumePolling(ticker);
     }
 
     @Override
@@ -187,7 +209,13 @@ public class HibachiQuoteEngine extends QuoteEngine {
             marketProcessor.addEventListener(this::onMarketMessage);
             marketClient = HibachiWebSocketClient.createMarket(
                     config.getMarketWsUrl(), marketProcessor, config.getClient(), null);
-            marketClient.connect();
+            if (!marketClient.connectBlocking(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Timed out connecting to Hibachi market WS at "
+                        + config.getMarketWsUrl());
+            }
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted connecting to Hibachi market WS", ie);
         } catch (Exception e) {
             throw new IllegalStateException("Failed to create Hibachi market WS client", e);
         }
@@ -201,7 +229,10 @@ public class HibachiQuoteEngine extends QuoteEngine {
         try {
             String msg = HibachiMarketSubscribeMessage.subscribe(ticker.getSymbol(), topic);
             if (marketClient != null && marketClient.isOpen()) {
+                logger.info("Hibachi WS send: {}", msg);
                 marketClient.send(msg);
+            } else {
+                logger.warn("Hibachi WS not open; dropping subscribe for {} {}", ticker.getSymbol(), topic);
             }
         } catch (Exception e) {
             logger.warn("Failed to send subscribe for {} {}", ticker.getSymbol(), topic, e);
@@ -212,7 +243,9 @@ public class HibachiQuoteEngine extends QuoteEngine {
         if (!started) {
             return;
         }
-        logger.warn("Hibachi market WS closed; will not auto-reconnect in this engine version");
+        logger.warn("Hibachi market WS closed; auto-reconnect is disabled in this engine version because "
+                + "the engine does not rebuild the websocket/subscription state after disconnect. "
+                + "Manual recovery is required before market data will resume.");
     }
 
     protected void onMarketMessage(JsonNode message) {
@@ -222,10 +255,13 @@ public class HibachiQuoteEngine extends QuoteEngine {
         String topic = message.path("topic").asText("");
         String symbol = message.path("symbol").asText("");
         if (topic.isEmpty()) {
+            logger.info("Hibachi WS recv (no topic): {}", message);
             return;
         }
+        logger.info("Hibachi WS dispatch topic={} symbol={}", topic, symbol);
         Ticker ticker = lookupTicker(symbol);
         if (ticker == null) {
+            logger.warn("Hibachi WS no ticker for symbol={} topic={}", symbol, topic);
             return;
         }
         try {
@@ -234,6 +270,7 @@ public class HibachiQuoteEngine extends QuoteEngine {
                 case HibachiTopicRouter.TOPIC_MARK_PRICE -> onMarkPriceUpdate(ticker, message);
                 case HibachiTopicRouter.TOPIC_ORDERBOOK -> onOrderBookUpdate(ticker, message);
                 case HibachiTopicRouter.TOPIC_TRADES -> onTradesUpdate(ticker, message);
+                case HibachiTopicRouter.TOPIC_FUNDING_RATE_ESTIMATION -> onFundingRateUpdate(ticker, message);
                 default -> { /* unhandled topic */ }
             }
         } catch (Exception e) {
@@ -242,15 +279,16 @@ public class HibachiQuoteEngine extends QuoteEngine {
     }
 
     protected void onAskBidUpdate(Ticker ticker, JsonNode message) {
-        Level1Quote quote = new Level1Quote(ticker, toTimestamp(message, "timestamp"));
+        JsonNode data = message.path("data");
+        Level1Quote quote = new Level1Quote(ticker, toTimestamp(message, "timestamp_ms"));
         boolean any = false;
-        BigDecimal bid = decimal(message, "bidPrice");
+        BigDecimal bid = decimal(data, "bidPrice");
         if (bid != null) { quote.addQuote(QuoteType.BID, bid); any = true; }
-        BigDecimal bidSize = decimal(message, "bidSize");
+        BigDecimal bidSize = decimal(data, "bidSize");
         if (bidSize != null) { quote.addQuote(QuoteType.BID_SIZE, bidSize); any = true; }
-        BigDecimal ask = decimal(message, "askPrice");
+        BigDecimal ask = decimal(data, "askPrice");
         if (ask != null) { quote.addQuote(QuoteType.ASK, ask); any = true; }
-        BigDecimal askSize = decimal(message, "askSize");
+        BigDecimal askSize = decimal(data, "askSize");
         if (askSize != null) { quote.addQuote(QuoteType.ASK_SIZE, askSize); any = true; }
         if (any) {
             fireLevel1Quote(quote);
@@ -258,9 +296,10 @@ public class HibachiQuoteEngine extends QuoteEngine {
     }
 
     protected void onMarkPriceUpdate(Ticker ticker, JsonNode message) {
-        Level1Quote quote = new Level1Quote(ticker, toTimestamp(message, "timestamp"));
+        JsonNode data = message.path("data");
+        Level1Quote quote = new Level1Quote(ticker, toTimestamp(message, "timestamp_ms"));
         boolean any = false;
-        BigDecimal mark = firstDecimal(message, "markPrice", "price");
+        BigDecimal mark = firstDecimal(data, "markPrice", "price");
         if (mark != null) { quote.addQuote(QuoteType.MARK_PRICE, mark); any = true; }
         if (any) {
             fireLevel1Quote(quote);
@@ -268,40 +307,119 @@ public class HibachiQuoteEngine extends QuoteEngine {
     }
 
     protected void onOrderBookUpdate(Ticker ticker, JsonNode message) {
-        List<OrderBook.PriceLevel> bids = parseLevels(message.path("bids"));
-        List<OrderBook.PriceLevel> asks = parseLevels(message.path("asks"));
+        JsonNode data = message.path("data");
+        List<OrderBook.PriceLevel> bids = parseLevels(data.path("bid").path("levels"));
+        List<OrderBook.PriceLevel> asks = parseLevels(data.path("ask").path("levels"));
         if (bids.isEmpty() && asks.isEmpty()) {
             return;
         }
         OrderBook orderBook = new OrderBook(ticker, ticker.getMinimumTickSize());
-        ZonedDateTime timestamp = toTimestamp(message, "timestamp");
+        ZonedDateTime timestamp = toTimestamp(message, "timestamp_ms");
         orderBook.updateFromSnapshot(bids, asks, timestamp);
         fireMarketDepthQuote(new Level2Quote(ticker, orderBook, timestamp));
     }
 
     protected void onTradesUpdate(Ticker ticker, JsonNode message) {
-        JsonNode trades = message.path("trades");
-        if (!trades.isArray()) {
-            // Single-trade payload?
-            emitTrade(ticker, message);
+        JsonNode data = message.path("data");
+        // Hibachi may wrap a single trade as {"trade":{...}} or batch as {"trades":[...]}
+        JsonNode singleTrade = data.path("trade");
+        if (singleTrade.isObject()) {
+            emitTrade(ticker, singleTrade);
             return;
         }
-        for (JsonNode trade : trades) {
-            emitTrade(ticker, trade);
+        JsonNode trades = data.path("trades");
+        if (trades.isArray()) {
+            for (JsonNode trade : trades) {
+                emitTrade(ticker, trade);
+            }
+            return;
         }
+        emitTrade(ticker, data);
     }
 
     protected void emitTrade(Ticker ticker, JsonNode trade) {
         BigDecimal price = decimal(trade, "price");
         BigDecimal size = firstDecimal(trade, "quantity", "size");
         if (price == null || size == null) {
+            logger.info("Hibachi trade missing fields: price={} size={} raw={}", price, size, trade);
             return;
         }
-        String sideStr = trade.path("side").asText("BID").toUpperCase();
+        String sideStr = firstString(trade, "takerSide", "side").toUpperCase();
         OrderFlow.Side side = "ASK".equals(sideStr) || "SELL".equals(sideStr)
                 ? OrderFlow.Side.SELL : OrderFlow.Side.BUY;
-        OrderFlow flow = new OrderFlow(ticker, price, size, side, toTimestamp(trade, "timestamp"));
+        ZonedDateTime ts = toTimestamp(trade, "timestamp_ms");
+        OrderFlow flow = new OrderFlow(ticker, price, size, side, ts);
         fireOrderFlow(flow);
+
+        Level1Quote lastQuote = new Level1Quote(ticker, ts);
+        lastQuote.addQuote(QuoteType.LAST, price);
+        lastQuote.addQuote(QuoteType.LAST_SIZE, size);
+        fireLevel1Quote(lastQuote);
+    }
+
+    protected void onFundingRateUpdate(Ticker ticker, JsonNode message) {
+        JsonNode data = message.path("data");
+        BigDecimal rate = decimal(data, "estimatedFundingRate");
+        if (rate == null) {
+            rate = decimal(data.path("fundingRateEstimation"), "estimatedFundingRate");
+        }
+        if (rate == null) {
+            logger.info("Hibachi funding rate missing estimatedFundingRate: {}", data);
+            return;
+        }
+        int fundingInterval = ticker.getFundingRateInterval();
+        if (fundingInterval <= 0) {
+            fundingInterval = 8;
+        }
+        BigDecimal hourlyRate = rate.divide(BigDecimal.valueOf(fundingInterval), MC);
+        BigDecimal annualizedPercent = hourlyRate.multiply(HOURS_PER_YEAR).multiply(PERCENT_MULTIPLIER, MC);
+        BigDecimal hourlyBps = hourlyRate.multiply(BPS_MULTIPLIER, MC);
+        Level1Quote quote = new Level1Quote(ticker, toTimestamp(message, "timestamp_ms"));
+        quote.addQuote(QuoteType.FUNDING_RATE_APR, annualizedPercent);
+        quote.addQuote(QuoteType.FUNDING_RATE_HOURLY_BPS, hourlyBps);
+        fireLevel1Quote(quote);
+    }
+
+    protected synchronized void startVolumePolling(Ticker ticker) {
+        String symbol = ticker.getSymbol();
+        if (!volumePollingSymbols.add(symbol)) {
+            return;
+        }
+        if (volumeScheduler == null) {
+            volumeScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "hibachi-volume-poll");
+                t.setDaemon(true);
+                return t;
+            });
+            volumeTask = volumeScheduler.scheduleAtFixedRate(
+                    this::pollVolume, 0, 1, TimeUnit.SECONDS);
+        }
+    }
+
+    protected void pollVolume() {
+        for (String symbol : volumePollingSymbols) {
+            try {
+                JsonNode stats = restApi.getMarketStats(symbol);
+                if (stats == null || stats.isMissingNode()) {
+                    continue;
+                }
+                Ticker ticker = lookupTicker(symbol);
+                if (ticker == null) {
+                    continue;
+                }
+                Level1Quote quote = new Level1Quote(ticker, ZonedDateTime.now(UTC));
+                boolean any = false;
+                BigDecimal volume = decimal(stats, "volume24h");
+                if (volume != null) { quote.addQuote(QuoteType.VOLUME, volume); any = true; }
+                BigDecimal volumeNotional = decimal(stats, "volumeNotional24h");
+                if (volumeNotional != null) { quote.addQuote(QuoteType.VOLUME_NOTIONAL, volumeNotional); any = true; }
+                if (any) {
+                    fireLevel1Quote(quote);
+                }
+            } catch (Exception e) {
+                logger.debug("Failed to poll volume for {}", symbol, e);
+            }
+        }
     }
 
     protected Ticker lookupTicker(String symbol) {
@@ -337,10 +455,18 @@ public class HibachiQuoteEngine extends QuoteEngine {
             return out;
         }
         for (JsonNode lvl : arr) {
-            if (!lvl.isArray() || lvl.size() < 2) continue;
             try {
-                BigDecimal price = new BigDecimal(lvl.get(0).asText());
-                double size = Double.parseDouble(lvl.get(1).asText());
+                BigDecimal price;
+                double size;
+                if (lvl.isArray() && lvl.size() >= 2) {
+                    price = new BigDecimal(lvl.get(0).asText());
+                    size = Double.parseDouble(lvl.get(1).asText());
+                } else if (lvl.isObject()) {
+                    price = new BigDecimal(lvl.path("price").asText());
+                    size = Double.parseDouble(lvl.path("quantity").asText());
+                } else {
+                    continue;
+                }
                 out.add(new OrderBook.PriceLevel(price, size));
             } catch (NumberFormatException ignored) {
             }
@@ -380,6 +506,15 @@ public class HibachiQuoteEngine extends QuoteEngine {
             }
         }
         return null;
+    }
+
+    protected String firstString(JsonNode message, String... fields) {
+        if (message == null) return "";
+        for (String f : fields) {
+            String v = message.path(f).asText("");
+            if (!v.isBlank()) return v;
+        }
+        return "";
     }
 
     protected void requireTicker(Ticker ticker) {
