@@ -67,7 +67,9 @@
       "Bash(mvn -pl commons/hibachi-common-api,implementations/market-data-api/hibachi-market-data-impl,implementations/broker-api/hibachi-broker-api-impl test -am)",
       "Bash(mvn -q -pl commons/hibachi-common-api -am compile -DskipTests)",
       "Bash(mvn -pl implementations/market-data-api/hibachi-market-data-impl -am compile -DskipTests -q)",
-      "Bash(mvn -pl examples/CryptoExamples -am compile -DskipTests -q)"
+      "Bash(mvn -pl examples/CryptoExamples -am compile -DskipTests -q)",
+      "Bash(mvn -pl implementations/broker-api/paper-broker-api-impl -am compile -DskipTests -q)",
+      "Bash(mvn -pl implementations/broker-api/paper-broker-api-impl -am test -q)"
     ],
     "additionalDirectories": [
       "/Users/robicemilowski/Code/JavaProjects/FueledByChaiTrading/commons/hibachi-common-api/src/main/java/com/fueledbychai/hibachi/common/api/ws/market"
