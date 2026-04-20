@@ -98,15 +98,6 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
     protected final double makerFee;
     protected final double takerFee;
 
-    // --- Passive fill tuning ---
-    protected double passiveFillBaseThreshold = 6.0;
-    protected double passiveFillInsideSpreadWeight = 2.0;
-    protected double passiveFillTradeEvidenceBonus = 1.0;
-    protected double passiveFillWideSpreadPenaltyPer100Bps = 0.25;
-
-    protected static final double PASSIVE_FILL_BASE_QUOTE_SCORE = 1.0;
-    protected static final double PASSIVE_FILL_SCORE_DECAY = 0.5;
-    protected static final double PASSIVE_FILL_TRADE_EVIDENCE_DECAY = 0.5;
 
     // ========================================================================
     // Per-ticker state holder
@@ -134,7 +125,6 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
         final Deque<SpreadEntry> spreadHistory = new ArrayDeque<>();
         static final long TIME_WINDOW_MILLIS = 6000;
         static final double DISLOCATION_MULTIPLIER = 7.5;
-        final Map<String, PassiveFillState> passiveFillStates = new ConcurrentHashMap<>();
 
         TickerState(Ticker ticker) {
             this.ticker = ticker;
@@ -151,10 +141,6 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
         }
     }
 
-    protected static class PassiveFillState {
-        double score;
-        double tradeEvidence;
-    }
 
     // ========================================================================
     // Constructors
@@ -201,22 +187,6 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
 
     public void setOutputDir(String outputDir) {
         this.outputDir = outputDir;
-    }
-
-    public void setPassiveFillBaseThreshold(double passiveFillBaseThreshold) {
-        this.passiveFillBaseThreshold = Math.max(0.0, passiveFillBaseThreshold);
-    }
-
-    public void setPassiveFillInsideSpreadWeight(double passiveFillInsideSpreadWeight) {
-        this.passiveFillInsideSpreadWeight = Math.max(0.0, passiveFillInsideSpreadWeight);
-    }
-
-    public void setPassiveFillTradeEvidenceBonus(double passiveFillTradeEvidenceBonus) {
-        this.passiveFillTradeEvidenceBonus = Math.max(0.0, passiveFillTradeEvidenceBonus);
-    }
-
-    public void setPassiveFillWideSpreadPenaltyPer100Bps(double passiveFillWideSpreadPenaltyPer100Bps) {
-        this.passiveFillWideSpreadPenaltyPer100Bps = Math.max(0.0, passiveFillWideSpreadPenaltyPer100Bps);
     }
 
     // ========================================================================
@@ -319,7 +289,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
             return;
         }
         TickerState state = getOrCreateTickerState(orderflow.getTicker());
-        addPassiveTradeEvidence(state, orderflow.getSide(), orderflow.getPrice().doubleValue());
+        evaluateTradeBasedFills(state, orderflow.getSide(), orderflow.getPrice().doubleValue());
     }
 
     protected void markPriceUpdated(TickerState state, BigDecimal markPrice, ZonedDateTime timestamp) {
@@ -397,7 +367,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
 
         orderOperationsLock.writeLock().lock();
         try {
-            state.passiveFillStates.remove(orderId);
+
             openOrders.put(orderId, order);
         } finally {
             orderOperationsLock.writeLock().unlock();
@@ -488,7 +458,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
                         if (order.containsModifier(Modifier.POST_ONLY)
                                 && order.getLimitPrice().doubleValue() >= state.bestAskPrice) {
                             state.openBids.remove(orderId);
-                            state.passiveFillStates.remove(orderId);
+                
                             cancelOrderInternal(state, orderId, order.getClientOrderId(),
                                     CancelReason.POST_ONLY_WOULD_CROSS);
                             return new BrokerRequestResult(false, true,
@@ -499,7 +469,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
                             logger.error("No existing buy order found with ID: {} to modify.", orderId);
                             return new BrokerRequestResult(false, true, "404 Order not found: " + orderId);
                         }
-                        state.passiveFillStates.remove(orderId);
+            
                         state.openBids.put(orderId, order);
                         OrderStatus status = new OrderStatus(OrderStatus.Status.REPLACED, orderId, orderId, ticker,
                                 getCurrentTime());
@@ -508,7 +478,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
                         if (order.containsModifier(Modifier.POST_ONLY)
                                 && order.getLimitPrice().doubleValue() <= state.bestBidPrice) {
                             state.openAsks.remove(orderId);
-                            state.passiveFillStates.remove(orderId);
+                
                             cancelOrderInternal(state, orderId, order.getClientOrderId(),
                                     CancelReason.POST_ONLY_WOULD_CROSS);
                             return new BrokerRequestResult(false, true,
@@ -519,7 +489,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
                             logger.error("No existing sell order found with ID: {} to modify.", orderId);
                             return new BrokerRequestResult(false, true, "404 Order not found: " + orderId);
                         }
-                        state.passiveFillStates.remove(orderId);
+            
                         state.openAsks.put(orderId, order);
                         OrderStatus status = new OrderStatus(OrderStatus.Status.REPLACED, orderId, orderId, ticker,
                                 getCurrentTime());
@@ -709,7 +679,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
                 return false;
             }
 
-            state.passiveFillStates.remove(orderId);
+
             state.openBids.remove(orderId);
             state.openAsks.remove(orderId);
 
@@ -837,15 +807,20 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
     // Passive fill evaluation
     // ========================================================================
 
-    protected List<OrderTicket> evaluatePassiveFillCandidatesLocked(TickerState state) {
-        List<OrderTicket> filledOrders = new ArrayList<>();
-
+    /**
+     * Evaluates resting limit orders against the current top-of-book.
+     * A resting buy fills when the best ask drops to the limit price or better.
+     * A resting sell fills when the best bid rises to the limit price or better.
+     * Called under the market-data write lock.
+     */
+    protected void evaluatePassiveFillCandidatesLocked(TickerState state) {
         for (OrderTicket order : new ArrayList<>(state.openBids.values())) {
             if (order == null || order.getType() != Type.LIMIT || order.getLimitPrice() == null) {
                 continue;
             }
-            if (evaluatePassiveBidFill(state, order)) {
-                filledOrders.add(order);
+            double limitPrice = order.getLimitPrice().doubleValue();
+            if (state.bestAskPrice < Double.MAX_VALUE && limitPrice >= state.bestAskPrice) {
+                fillOrder(state, order, limitPrice);
             }
         }
 
@@ -853,121 +828,39 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
             if (order == null || order.getType() != Type.LIMIT || order.getLimitPrice() == null) {
                 continue;
             }
-            if (evaluatePassiveAskFill(state, order)) {
-                filledOrders.add(order);
+            double limitPrice = order.getLimitPrice().doubleValue();
+            if (state.bestBidPrice > 0.0 && limitPrice <= state.bestBidPrice) {
+                fillOrder(state, order, limitPrice);
             }
         }
-
-        return filledOrders;
     }
 
-    protected boolean evaluatePassiveBidFill(TickerState state, OrderTicket order) {
-        String orderId = order.getOrderId();
-        double limitPrice = order.getLimitPrice().doubleValue();
-
-        if (state.bestAskPrice < Double.MAX_VALUE && limitPrice >= state.bestAskPrice) {
-            state.passiveFillStates.remove(orderId);
-            return fillOrder(state, order, limitPrice);
-        }
-
-        if (!hasUsableTopOfBook(state) || limitPrice < state.bestBidPrice) {
-            decayPassiveFillState(state, orderId);
-            return false;
-        }
-
-        double spread = state.bestAskPrice - state.bestBidPrice;
-        double progress = clamp((limitPrice - state.bestBidPrice) / spread, 0.0, 1.0);
-        return accumulatePassiveFillScore(state, order, orderId, progress);
-    }
-
-    protected boolean evaluatePassiveAskFill(TickerState state, OrderTicket order) {
-        String orderId = order.getOrderId();
-        double limitPrice = order.getLimitPrice().doubleValue();
-
-        if (state.bestBidPrice > 0.0 && limitPrice <= state.bestBidPrice) {
-            state.passiveFillStates.remove(orderId);
-            return fillOrder(state, order, limitPrice);
-        }
-
-        if (!hasUsableTopOfBook(state) || limitPrice > state.bestAskPrice) {
-            decayPassiveFillState(state, orderId);
-            return false;
-        }
-
-        double spread = state.bestAskPrice - state.bestBidPrice;
-        double progress = clamp((state.bestAskPrice - limitPrice) / spread, 0.0, 1.0);
-        return accumulatePassiveFillScore(state, order, orderId, progress);
-    }
-
-    protected boolean accumulatePassiveFillScore(TickerState state, OrderTicket order, String orderId,
-            double progress) {
-        PassiveFillState pfState = state.passiveFillStates.computeIfAbsent(orderId, ignored -> new PassiveFillState());
-        double tradeEvidenceBonus = Math.min(pfState.tradeEvidence, passiveFillTradeEvidenceBonus);
-        pfState.score += PASSIVE_FILL_BASE_QUOTE_SCORE + (progress * passiveFillInsideSpreadWeight)
-                + tradeEvidenceBonus;
-        pfState.tradeEvidence *= PASSIVE_FILL_TRADE_EVIDENCE_DECAY;
-
-        if (pfState.score >= getPassiveFillThreshold(state)) {
-            state.passiveFillStates.remove(orderId);
-            return fillOrder(state, order, order.getLimitPrice().doubleValue());
-        }
-        return false;
-    }
-
-    protected boolean hasUsableTopOfBook(TickerState state) {
-        return state.bestBidPrice > 0.0 && state.bestAskPrice < Double.MAX_VALUE
-                && state.bestAskPrice > state.bestBidPrice;
-    }
-
-    protected double getPassiveFillThreshold(TickerState state) {
-        if (!hasUsableTopOfBook(state) || state.midPrice <= 0.0) {
-            return passiveFillBaseThreshold;
-        }
-        double spreadBps = ((state.bestAskPrice - state.bestBidPrice) / state.midPrice) * 10000.0;
-        double wideSpreadPenalty = (spreadBps / 100.0) * passiveFillWideSpreadPenaltyPer100Bps;
-        return passiveFillBaseThreshold + Math.min(passiveFillBaseThreshold, wideSpreadPenalty);
-    }
-
-    protected void addPassiveTradeEvidence(TickerState state, OrderFlow.Side side, double tradePrice) {
-        if (side == null) {
-            return;
-        }
+    /**
+     * Evaluates resting limit orders against the trade tape.
+     * A resting buy fills when a sell-aggressor trade prints at the bid price or better (lower).
+     * A resting sell fills when a buy-aggressor trade prints at the ask price or better (higher).
+     */
+    protected void evaluateTradeBasedFills(TickerState state, OrderFlow.Side side, double tradePrice) {
         if (side == OrderFlow.Side.SELL) {
             for (OrderTicket order : new ArrayList<>(state.openBids.values())) {
-                addPassiveTradeEvidenceForOrder(state, order, tradePrice, true);
+                if (order == null || order.getType() != Type.LIMIT || order.getLimitPrice() == null) {
+                    continue;
+                }
+                double limitPrice = order.getLimitPrice().doubleValue();
+                if (tradePrice <= limitPrice) {
+                    fillOrder(state, order, limitPrice);
+                }
             }
         } else if (side == OrderFlow.Side.BUY) {
             for (OrderTicket order : new ArrayList<>(state.openAsks.values())) {
-                addPassiveTradeEvidenceForOrder(state, order, tradePrice, false);
+                if (order == null || order.getType() != Type.LIMIT || order.getLimitPrice() == null) {
+                    continue;
+                }
+                double limitPrice = order.getLimitPrice().doubleValue();
+                if (tradePrice >= limitPrice) {
+                    fillOrder(state, order, limitPrice);
+                }
             }
-        }
-    }
-
-    protected void addPassiveTradeEvidenceForOrder(TickerState state, OrderTicket order, double tradePrice,
-            boolean buyOrder) {
-        if (order == null || order.getType() != Type.LIMIT || order.getLimitPrice() == null) {
-            return;
-        }
-        double limitPrice = order.getLimitPrice().doubleValue();
-        boolean supportiveTrade = buyOrder ? tradePrice <= limitPrice : tradePrice >= limitPrice;
-        if (!supportiveTrade) {
-            return;
-        }
-        PassiveFillState pfState = state.passiveFillStates.computeIfAbsent(order.getOrderId(),
-                ignored -> new PassiveFillState());
-        pfState.tradeEvidence = Math.min(passiveFillTradeEvidenceBonus,
-                pfState.tradeEvidence + passiveFillTradeEvidenceBonus);
-    }
-
-    protected void decayPassiveFillState(TickerState state, String orderId) {
-        PassiveFillState pfState = state.passiveFillStates.get(orderId);
-        if (pfState == null) {
-            return;
-        }
-        pfState.score *= PASSIVE_FILL_SCORE_DECAY;
-        pfState.tradeEvidence *= PASSIVE_FILL_TRADE_EVIDENCE_DECAY;
-        if (pfState.score < 0.0001 && pfState.tradeEvidence < 0.0001) {
-            state.passiveFillStates.remove(orderId);
         }
     }
 
@@ -982,7 +875,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
     protected void cancelOrderInternal(TickerState state, String orderId, String clientOrderId, CancelReason reason) {
         try {
             OrderTicket order = openOrders.remove(orderId);
-            state.passiveFillStates.remove(orderId);
+
             state.openBids.remove(orderId);
             state.openAsks.remove(orderId);
 
