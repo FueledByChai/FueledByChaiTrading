@@ -1,6 +1,7 @@
 package com.fueledbychai.marketdata.paradex;
 
 import java.math.BigDecimal;
+import java.math.MathContext;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -322,10 +323,11 @@ public class ParadexQuoteEngine extends QuoteEngine
         putIfNotNull(quoteValues, QuoteType.LAST, lastPriceDecimal);
         putIfNotNull(quoteValues, QuoteType.MARK_PRICE, markPriceDecimal);
         putIfNotNull(quoteValues, QuoteType.OPEN_INTEREST, openInterestDecimal);
-        putIfNotNull(quoteValues, QuoteType.VOLUME, volume24hDecimal);
         putIfNotNull(quoteValues, QuoteType.UNDERLYING_PRICE, underlyingPriceDecimal);
-        if (lastPriceDecimal != null && volume24hDecimal != null) {
-            quoteValues.put(QuoteType.VOLUME_NOTIONAL, lastPriceDecimal.multiply(volume24hDecimal));
+        // Paradex reports volume_24h in USD (quote currency), not base units.
+        putIfNotNull(quoteValues, QuoteType.VOLUME_NOTIONAL, volume24hDecimal);
+        if (lastPriceDecimal != null && lastPriceDecimal.signum() != 0 && volume24hDecimal != null) {
+            quoteValues.put(QuoteType.VOLUME, volume24hDecimal.divide(lastPriceDecimal, MathContext.DECIMAL64));
         }
         if (lastPriceDecimal != null && openInterestDecimal != null) {
             quoteValues.put(QuoteType.OPEN_INTEREST_NOTIONAL, lastPriceDecimal.multiply(openInterestDecimal));
