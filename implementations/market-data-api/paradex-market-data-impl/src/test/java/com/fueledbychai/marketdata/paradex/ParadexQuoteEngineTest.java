@@ -90,9 +90,9 @@ class ParadexQuoteEngineTest {
         assertNotNull(quote);
         assertEquals(new BigDecimal("1500.50"), quote.getValue(QuoteType.LAST));
         assertEquals(new BigDecimal("1505.00"), quote.getValue(QuoteType.MARK_PRICE));
-        assertEquals(new BigDecimal("10"), quote.getValue(QuoteType.VOLUME));
-        // Notional volume = lastPrice * volume24h, both available
-        assertEquals(new BigDecimal("15005.00"), quote.getValue(QuoteType.VOLUME_NOTIONAL));
+        // Paradex volume_24h is USD notional; base VOLUME is derived as notional / last.
+        assertEquals(new BigDecimal("10"), quote.getValue(QuoteType.VOLUME_NOTIONAL));
+        assertEquals(0.006664445, quote.getValue(QuoteType.VOLUME).doubleValue(), 1e-9);
         // Open interest fields not present
         assertFalse(quote.containsType(QuoteType.OPEN_INTEREST));
         assertFalse(quote.containsType(QuoteType.OPEN_INTEREST_NOTIONAL));

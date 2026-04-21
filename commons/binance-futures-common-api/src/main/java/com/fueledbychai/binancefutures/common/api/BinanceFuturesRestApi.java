@@ -250,7 +250,9 @@ public class BinanceFuturesRestApi extends BaseRestApi implements IBinanceFuture
         }
         String contractType = symbolNode.path("contractType").asText("");
         String status = symbolNode.path("status").asText("");
-        return "PERPETUAL".equalsIgnoreCase(contractType) && "TRADING".equalsIgnoreCase(status);
+        boolean isPerpetual = "PERPETUAL".equalsIgnoreCase(contractType)
+                || "TRADIFI_PERPETUAL".equalsIgnoreCase(contractType);
+        return isPerpetual && "TRADING".equalsIgnoreCase(status);
     }
 
     protected boolean isTradableOption(JsonNode symbolNode) {
