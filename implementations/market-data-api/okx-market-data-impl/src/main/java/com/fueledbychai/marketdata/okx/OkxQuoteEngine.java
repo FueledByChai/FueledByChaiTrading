@@ -173,17 +173,39 @@ public class OkxQuoteEngine extends QuoteEngine {
     public synchronized void subscribeLevel1(Ticker ticker, Level1QuoteListener listener) {
         validateTickerAndListener(ticker, listener);
         Ticker normalizedTicker = normalizeTicker(ticker);
-        super.subscribeLevel1(normalizedTicker, listener);
-
         String instrumentId = normalizedTicker.getSymbol();
+
+        // Ticker is mutable and Ticker.hashCode() includes fundingRateInterval. Apply
+        // the real funding interval BEFORE any map put, otherwise a later mutation
+        // (OKX non-8h perps like BZ-USDT-SWAP use 4h) changes the key's hashCode and
+        // subsequent level1ListenerMap.get() silently misses.
+        boolean firstFundingSubscribe = normalizedTicker.getInstrumentType() == InstrumentType.PERPETUAL_FUTURES
+                && !fundingRateSubscriptions.contains(instrumentId);
+        OkxFundingRateUpdate fundingSnapshot = null;
+        if (firstFundingSubscribe) {
+            try {
+                fundingSnapshot = restApi.getFundingRate(instrumentId);
+                if (fundingSnapshot != null) {
+                    applyFundingInterval(normalizedTicker, fundingSnapshot);
+                }
+            } catch (RuntimeException e) {
+                logger.warn("Unable to seed OKX funding interval for {}", instrumentId, e);
+            }
+        }
+
+        super.subscribeLevel1(normalizedTicker, listener);
         level1TickersBySymbol.put(instrumentId, normalizedTicker);
         if (tickerSubscriptions.add(instrumentId)) {
             webSocketApi.subscribeTicker(instrumentId, this::handleTickerUpdate);
         }
-        if (normalizedTicker.getInstrumentType() == InstrumentType.PERPETUAL_FUTURES
-                && fundingRateSubscriptions.add(instrumentId)) {
+        if (firstFundingSubscribe && fundingRateSubscriptions.add(instrumentId)) {
             webSocketApi.subscribeFundingRate(instrumentId, this::handleFundingRateUpdate);
-            seedFundingRate(normalizedTicker, instrumentId);
+            if (fundingSnapshot != null) {
+                Level1Quote quote = buildFundingQuote(normalizedTicker, fundingSnapshot);
+                if (quote.hasUpdates()) {
+                    fireLevel1Quote(quote);
+                }
+            }
         }
     }
 
@@ -274,8 +296,25 @@ public class OkxQuoteEngine extends QuoteEngine {
         addPriceQuote(quote, ticker, QuoteType.LAST, update.getLastPrice(), QuoteType.LAST_SIZE, update.getLastSize());
         addScalarQuote(quote, ticker, QuoteType.MARK_PRICE, update.getMarkPrice(), true);
         addScalarQuote(quote, ticker, QuoteType.OPEN_INTEREST, update.getOpenInterest(), false);
-        addScalarQuote(quote, ticker, QuoteType.VOLUME, update.getVolume(), false);
-        addScalarQuote(quote, ticker, QuoteType.VOLUME_NOTIONAL, update.getVolumeNotional(), false);
+        // OKX ticker semantics differ by instrument type:
+        //   SPOT:         vol24h = base, volCcy24h = quote (true notional).
+        //   derivatives:  vol24h = contract count, volCcy24h = base currency.
+        // Normalize so VOLUME = base units and VOLUME_NOTIONAL = quote currency for all types.
+        InstrumentType type = ticker.getInstrumentType();
+        boolean isDerivative = type == InstrumentType.PERPETUAL_FUTURES
+                || type == InstrumentType.FUTURES
+                || type == InstrumentType.OPTION;
+        if (isDerivative) {
+            BigDecimal baseVolume = update.getVolumeNotional();
+            addScalarQuote(quote, ticker, QuoteType.VOLUME, baseVolume, false);
+            BigDecimal lastPrice = update.getLastPrice();
+            if (baseVolume != null && lastPrice != null) {
+                addScalarQuote(quote, ticker, QuoteType.VOLUME_NOTIONAL, baseVolume.multiply(lastPrice), false);
+            }
+        } else {
+            addScalarQuote(quote, ticker, QuoteType.VOLUME, update.getVolume(), false);
+            addScalarQuote(quote, ticker, QuoteType.VOLUME_NOTIONAL, update.getVolumeNotional(), false);
+        }
 
         if (update.getOpenInterest() != null) {
             BigDecimal referencePrice = firstNonNull(update.getMarkPrice(), update.getLastPrice(),
