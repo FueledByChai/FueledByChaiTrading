@@ -284,7 +284,16 @@ public class HibachiRestApi extends BaseRestApi implements IHibachiRestApi {
                 return null;
             }
         }
-        BigDecimal tickSize = contract.getTickSize() != null ? contract.getTickSize() : BigDecimal.ONE;
+        // Effective quoting tick: use the finest orderbookGranularity rather than
+        // the raw tickSize. Hibachi's native tick is often absurdly fine
+        // (SOL/USDT-P = 0.0000001 = 1e-9 bps at $88), which collapses every
+        // tick-denominated number in a market-making strategy to zero. The
+        // orderbook granularities list is the exchange's own declaration of the
+        // coarser grids the orderbook aggregates to and matchers display — the
+        // finest of those is the natural quoting grid. We still floor at the
+        // raw tickSize in case granularities is empty or somehow finer.
+        BigDecimal rawTick = contract.getTickSize() != null ? contract.getTickSize() : BigDecimal.ONE;
+        BigDecimal tickSize = resolveEffectiveTickSize(rawTick, contract.getOrderbookGranularities());
         BigDecimal stepSize = contract.getStepSize() != null ? contract.getStepSize() : BigDecimal.ONE;
         BigDecimal minOrderSize = contract.getMinOrderSize() != null ? contract.getMinOrderSize() : BigDecimal.ONE;
         int minNotional = contract.getMinNotional() == null
@@ -305,6 +314,49 @@ public class HibachiRestApi extends BaseRestApi implements IHibachiRestApi {
                 BigDecimal.ONE,
                 1,
                 Integer.toString(contract.getId()));
+    }
+
+    /**
+     * Given the contract's native tick and its {@code orderbookGranularities}
+     * list (e.g. {@code ['0.001','0.01','0.1','1']}), return the finest
+     * granularity ≥ the native tick. Rationale: the finest granularity is the
+     * resolution at which the exchange aggregates the public orderbook — quoting
+     * finer than that is invisible to counterparties, and using the native tick
+     * (which can be 1e-9 bps-equivalent) breaks every tick-denominated MM
+     * parameter. Falls back to the native tick when granularities are missing,
+     * malformed, or all finer than the native tick.
+     *
+     * <p>Per-instrument by construction: each Hibachi contract publishes its own
+     * granularities list, so BTC's 0.1 and SOL's 0.001 both come through
+     * automatically with no per-symbol logic.
+     */
+    static BigDecimal resolveEffectiveTickSize(BigDecimal rawTick, List<String> granularities) {
+        if (granularities == null || granularities.isEmpty()) {
+            return rawTick;
+        }
+        BigDecimal finest = null;
+        for (String g : granularities) {
+            if (g == null || g.isBlank()) {
+                continue;
+            }
+            try {
+                BigDecimal parsed = new BigDecimal(g.trim());
+                if (parsed.signum() <= 0) {
+                    continue;
+                }
+                // Skip granularities finer than the native tick — the exchange
+                // won't accept quotes inside the native tick anyway.
+                if (rawTick != null && parsed.compareTo(rawTick) < 0) {
+                    continue;
+                }
+                if (finest == null || parsed.compareTo(finest) < 0) {
+                    finest = parsed;
+                }
+            } catch (NumberFormatException ignored) {
+                // Malformed granularity — ignore, try the next one.
+            }
+        }
+        return finest != null ? finest : rawTick;
     }
 
     protected JsonNode publicRequest(String baseUrl, String path, Map<String, String> params) {
