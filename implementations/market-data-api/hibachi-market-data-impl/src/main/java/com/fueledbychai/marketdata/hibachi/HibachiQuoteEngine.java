@@ -75,6 +75,17 @@ public class HibachiQuoteEngine extends QuoteEngine {
     protected volatile ScheduledExecutorService volumeScheduler;
     protected volatile ScheduledFuture<?> volumeTask;
 
+    // Auto-reconnect state. First retry is ~500ms for fast recovery from
+    // transient blips (cloudflare hiccup, brief network reset); subsequent
+    // retries back off exponentially up to 30s so we don't hammer the exchange
+    // during a prolonged outage. Counter resets on successful reconnect.
+    // Progression: 500ms → 1s → 2s → 4s → 8s → 16s → 30s (capped).
+    private static final long RECONNECT_INITIAL_DELAY_MS = 500L;
+    private static final long RECONNECT_MAX_DELAY_MS = 30_000L;
+    protected volatile ScheduledExecutorService reconnectScheduler;
+    protected final java.util.concurrent.atomic.AtomicInteger reconnectAttempt =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+
     public HibachiQuoteEngine() {
         this(ExchangeRestApiFactory.getPublicApi(Exchange.HIBACHI, IHibachiRestApi.class),
                 TickerRegistryFactory.getInstance(Exchange.HIBACHI),
@@ -139,6 +150,11 @@ public class HibachiQuoteEngine extends QuoteEngine {
             volumeScheduler.shutdownNow();
             volumeScheduler = null;
         }
+        if (reconnectScheduler != null) {
+            reconnectScheduler.shutdownNow();
+            reconnectScheduler = null;
+        }
+        reconnectAttempt.set(0);
         HibachiWebSocketClient client = marketClient;
         marketClient = null;
         HibachiJsonProcessor processor = marketProcessor;
@@ -243,9 +259,86 @@ public class HibachiQuoteEngine extends QuoteEngine {
         if (!started) {
             return;
         }
-        logger.warn("Hibachi market WS closed; auto-reconnect is disabled in this engine version because "
-                + "the engine does not rebuild the websocket/subscription state after disconnect. "
-                + "Manual recovery is required before market data will resume.");
+        int attempts = reconnectAttempt.get();
+        logger.warn("Hibachi market WS closed; scheduling reconnect (attempt will be #{} )",
+                attempts + 1);
+        scheduleReconnect();
+    }
+
+    /**
+     * Exponential backoff reconnect, capped at {@link #RECONNECT_MAX_DELAY_MS}.
+     * The attempt counter reads while scheduling (so the very first retry after
+     * a healthy session has no delay growth) and resets to 0 once a reconnect
+     * succeeds in {@link #attemptReconnect()}.
+     */
+    protected synchronized void scheduleReconnect() {
+        if (!started) {
+            return;
+        }
+        if (reconnectScheduler == null || reconnectScheduler.isShutdown()) {
+            reconnectScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "hibachi-ws-reconnect");
+                t.setDaemon(true);
+                return t;
+            });
+        }
+        int attempt = reconnectAttempt.incrementAndGet();
+        // Backoff: 500ms, 1s, 2s, 4s, 8s, 16s, 30s (capped), 30s, ...
+        long delayMs = Math.min(RECONNECT_MAX_DELAY_MS,
+                RECONNECT_INITIAL_DELAY_MS * (1L << Math.min(attempt - 1, 6)));
+        reconnectScheduler.schedule(this::attemptReconnect, delayMs, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Tear down the stale WS state, rebuild a fresh connection, and replay
+     * every topic that was subscribed before the disconnect. If the rebuild
+     * itself fails, logs and re-schedules another attempt on the same backoff
+     * curve.
+     */
+    protected synchronized void attemptReconnect() {
+        if (!started) {
+            return;
+        }
+        try {
+            // Drop the dead client & processor. ensureMarketClient() only
+            // rebuilds if marketClient is null or closed, so we null them first.
+            HibachiWebSocketClient stale = marketClient;
+            HibachiJsonProcessor staleProcessor = marketProcessor;
+            marketClient = null;
+            marketProcessor = null;
+            if (stale != null) {
+                try { stale.close(); } catch (Exception ignored) {}
+            }
+            if (staleProcessor != null) {
+                staleProcessor.shutdown();
+            }
+
+            // Snapshot subscriptions before clearing — subscribeTopic() is a
+            // no-op when the SubKey is already present, so we have to clear
+            // the set before replaying or nothing gets sent over the new wire.
+            List<SubKey> toReplay = new ArrayList<>(activeSubscriptions);
+            activeSubscriptions.clear();
+
+            ensureMarketClient();
+
+            int replayed = 0;
+            for (SubKey key : toReplay) {
+                Ticker ticker = lookupTicker(key.symbol);
+                if (ticker == null) {
+                    logger.warn("Cannot replay Hibachi subscription: ticker not found for symbol={} topic={}",
+                            key.symbol, key.topic);
+                    continue;
+                }
+                subscribeTopic(ticker, key.topic);
+                replayed++;
+            }
+            reconnectAttempt.set(0);
+            logger.info("Hibachi market WS reconnected; replayed {} subscription(s)", replayed);
+        } catch (Exception e) {
+            logger.warn("Hibachi market WS reconnect attempt {} failed: {}",
+                    reconnectAttempt.get(), e.toString());
+            scheduleReconnect();
+        }
     }
 
     protected void onMarketMessage(JsonNode message) {
