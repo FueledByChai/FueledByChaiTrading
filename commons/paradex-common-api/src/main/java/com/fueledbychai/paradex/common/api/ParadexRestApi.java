@@ -491,6 +491,67 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
     }
 
     @Override
+    public RestResponse cancelOrderBatch(String jwtToken, List<String> orderIds, List<String> clientOrderIds) {
+        checkPrivateApi();
+
+        boolean hasOrderIds = orderIds != null && !orderIds.isEmpty();
+        boolean hasClientOrderIds = clientOrderIds != null && !clientOrderIds.isEmpty();
+        if (!hasOrderIds && !hasClientOrderIds) {
+            throw new IllegalArgumentException(
+                    "cancelOrderBatch requires at least one of orderIds or clientOrderIds");
+        }
+
+        JsonObject body = new JsonObject();
+        if (hasOrderIds) {
+            JsonArray ids = new JsonArray();
+            for (String id : orderIds) {
+                ids.add(id);
+            }
+            body.add("order_ids", ids);
+        }
+        if (hasClientOrderIds) {
+            JsonArray ids = new JsonArray();
+            for (String id : clientOrderIds) {
+                ids.add(id);
+            }
+            body.add("client_order_ids", ids);
+        }
+
+        try {
+            String path = "/orders/batch";
+            String url = baseUrl + path;
+            RequestBody requestBody = RequestBody.create(body.toString(),
+                    MediaType.get("application/json; charset=utf-8"));
+            Request request = new Request.Builder().url(url).delete(requestBody)
+                    .addHeader("Authorization", "Bearer " + jwtToken).build();
+            logger.info("Request: " + request);
+
+            Response response;
+            try (var s = Span.start("PD_CANCEL_ORDER_BATCH_REST_CALL", String.valueOf(
+                    (hasOrderIds ? orderIds.size() : 0) + (hasClientOrderIds ? clientOrderIds.size() : 0)),
+                    LATENCY_LOGGER)) {
+                response = client.newCall(request).execute();
+                if (!response.isSuccessful()) {
+                    String errBody = "";
+                    if (response.body() != null) {
+                        errBody = response.body().string();
+                    }
+                    logger.error("Error response: " + errBody);
+                    throw new ResponseException("Unexpected code " + response.code() + ": " + errBody,
+                            response.code());
+                }
+            }
+
+            String responseBody = response.body().string();
+            logger.info("Response output: " + responseBody);
+            return new RestResponse(response.code(), responseBody);
+        } catch (IOException e) {
+            logger.error("IO error in cancelOrderBatch: " + e.getMessage(), e);
+            throw new ResponseException("Network error canceling batch: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
     public ParadexOrder getOrderByClientOrderId(String jwtToken, String clientOrderId) {
         checkPrivateApi();
 

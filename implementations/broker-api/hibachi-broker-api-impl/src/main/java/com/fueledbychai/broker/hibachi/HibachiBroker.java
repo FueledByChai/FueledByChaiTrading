@@ -241,6 +241,11 @@ public class HibachiBroker extends AbstractBasicBroker {
         return cancelAllOrders();
     }
 
+    @Override
+    public BrokerRequestResult cancelOrders(java.util.List<OrderTicket> orders) {
+        throw new UnsupportedOperationException("Batch cancel not supported by HibachiBroker");
+    }
+
     protected BrokerRequestResult interpretResponse(JsonNode response, String op) {
         if (response == null) {
             return new BrokerRequestResult(false, true, op + " returned null", BrokerRequestResult.FailureType.UNKNOWN);

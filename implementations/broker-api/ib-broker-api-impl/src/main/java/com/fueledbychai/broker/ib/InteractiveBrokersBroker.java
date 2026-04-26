@@ -702,6 +702,11 @@ public class InteractiveBrokersBroker extends BaseIBConnectionDelegate implement
     }
 
     @Override
+    public BrokerRequestResult cancelOrders(java.util.List<OrderTicket> orders) {
+        throw new UnsupportedOperationException("Batch cancel not supported by InteractiveBrokersBroker");
+    }
+
+    @Override
     public BrokerRequestResult cancelOrderByClientOrderId(String clientOrderId) {
         throw new UnsupportedOperationException("Not supported"); // To change body of generated methods, choose Tools |
                                                                   // Templates.
