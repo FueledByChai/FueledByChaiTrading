@@ -358,7 +358,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
     @Override
     public BrokerRequestResult placeOrder(OrderTicket order) {
         order.setOrderEntryTime(getCurrentTime());
-        delayRestCall();
+        delayPlaceOrder();
         String orderId = UUID.randomUUID().toString();
         order.setOrderId(orderId);
 
@@ -443,7 +443,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
     @Override
     public BrokerRequestResult modifyOrder(OrderTicket order) {
         order.setOrderEntryTime(getCurrentTime());
-        delayRestCall();
+        delayModifyOrder();
 
         Ticker ticker = order.getTicker();
         TickerState state = getOrCreateTickerState(ticker);
@@ -549,7 +549,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
         }
 
         executorService.submit(() -> {
-            delayRestCall();
+            delayCancelOrder();
             for (String orderId : new ArrayList<>(state.openBids.keySet())) {
                 try {
                     cancelOrderSubmitWithDelay(orderId, false);
@@ -571,7 +571,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
     @Override
     public BrokerRequestResult cancelAllOrders() {
         executorService.submit(() -> {
-            delayRestCall();
+            delayCancelOrder();
             for (TickerState state : tickerStates.values()) {
                 for (String orderId : new ArrayList<>(state.openBids.keySet())) {
                     try {
@@ -594,7 +594,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
 
     protected void cancelOrderSubmitWithDelay(String orderId, boolean shouldDelay) {
         if (shouldDelay) {
-            delayRestCall();
+            delayCancelOrder();
         }
 
         TickerState state = findTickerStateForOrder(orderId);
@@ -933,7 +933,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
 
     @Override
     public List<OrderTicket> getOpenOrders() {
-        delayRestCall();
+        delayQueryCall();
         List<OrderTicket> result = new ArrayList<>();
         for (TickerState state : tickerStates.values()) {
             result.addAll(state.openBids.values());
@@ -943,7 +943,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
     }
 
     public List<OrderTicket> getOpenOrders(Ticker ticker) {
-        delayRestCall();
+        delayQueryCall();
         TickerState state = tickerStates.get(ticker.getSymbol());
         if (state == null) {
             return new ArrayList<>();
@@ -956,7 +956,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
 
     @Override
     public List<Position> getAllPositions() {
-        delayRestCall();
+        delayQueryCall();
         List<Position> positions = new ArrayList<>();
         for (TickerState state : tickerStates.values()) {
             if (!state.currentPosition.equals(BigDecimal.ZERO)) {
@@ -970,7 +970,7 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
 
     @Override
     public OrderTicket requestOrderStatus(String orderId) {
-        delayRestCall();
+        delayQueryCall();
         return openOrders.get(orderId);
     }
 
@@ -1007,21 +1007,33 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
     // ========================================================================
 
     protected void delayRestCall() {
-        try {
-            long latency = latencyModel.getRestLatencyMsMin() + (long) (Math.random()
-                    * (latencyModel.getRestLatencyMsMax() - latencyModel.getRestLatencyMsMin()));
-            if (latency > 0) {
-                Thread.sleep(latency);
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        sleepRandomMs(latencyModel.getRestLatencyMsMin(), latencyModel.getRestLatencyMsMax());
+    }
+
+    protected void delayPlaceOrder() {
+        sleepRandomMs(latencyModel.getPlaceLatencyMsMin(), latencyModel.getPlaceLatencyMsMax());
+    }
+
+    protected void delayCancelOrder() {
+        sleepRandomMs(latencyModel.getCancelLatencyMsMin(), latencyModel.getCancelLatencyMsMax());
+    }
+
+    protected void delayModifyOrder() {
+        sleepRandomMs(latencyModel.getModifyLatencyMsMin(), latencyModel.getModifyLatencyMsMax());
+    }
+
+    protected void delayQueryCall() {
+        sleepRandomMs(latencyModel.getQueryLatencyMsMin(), latencyModel.getQueryLatencyMsMax());
     }
 
     protected void delayWebSocketCall() {
+        sleepRandomMs(latencyModel.getWsLatencyMsMin(), latencyModel.getWsLatencyMsMax());
+    }
+
+    private void sleepRandomMs(int minMs, int maxMs) {
         try {
-            long latency = latencyModel.getWsLatencyMsMin()
-                    + (long) (Math.random() * (latencyModel.getWsLatencyMsMax() - latencyModel.getWsLatencyMsMin()));
+            int span = Math.max(0, maxMs - minMs);
+            long latency = minMs + (long) (Math.random() * span);
             if (latency > 0) {
                 Thread.sleep(latency);
             }

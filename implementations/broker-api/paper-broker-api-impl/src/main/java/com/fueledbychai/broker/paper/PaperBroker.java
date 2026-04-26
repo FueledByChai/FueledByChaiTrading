@@ -325,7 +325,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     @Override
     public synchronized BrokerRequestResult cancelAllOrders(Ticker ticker) {
         executorService.submit(() -> {
-            delayRestCall(); // Simulate network delay
+            delayCancelOrder(); // Simulate network delay
             Iterator<Map.Entry<String, OrderTicket>> bidIterator = openBids.entrySet().iterator();
             while (bidIterator.hasNext()) {
                 Map.Entry<String, OrderTicket> entry = bidIterator.next();
@@ -362,7 +362,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     public void cancelOrderSubmitWithDelay(String orderId, boolean shouldDelay) {
 
         if (shouldDelay) {
-            delayRestCall(); // Simulate network delay
+            delayCancelOrder(); // Simulate network delay
         }
         // Take read lock on market data (allows concurrent cancels, but waits for fill
         // processing)
@@ -396,7 +396,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     public List<OrderTicket> getOpenOrders(Ticker ticker) {
-        delayRestCall(); // Simulate network delay
+        delayQueryCall(); // Simulate network delay
         List<OrderTicket> openOrders = new ArrayList<>(); // List to hold open orders
         // Add all open bids to the list
         for (OrderTicket order : openBids.values()) {
@@ -416,7 +416,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     public List<Position> getAllPositions() {
-        delayRestCall(); // Simulate network delay
+        delayQueryCall(); // Simulate network delay
         List<Position> positions = new ArrayList<>(); // List to hold position info
         if (!currentPosition.equals(BigDecimal.ZERO)) { // Only add position if there is an inventory
             Side side = currentPosition.compareTo(BigDecimal.ZERO) > 0 ? Side.LONG : Side.SHORT;
@@ -434,7 +434,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     public BrokerRequestResult modifyOrder(OrderTicket order) {
 
         order.setOrderEntryTime(getCurrentTime());
-        delayRestCall(); // Simulate network delay
+        delayModifyOrder(); // Simulate network delay
 
         // Take read lock on market data (allows concurrent modifies, but waits for
         // fill processing)
@@ -503,7 +503,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     @Override
     public BrokerRequestResult placeOrder(OrderTicket order) {
         order.setOrderEntryTime(getCurrentTime());
-        delayRestCall(); // Simulate network delay
+        delayPlaceOrder(); // Simulate network delay
         String orderId = System.currentTimeMillis() + "-" + (int) (Math.random() * 10000); // Generate a unique order ID
         order.setOrderId(orderId); // Set the generated order ID
         orderOperationsLock.writeLock().lock();
@@ -1170,29 +1170,39 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
     }
 
     protected void delayRestCall() {
-        // Simulate network delay or processing time
-        try {
-            long latency = latencyModel.getRestLatencyMsMin() + (long) (Math.random()
-                    * (latencyModel.getRestLatencyMsMax() - latencyModel.getRestLatencyMsMin()));
-            logger.debug("REST call delay: {} ms", latency);
-            Thread.sleep(latency);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt(); // Restore interrupted status
-            logger.error("Delay interrupted: " + e.getMessage(), e);
-        }
+        sleepRandomMs(latencyModel.getRestLatencyMsMin(), latencyModel.getRestLatencyMsMax(), "REST");
+    }
+
+    protected void delayPlaceOrder() {
+        sleepRandomMs(latencyModel.getPlaceLatencyMsMin(), latencyModel.getPlaceLatencyMsMax(), "place");
+    }
+
+    protected void delayCancelOrder() {
+        sleepRandomMs(latencyModel.getCancelLatencyMsMin(), latencyModel.getCancelLatencyMsMax(), "cancel");
+    }
+
+    protected void delayModifyOrder() {
+        sleepRandomMs(latencyModel.getModifyLatencyMsMin(), latencyModel.getModifyLatencyMsMax(), "modify");
+    }
+
+    protected void delayQueryCall() {
+        sleepRandomMs(latencyModel.getQueryLatencyMsMin(), latencyModel.getQueryLatencyMsMax(), "query");
     }
 
     protected void delayWebSocketCall() {
-        // Simulate network delay or processing time
-        try {
-            // sleep time should be a random time betweehn the latencyMsMin and latencyMsMax
+        sleepRandomMs(latencyModel.getWsLatencyMsMin(), latencyModel.getWsLatencyMsMax(), "WebSocket");
+    }
 
-            long latency = latencyModel.getWsLatencyMsMin()
-                    + (long) (Math.random() * (latencyModel.getWsLatencyMsMax() - latencyModel.getWsLatencyMsMin()));
-            logger.debug("WebSocket call delay: {} ms", latency);
-            Thread.sleep(latency);
+    private void sleepRandomMs(int minMs, int maxMs, String label) {
+        try {
+            int span = Math.max(0, maxMs - minMs);
+            long latency = minMs + (long) (Math.random() * span);
+            logger.debug("{} call delay: {} ms", label, latency);
+            if (latency > 0) {
+                Thread.sleep(latency);
+            }
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt(); // Restore interrupted status
+            Thread.currentThread().interrupt();
             logger.error("Delay interrupted: " + e.getMessage(), e);
         }
     }
@@ -1281,7 +1291,7 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     @Override
     public List<OrderTicket> getOpenOrders() {
-        delayRestCall(); // Simulate network delay
+        delayQueryCall(); // Simulate network delay
         List<OrderTicket> openOrders = new ArrayList<>(); // List to hold open orders
         // Add all open bids to the list in a thread-safe manner
         synchronized (openBids) {
