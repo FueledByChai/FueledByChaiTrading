@@ -207,6 +207,72 @@ public class ParadexBroker extends AbstractBasicBroker {
     }
 
     @Override
+    public BrokerRequestResult cancelOrders(List<OrderTicket> orders) {
+        checkConnected();
+        if (orders == null || orders.isEmpty()) {
+            return new BrokerRequestResult();
+        }
+
+        java.util.List<String> orderIds = new java.util.ArrayList<>();
+        java.util.List<String> clientOrderIds = new java.util.ArrayList<>();
+        for (OrderTicket order : orders) {
+            if (order == null) {
+                continue;
+            }
+            String clientOrderId = order.getClientOrderId();
+            if (clientOrderId != null && !clientOrderId.isEmpty()) {
+                clientOrderIds.add(clientOrderId);
+            } else if (order.getOrderId() != null && !order.getOrderId().isEmpty()) {
+                orderIds.add(order.getOrderId());
+            } else {
+                logger.warn("Skipping order with no orderId or clientOrderId: {}", order);
+            }
+        }
+
+        if (orderIds.isEmpty() && clientOrderIds.isEmpty()) {
+            return new BrokerRequestResult(false, true, "No identifiable orders to cancel");
+        }
+
+        logger.info("Batch canceling {} orders ({} by id, {} by clientId)",
+                orderIds.size() + clientOrderIds.size(), orderIds.size(), clientOrderIds.size());
+
+        RestResponse response;
+        try (var s = Span.start("PD_CANCEL_ORDER_BATCH_API_CALL",
+                String.valueOf(orderIds.size() + clientOrderIds.size()), LATENCY_LOGGER)) {
+            response = restApi.cancelOrderBatch(jwtToken, orderIds, clientOrderIds);
+        }
+        logger.info("Batch cancel response code: {}", response.getHttpCode());
+
+        if (!response.isSuccessful()) {
+            logger.error("Batch cancel failed: {}", response.getBody());
+            return new BrokerRequestResult(false, true, response.getBody());
+        }
+
+        for (OrderTicket order : orders) {
+            if (order == null) {
+                continue;
+            }
+            OrderTicket tracked = null;
+            if (order.getOrderId() != null) {
+                tracked = orderRegistry.getOpenOrderById(order.getOrderId());
+            }
+            if (tracked == null && order.getClientOrderId() != null) {
+                tracked = orderRegistry.getOpenOrderByClientId(order.getClientOrderId());
+            }
+            if (tracked == null) {
+                continue;
+            }
+            tracked.setCurrentStatus(OrderStatus.Status.PENDING_CANCEL);
+            OrderStatus status = new OrderStatus(OrderStatus.Status.PENDING_CANCEL, tracked.getOrderId(),
+                    tracked.getFilledSize(), tracked.getSize().subtract(tracked.getFilledSize()),
+                    tracked.getFilledPrice(), tracked.getTicker(), getCurrentTime());
+            super.fireOrderEvent(new OrderEvent(tracked, status));
+        }
+
+        return new BrokerRequestResult();
+    }
+
+    @Override
     public BrokerRequestResult placeOrder(OrderTicket order) {
         checkConnected();
         order.setOrderEntryTime(getCurrentTime());

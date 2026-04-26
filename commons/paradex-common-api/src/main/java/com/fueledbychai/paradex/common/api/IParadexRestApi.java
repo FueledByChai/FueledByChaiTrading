@@ -38,6 +38,21 @@ public interface IParadexRestApi {
 
     RestResponse cancelOrderByClientOrderId(String jwtToken, String clientOrderId);
 
+    /**
+     * Cancels multiple orders in a single batch request.
+     *
+     * @param jwtToken       Authentication token.
+     * @param orderIds       Optional list of Paradex order IDs to cancel.
+     * @param clientOrderIds Optional list of client-assigned order IDs to cancel.
+     *                       At least one of {@code orderIds} or
+     *                       {@code clientOrderIds} must be non-empty.
+     * @return The raw REST response. The response body contains a
+     *         {@code results} array with per-ID outcomes (status values such
+     *         as {@code QUEUED_FOR_CANCELLATION}, {@code ALREADY_CLOSED},
+     *         {@code NOT_FOUND}).
+     */
+    RestResponse cancelOrderBatch(String jwtToken, List<String> orderIds, List<String> clientOrderIds);
+
     ParadexOrder getOrderByClientOrderId(String jwtToken, String clientOrderId);
 
     String placeOrder(String jwtToken, ParadexOrder tradeOrder);

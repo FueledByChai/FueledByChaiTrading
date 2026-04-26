@@ -592,6 +592,58 @@ public class MultiTickerPaperBroker extends AbstractBasicBroker implements Level
         return new BrokerRequestResult();
     }
 
+    @Override
+    public BrokerRequestResult cancelOrders(List<OrderTicket> orders) {
+        if (orders == null || orders.isEmpty()) {
+            return new BrokerRequestResult();
+        }
+
+        List<String> orderIds = new ArrayList<>();
+        orderOperationsLock.readLock().lock();
+        try {
+            for (OrderTicket order : orders) {
+                if (order == null) {
+                    continue;
+                }
+                String orderId = order.getOrderId();
+                if (orderId == null || orderId.isEmpty()) {
+                    String clientOrderId = order.getClientOrderId();
+                    if (clientOrderId != null && !clientOrderId.isEmpty()) {
+                        for (OrderTicket open : openOrders.values()) {
+                            if (clientOrderId.equals(open.getClientOrderId())) {
+                                orderId = open.getOrderId();
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (orderId != null && !orderId.isEmpty()) {
+                    orderIds.add(orderId);
+                } else {
+                    logger.warn("Skipping order with no orderId or matching clientOrderId: {}", order);
+                }
+            }
+        } finally {
+            orderOperationsLock.readLock().unlock();
+        }
+
+        if (orderIds.isEmpty()) {
+            return new BrokerRequestResult();
+        }
+
+        executorService.submit(() -> {
+            delayRestCall();
+            for (String orderId : orderIds) {
+                try {
+                    cancelOrderSubmitWithDelay(orderId, false);
+                } catch (Exception e) {
+                    logger.error(e.getMessage(), e);
+                }
+            }
+        });
+        return new BrokerRequestResult();
+    }
+
     protected void cancelOrderSubmitWithDelay(String orderId, boolean shouldDelay) {
         if (shouldDelay) {
             delayRestCall();

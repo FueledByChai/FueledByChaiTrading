@@ -582,6 +582,11 @@ public class PaperBroker extends AbstractBasicBroker implements Level1QuoteListe
 
     }
 
+    @Override
+    public BrokerRequestResult cancelOrders(List<OrderTicket> orders) {
+        throw new UnsupportedOperationException("Batch cancel not supported by PaperBroker");
+    }
+
     public double getUnrealizedPnL() {
         if (markPrice == 0 || currentPosition.doubleValue() == 0) {
             return 0.0; // Avoid division by zero if markPrice or position size is zero

@@ -129,6 +129,11 @@ public class OkxBroker extends AbstractBasicBroker {
     }
 
     @Override
+    public BrokerRequestResult cancelOrders(List<OrderTicket> orders) {
+        throw new UnsupportedOperationException("Batch cancel not supported by OkxBroker");
+    }
+
+    @Override
     public BrokerRequestResult placeOrder(OrderTicket order) {
         if (!connected) {
             return notConnectedResult();

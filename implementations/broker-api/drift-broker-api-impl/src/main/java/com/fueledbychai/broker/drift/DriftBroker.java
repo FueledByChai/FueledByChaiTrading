@@ -221,6 +221,11 @@ public class DriftBroker extends AbstractBasicBroker {
     }
 
     @Override
+    public BrokerRequestResult cancelOrders(java.util.List<OrderTicket> orders) {
+        throw new UnsupportedOperationException("Batch cancel not supported by DriftBroker");
+    }
+
+    @Override
     public BrokerRequestResult placeOrder(OrderTicket order) {
         checkConnected();
         if (order == null) {
