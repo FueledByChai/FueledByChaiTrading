@@ -361,6 +361,11 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
 
     }
 
+    @Override
+    public BrokerRequestResult cancelOrders(List<OrderTicket> orders) {
+        throw new UnsupportedOperationException("Batch cancel not supported by HyperliquidBroker");
+    }
+
     public void ordersUpdateWsEventReceived(List<WsOrderUpdate> event) {
 
         for (WsOrderUpdate orderUpdate : event) {

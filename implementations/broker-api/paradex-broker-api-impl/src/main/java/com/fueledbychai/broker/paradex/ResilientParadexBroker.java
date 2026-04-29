@@ -891,6 +891,20 @@ public class ResilientParadexBroker extends ForwardingBroker {
     }
 
     @Override
+    public BrokerRequestResult cancelOrders(List<OrderTicket> orders) {
+        Supplier<BrokerRequestResult> batchCancelSupplier = () -> {
+            try {
+                return delegate.cancelOrders(orders);
+            } catch (Exception e) {
+                logger.error("Error in batch cancel for {} orders: {}",
+                        orders == null ? 0 : orders.size(), e.getMessage(), e);
+                throw e;
+            }
+        };
+        return Decorators.ofSupplier(batchCancelSupplier).withRetry(cancelOrderRetry).decorate().get();
+    }
+
+    @Override
     public OrderTicket requestOrderStatusByClientOrderId(String clientOrderId) {
         // Create resilient supplier for the order status request
         Supplier<OrderTicket> orderStatusSupplier = () -> {

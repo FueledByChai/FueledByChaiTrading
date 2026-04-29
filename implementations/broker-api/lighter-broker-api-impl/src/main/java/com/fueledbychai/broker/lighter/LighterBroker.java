@@ -427,6 +427,11 @@ public class LighterBroker extends AbstractBasicBroker {
         throw new UnsupportedOperationException("Cancel all orders not implemented yet");
     }
 
+    @Override
+    public BrokerRequestResult cancelOrders(java.util.List<OrderTicket> orders) {
+        throw new UnsupportedOperationException("Batch cancel not supported by LighterBroker");
+    }
+
     protected void checkConnected() {
         if (!connected) {
             logger.warn("Lighter broker API method called while broker is not connected");
