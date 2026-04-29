@@ -52,8 +52,9 @@ public class HibachiAccountStreamClient {
             processor.addEventListener(this::onMessage);
             client = HibachiWebSocketClient.createPrivate(
                     config.getAccountWsUrl(), String.valueOf(accountId), processor, apiKey, config.getClient());
-            client.connect();
-            // Send stream.start once the socket is open. java-websocket connects synchronously here.
+            if (!client.connectBlocking(15, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Hibachi account WS handshake timed out");
+            }
             sendStreamStart();
             startPing();
         } catch (Exception e) {

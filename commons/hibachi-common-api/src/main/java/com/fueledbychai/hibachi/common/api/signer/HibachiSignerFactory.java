@@ -12,10 +12,16 @@ public final class HibachiSignerFactory {
     }
 
     public static IHibachiSigner create(HibachiConfiguration config) {
+        String privateKey = config.getPrivateKey();
+        if (privateKey != null && !privateKey.isBlank()) {
+            return new EcdsaHibachiSigner(privateKey);
+        }
         String secret = config.getApiSecret();
         if (secret == null || secret.isBlank()) {
             throw new IllegalStateException(
-                    "Cannot create Hibachi signer: " + HibachiConfiguration.HIBACHI_API_SECRET + " is not configured");
+                    "Cannot create Hibachi signer: set " + HibachiConfiguration.HIBACHI_PRIVATE_KEY
+                            + " (trustless ECDSA) or " + HibachiConfiguration.HIBACHI_API_SECRET
+                            + " (exchange-managed HMAC).");
         }
         return new HmacHibachiSigner(secret);
     }
