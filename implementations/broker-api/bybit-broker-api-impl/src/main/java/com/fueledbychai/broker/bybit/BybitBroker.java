@@ -129,6 +129,11 @@ public class BybitBroker extends AbstractBasicBroker {
     }
 
     @Override
+    public BrokerRequestResult cancelOrders(List<OrderTicket> orders) {
+        throw new UnsupportedOperationException("Batch cancel not supported by BybitBroker");
+    }
+
+    @Override
     public BrokerRequestResult placeOrder(OrderTicket order) {
         if (!connected) {
             return notConnectedResult();

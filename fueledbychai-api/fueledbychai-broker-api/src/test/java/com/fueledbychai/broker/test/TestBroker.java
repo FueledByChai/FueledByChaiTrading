@@ -43,6 +43,11 @@ public class TestBroker extends AbstractBasicBroker {
     }
 
     @Override
+    public BrokerRequestResult cancelOrders(List<OrderTicket> orders) {
+        return new BrokerRequestResult();
+    }
+
+    @Override
     public BrokerRequestResult placeOrder(OrderTicket order) {
         return new BrokerRequestResult();
     }

@@ -56,10 +56,19 @@ public interface IBroker {
 
     /**
      * Cancels all orders for the specified ticker.
-     * 
+     *
      * @param ticker The ticker for which to cancel all orders.
      */
     BrokerRequestResult cancelAllOrders(Ticker ticker);
+
+    /**
+     * Cancels the supplied orders as a single batch request, when the venue
+     * supports it. Implementations that do not support batch cancellation
+     * should throw {@link UnsupportedOperationException}.
+     *
+     * @param orders The orders to cancel as a batch.
+     */
+    BrokerRequestResult cancelOrders(List<OrderTicket> orders);
 
     /**
      * Cancels all open orders.

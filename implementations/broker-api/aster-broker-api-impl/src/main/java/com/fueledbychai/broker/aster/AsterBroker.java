@@ -250,6 +250,11 @@ public class AsterBroker extends AbstractBasicBroker {
     }
 
     @Override
+    public BrokerRequestResult cancelOrders(java.util.List<OrderTicket> orders) {
+        throw new UnsupportedOperationException("Batch cancel not supported by AsterBroker");
+    }
+
+    @Override
     public BrokerRequestResult placeOrder(OrderTicket order) {
         if (!connected) {
             return notConnectedResult();
