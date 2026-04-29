@@ -20,11 +20,13 @@ import com.fueledbychai.hibachi.common.api.HibachiContract;
 import com.fueledbychai.hibachi.common.api.IHibachiRestApi;
 import com.fueledbychai.hibachi.common.api.signer.HibachiSignerFactory;
 import com.fueledbychai.hibachi.common.api.signer.IHibachiSigner;
+import com.fueledbychai.time.Span;
 import com.fueledbychai.util.ExchangeRestApiFactory;
 
 public class HibachiBroker extends AbstractBasicBroker {
 
     private static final Logger logger = LoggerFactory.getLogger(HibachiBroker.class);
+    protected static final String LATENCY_LOGGER = "latency.hibachi";
 
     protected final IHibachiRestApi restApi;
     protected final HibachiConfiguration config;
@@ -108,7 +110,7 @@ public class HibachiBroker extends AbstractBasicBroker {
             return new BrokerRequestResult(false, true, "order is required",
                     BrokerRequestResult.FailureType.VALIDATION_FAILED);
         }
-        try {
+        try (var s = Span.start("HB_PLACE_ORDER", order.getClientOrderId(), LATENCY_LOGGER)) {
             String symbol = order.getTicker().getSymbol();
             HibachiContract contract = restApi.getContract(symbol);
             if (contract == null) {
@@ -118,7 +120,7 @@ public class HibachiBroker extends AbstractBasicBroker {
             long nonce = nextNonce();
             HibachiTranslator.SignedRequest request = translator.translatePlace(
                     order, contract, accountId, nonce, config.getOrderMaxFeesPercent(), signer);
-            JsonNode response = tradeWs.placeOrder(request.params, request.signature);
+            JsonNode response = tradeWs.placeOrder(request.params, request.signature, order.getClientOrderId());
             return interpretResponse(response, "placeOrder");
         } catch (Exception e) {
             logger.error("Hibachi placeOrder failed", e);
@@ -133,7 +135,7 @@ public class HibachiBroker extends AbstractBasicBroker {
             return new BrokerRequestResult(false, true, "order is required",
                     BrokerRequestResult.FailureType.VALIDATION_FAILED);
         }
-        try {
+        try (var s = Span.start("HB_MODIFY_ORDER", order.getClientOrderId(), LATENCY_LOGGER)) {
             String symbol = order.getTicker().getSymbol();
             HibachiContract contract = restApi.getContract(symbol);
             if (contract == null) {
@@ -143,7 +145,7 @@ public class HibachiBroker extends AbstractBasicBroker {
             long nonce = nextNonce();
             HibachiTranslator.SignedRequest request = translator.translateModify(
                     order, contract, accountId, nonce, config.getOrderMaxFeesPercent(), signer);
-            JsonNode response = tradeWs.modifyOrder(request.params, request.signature);
+            JsonNode response = tradeWs.modifyOrder(request.params, request.signature, order.getClientOrderId());
             return interpretResponse(response, "modifyOrder");
         } catch (Exception e) {
             logger.error("Hibachi modifyOrder failed", e);
@@ -158,10 +160,11 @@ public class HibachiBroker extends AbstractBasicBroker {
             return new BrokerRequestResult(false, true, "order is required",
                     BrokerRequestResult.FailureType.VALIDATION_FAILED);
         }
-        try {
+        String traceId = order.getOrderId() != null ? order.getOrderId() : order.getClientOrderId();
+        try (var s = Span.start("HB_CANCEL_ORDER", traceId, LATENCY_LOGGER)) {
             HibachiTranslator.SignedRequest request = translator.translateCancel(
                     order, accountId, nextNonce(), signer);
-            JsonNode response = tradeWs.cancelOrder(request.params, request.signature);
+            JsonNode response = tradeWs.cancelOrder(request.params, request.signature, traceId);
             return interpretResponse(response, "cancelOrder");
         } catch (Exception e) {
             logger.error("Hibachi cancelOrder failed", e);
@@ -221,8 +224,8 @@ public class HibachiBroker extends AbstractBasicBroker {
     @Override
     public BrokerRequestResult cancelAllOrders() {
         checkConnected();
-        try {
-            long nonce = nextNonce();
+        long nonce = nextNonce();
+        try (var s = Span.start("HB_CANCEL_ALL_ORDERS", String.valueOf(nonce), LATENCY_LOGGER)) {
             byte[] bytes = com.fueledbychai.hibachi.common.api.signer.HibachiPayloadPacker
                     .packCancelAll(nonce);
             String signature = signer.sign(bytes);

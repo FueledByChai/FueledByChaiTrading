@@ -38,4 +38,6 @@ commons/lighter-common-api/local-resources/lighter.properties
 # Credentials files - never check these in
 **/aster-credentials.properties
 examples/CryptoExamples/aster-credentials.properties.properties
+**/.env
+**/.env.local
 .claude/settings.json
