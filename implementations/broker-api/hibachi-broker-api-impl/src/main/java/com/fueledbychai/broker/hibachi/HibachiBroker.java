@@ -2,6 +2,10 @@ package com.fueledbychai.broker.hibachi;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
@@ -246,7 +250,68 @@ public class HibachiBroker extends AbstractBasicBroker {
 
     @Override
     public BrokerRequestResult cancelOrders(java.util.List<OrderTicket> orders) {
-        throw new UnsupportedOperationException("Batch cancel not supported by HibachiBroker");
+        checkConnected();
+        if (orders == null || orders.isEmpty()) {
+            return new BrokerRequestResult();
+        }
+
+        List<OrderTicket> targets = new ArrayList<>(orders.size());
+        for (OrderTicket o : orders) {
+            if (o == null) {
+                continue;
+            }
+            if ((o.getOrderId() == null || o.getOrderId().isBlank())
+                    && (o.getClientOrderId() == null || o.getClientOrderId().isBlank())) {
+                logger.warn("Skipping order with no orderId or clientOrderId: {}", o);
+                continue;
+            }
+            targets.add(o);
+        }
+        if (targets.isEmpty()) {
+            return new BrokerRequestResult(false, true, "No identifiable orders to cancel",
+                    BrokerRequestResult.FailureType.VALIDATION_FAILED);
+        }
+
+        logger.info("Hibachi batch cancel: fanning out {} cancels in parallel", targets.size());
+        try (var s = Span.start("HB_CANCEL_ORDERS_BATCH", String.valueOf(targets.size()), LATENCY_LOGGER);
+             ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<BrokerRequestResult>> futures = new ArrayList<>(targets.size());
+            for (OrderTicket order : targets) {
+                futures.add(executor.submit(() -> cancelOrder(order)));
+            }
+
+            int failures = 0;
+            String firstFailure = null;
+            for (int i = 0; i < futures.size(); i++) {
+                BrokerRequestResult r;
+                try {
+                    r = futures.get(i).get();
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return new BrokerRequestResult(false, true, "Interrupted while batch-canceling",
+                            BrokerRequestResult.FailureType.UNKNOWN);
+                } catch (ExecutionException ee) {
+                    failures++;
+                    if (firstFailure == null) {
+                        firstFailure = ee.getCause() != null ? ee.getCause().getMessage() : ee.getMessage();
+                    }
+                    continue;
+                }
+                if (!r.isSuccess()) {
+                    failures++;
+                    if (firstFailure == null) {
+                        firstFailure = r.getMessage();
+                    }
+                }
+            }
+
+            if (failures == 0) {
+                return new BrokerRequestResult();
+            }
+            return new BrokerRequestResult(false, true,
+                    failures + "/" + targets.size() + " cancels failed; first error: " + firstFailure,
+                    BrokerRequestResult.FailureType.UNKNOWN);
+        }
     }
 
     protected BrokerRequestResult interpretResponse(JsonNode response, String op) {
