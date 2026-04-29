@@ -1,7 +1,12 @@
 package com.fueledbychai.broker.hibachi;
 
+import java.math.BigDecimal;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -16,9 +21,17 @@ import com.fueledbychai.broker.AbstractBasicBroker;
 import com.fueledbychai.broker.BrokerRequestResult;
 import com.fueledbychai.broker.BrokerStatus;
 import com.fueledbychai.broker.Position;
+import com.fueledbychai.broker.order.Fill;
+import com.fueledbychai.broker.order.OrderEvent;
+import com.fueledbychai.broker.order.OrderStatus;
 import com.fueledbychai.broker.order.OrderTicket;
+import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.data.Exchange;
+import com.fueledbychai.data.InstrumentType;
+import com.fueledbychai.data.Side;
 import com.fueledbychai.data.Ticker;
+import com.fueledbychai.util.ITickerRegistry;
+import com.fueledbychai.util.TickerRegistryFactory;
 import com.fueledbychai.hibachi.common.api.HibachiConfiguration;
 import com.fueledbychai.hibachi.common.api.HibachiContract;
 import com.fueledbychai.hibachi.common.api.IHibachiRestApi;
@@ -41,6 +54,7 @@ public class HibachiBroker extends AbstractBasicBroker {
     protected final HibachiTradeWebSocketClient tradeWs;
     protected final HibachiAccountStreamClient accountWs;
     protected final AtomicLong nextClientOrderId = new AtomicLong(System.currentTimeMillis());
+    protected final Map<String, Position> positionsCache = new ConcurrentHashMap<>();
     protected volatile boolean connected;
 
     public HibachiBroker() {
@@ -63,6 +77,7 @@ public class HibachiBroker extends AbstractBasicBroker {
         this.accountId = parseAccountId(config.getAccountId());
         this.tradeWs = new HibachiTradeWebSocketClient(config, accountId, config.getApiKey());
         this.accountWs = new HibachiAccountStreamClient(config, accountId, config.getApiKey());
+        this.accountWs.setEventListener(new AccountListener());
     }
 
     @Override
@@ -124,8 +139,17 @@ public class HibachiBroker extends AbstractBasicBroker {
             long nonce = nextNonce();
             HibachiTranslator.SignedRequest request = translator.translatePlace(
                     order, contract, accountId, nonce, config.getOrderMaxFeesPercent(), signer);
+            orderRegistry.addOpenOrder(order);
             JsonNode response = tradeWs.placeOrder(request.params, request.signature, order.getClientOrderId());
-            return interpretResponse(response, "placeOrder");
+            BrokerRequestResult result = interpretResponse(response, "placeOrder");
+            if (result.isSuccess()) {
+                String exchangeOrderId = response.path("result").path("orderId").asText(null);
+                if (exchangeOrderId != null && !exchangeOrderId.isBlank()) {
+                    order.setOrderId(exchangeOrderId);
+                    orderRegistry.addOpenOrder(order);
+                }
+            }
+            return result;
         } catch (Exception e) {
             logger.error("Hibachi placeOrder failed", e);
             return new BrokerRequestResult(false, true, e.getMessage(), BrokerRequestResult.FailureType.UNKNOWN);
@@ -200,7 +224,21 @@ public class HibachiBroker extends AbstractBasicBroker {
         if (orderId == null || orderId.isBlank()) {
             return null;
         }
-        return orderRegistry.getOrderById(orderId);
+        OrderTicket cached = orderRegistry.getOrderById(orderId);
+        if (!isConnected()) {
+            return cached;
+        }
+        try (var s = Span.start("HB_REQUEST_ORDER_STATUS", orderId, LATENCY_LOGGER)) {
+            JsonNode response = restApi.getOrder(orderId);
+            if (response == null || response.isNull() || response.isMissingNode()) {
+                return cached;
+            }
+            applyOrderUpdateToRegistry(response);
+            return orderRegistry.getOrderById(orderId);
+        } catch (Exception e) {
+            logger.warn("Hibachi requestOrderStatus({}) failed; returning cached", orderId, e);
+            return cached;
+        }
     }
 
     @Override
@@ -216,7 +254,7 @@ public class HibachiBroker extends AbstractBasicBroker {
 
     @Override
     public List<Position> getAllPositions() {
-        return new ArrayList<>();
+        return new ArrayList<>(positionsCache.values());
     }
 
     @Override
@@ -243,9 +281,22 @@ public class HibachiBroker extends AbstractBasicBroker {
 
     @Override
     public BrokerRequestResult cancelAllOrders(Ticker ticker) {
-        // Hibachi does not expose a per-symbol cancel-all on the trade WS — fall back to the
-        // global cancel; callers needing per-symbol must iterate open orders themselves.
-        return cancelAllOrders();
+        checkConnected();
+        if (ticker == null) {
+            return cancelAllOrders();
+        }
+        String symbol = ticker.getSymbol();
+        List<OrderTicket> toCancel = new ArrayList<>();
+        for (OrderTicket open : getOpenOrders()) {
+            if (open != null && open.getTicker() != null
+                    && symbol.equals(open.getTicker().getSymbol())) {
+                toCancel.add(open);
+            }
+        }
+        if (toCancel.isEmpty()) {
+            return new BrokerRequestResult();
+        }
+        return cancelOrders(toCancel);
     }
 
     @Override
@@ -346,5 +397,309 @@ public class HibachiBroker extends AbstractBasicBroker {
             throw new IllegalArgumentException(
                     "Invalid " + HibachiConfiguration.HIBACHI_ACCOUNT_ID + ": " + value, e);
         }
+    }
+
+    /** Bridges parsed account-WS frames into the broker's registry, listeners, and cache. */
+    protected class AccountListener implements HibachiAccountEventListener {
+
+        @Override
+        public void onAccountSnapshot(JsonNode snapshot) {
+            if (snapshot == null || snapshot.isMissingNode() || snapshot.isNull()) {
+                return;
+            }
+            JsonNode positions = snapshot.path("positions");
+            if (positions.isArray()) {
+                positionsCache.clear();
+                for (JsonNode p : positions) {
+                    Position pos = parsePosition(p);
+                    if (pos != null && pos.getTicker() != null) {
+                        positionsCache.put(pos.getTicker().getSymbol(), pos);
+                    }
+                }
+            }
+            applyBalance(snapshot);
+        }
+
+        @Override
+        public void onPositionUpdate(JsonNode frame) {
+            JsonNode body = bodyOf(frame);
+            Position pos = parsePosition(body);
+            if (pos == null || pos.getTicker() == null) {
+                return;
+            }
+            BigDecimal size = pos.getSize();
+            if (size == null || size.signum() == 0) {
+                positionsCache.remove(pos.getTicker().getSymbol());
+            } else {
+                positionsCache.put(pos.getTicker().getSymbol(), pos);
+            }
+        }
+
+        @Override
+        public void onBalanceUpdate(JsonNode frame) {
+            applyBalance(bodyOf(frame));
+        }
+
+        @Override
+        public void onOrderUpdate(JsonNode frame) {
+            applyOrderUpdateToRegistry(bodyOf(frame));
+        }
+
+        @Override
+        public void onFill(JsonNode frame) {
+            Fill fill = parseFill(bodyOf(frame));
+            if (fill == null) {
+                return;
+            }
+            fireFillEvent(fill);
+        }
+    }
+
+    protected void applyBalance(JsonNode body) {
+        if (body == null || body.isMissingNode() || body.isNull()) {
+            return;
+        }
+        BigDecimal equity = readDecimal(body, "equity", "totalEquity", "accountEquity");
+        if (equity != null) {
+            fireAccountEquityUpdated(equity.doubleValue());
+        }
+        BigDecimal available = readDecimal(body, "availableFunds", "availableBalance", "balance", "freeBalance");
+        if (available != null) {
+            fireAvailableFundsUpdated(available.doubleValue());
+        }
+    }
+
+    protected void applyOrderUpdateToRegistry(JsonNode body) {
+        if (body == null || body.isMissingNode() || body.isNull()) {
+            return;
+        }
+        String exchangeOrderId = textOrNull(body, "orderId", "id");
+        String clientOrderId = textOrNull(body, "clientOrderId", "clientId", "nonce");
+        OrderTicket order = null;
+        if (exchangeOrderId != null) {
+            order = orderRegistry.getOrderById(exchangeOrderId);
+        }
+        if (order == null && clientOrderId != null) {
+            order = orderRegistry.getOrderByClientId(clientOrderId);
+        }
+        if (order == null) {
+            logger.debug("Hibachi order update for unknown id={} clientId={} body={}",
+                    exchangeOrderId, clientOrderId, body);
+            return;
+        }
+        if (exchangeOrderId != null && order.getOrderId() == null) {
+            order.setOrderId(exchangeOrderId);
+        }
+
+        BigDecimal filled = readDecimal(body, "filledQuantity", "executedQuantity", "filled");
+        BigDecimal remaining = readDecimal(body, "remainingQuantity", "remaining");
+        if (filled == null) {
+            filled = order.getFilledSize() != null ? order.getFilledSize() : BigDecimal.ZERO;
+        }
+        if (remaining == null && order.getSize() != null) {
+            remaining = order.getSize().subtract(filled);
+        }
+        BigDecimal fillPrice = readDecimal(body, "averagePrice", "avgFillPrice", "price");
+
+        OrderStatus.Status status = parseOrderStatus(textOrNull(body, "status", "orderStatus"));
+        if (status == null) {
+            return;
+        }
+        order.setCurrentStatus(status);
+        if (filled != null) {
+            order.setFilledSize(filled);
+        }
+        if (fillPrice != null) {
+            order.setFilledPrice(fillPrice);
+        }
+        OrderStatus s = new OrderStatus(status, order.getOrderId(), filled, remaining,
+                fillPrice, order.getTicker(), ZonedDateTime.now(ZoneOffset.UTC));
+        s.setClientOrderId(order.getClientOrderId());
+        fireOrderEvent(new OrderEvent(order, s));
+    }
+
+    protected Fill parseFill(JsonNode body) {
+        if (body == null || body.isMissingNode() || body.isNull()) {
+            return null;
+        }
+        String symbol = textOrNull(body, "symbol");
+        Ticker ticker = lookupTicker(symbol);
+        if (ticker == null) {
+            return null;
+        }
+        Fill fill = new Fill();
+        fill.setTicker(ticker);
+        fill.setOrderId(textOrNull(body, "orderId"));
+        fill.setClientOrderId(textOrNull(body, "clientOrderId", "clientId"));
+        fill.setFillId(textOrNull(body, "fillId", "tradeId", "id"));
+        fill.setPrice(readDecimal(body, "price", "fillPrice"));
+        fill.setSize(readDecimal(body, "quantity", "size", "filledQuantity"));
+        fill.setCommission(readDecimal(body, "fee", "commission"));
+        String side = textOrNull(body, "side", "direction");
+        if (side != null) {
+            String s = side.toUpperCase();
+            if (s.equals("BID") || s.equals("BUY") || s.equals("LONG")) {
+                fill.setSide(TradeDirection.BUY);
+            } else if (s.equals("ASK") || s.equals("SELL") || s.equals("SHORT")) {
+                fill.setSide(TradeDirection.SELL);
+            }
+        }
+        Long ts = readLong(body, "timestamp", "time", "tradeTime");
+        if (ts != null) {
+            // Heuristic: Hibachi nonces are microseconds; trade timestamps appear in millis.
+            long millis = ts > 1_000_000_000_000_000L ? ts / 1_000L : ts;
+            fill.setTime(ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(millis), ZoneOffset.UTC));
+        } else {
+            fill.setTime(ZonedDateTime.now(ZoneOffset.UTC));
+        }
+        return fill;
+    }
+
+    protected Position parsePosition(JsonNode body) {
+        if (body == null || body.isMissingNode() || body.isNull()) {
+            return null;
+        }
+        String symbol = textOrNull(body, "symbol");
+        Ticker ticker = lookupTicker(symbol);
+        if (ticker == null) {
+            return null;
+        }
+        Position pos = new Position(ticker);
+        BigDecimal size = readDecimal(body, "quantity", "size");
+        if (size != null) {
+            pos.setSize(size.abs());
+        }
+        BigDecimal avgPrice = readDecimal(body, "openPrice", "averagePrice", "entryPrice");
+        if (avgPrice != null) {
+            pos.setAverageCost(avgPrice);
+        }
+        String direction = textOrNull(body, "direction", "side");
+        if (direction != null) {
+            String d = direction.toUpperCase();
+            if (d.equals("LONG") || d.equals("BUY") || d.equals("BID")) {
+                pos.setSide(Side.LONG);
+            } else if (d.equals("SHORT") || d.equals("SELL") || d.equals("ASK")) {
+                pos.setSide(Side.SHORT);
+            }
+        } else if (size != null && size.signum() < 0) {
+            pos.setSide(Side.SHORT);
+        }
+        return pos;
+    }
+
+    protected Ticker lookupTicker(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            return null;
+        }
+        ITickerRegistry registry = TickerRegistryFactory.getInstance(Exchange.HIBACHI);
+        Ticker t = registry.lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, symbol);
+        if (t == null) {
+            t = registry.lookupByCommonSymbol(InstrumentType.PERPETUAL_FUTURES, symbol);
+        }
+        return t;
+    }
+
+    protected static OrderStatus.Status parseOrderStatus(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        switch (raw.toUpperCase()) {
+            case "NEW":
+            case "PLACED":
+            case "OPEN":
+            case "ACCEPTED":
+                return OrderStatus.Status.NEW;
+            case "PARTIALLY_FILLED":
+            case "PARTIAL_FILL":
+            case "PARTIAL":
+                return OrderStatus.Status.PARTIAL_FILL;
+            case "FILLED":
+            case "FULLY_FILLED":
+                return OrderStatus.Status.FILLED;
+            case "CANCELED":
+            case "CANCELLED":
+                return OrderStatus.Status.CANCELED;
+            case "PENDING_CANCEL":
+                return OrderStatus.Status.PENDING_CANCEL;
+            case "REJECTED":
+                return OrderStatus.Status.REJECTED;
+            case "REPLACED":
+            case "MODIFIED":
+                return OrderStatus.Status.REPLACED;
+            default:
+                return OrderStatus.Status.UNKNOWN;
+        }
+    }
+
+    protected static JsonNode bodyOf(JsonNode frame) {
+        if (frame == null) {
+            return null;
+        }
+        if (frame.has("data") && !frame.path("data").isMissingNode()) {
+            return frame.path("data");
+        }
+        if (frame.has("params") && !frame.path("params").isMissingNode()) {
+            return frame.path("params");
+        }
+        if (frame.has("result") && !frame.path("result").isMissingNode()) {
+            return frame.path("result");
+        }
+        return frame;
+    }
+
+    protected static String textOrNull(JsonNode body, String... fields) {
+        if (body == null) {
+            return null;
+        }
+        for (String f : fields) {
+            JsonNode v = body.path(f);
+            if (!v.isMissingNode() && !v.isNull()) {
+                String s = v.asText(null);
+                if (s != null && !s.isBlank()) {
+                    return s;
+                }
+            }
+        }
+        return null;
+    }
+
+    protected static BigDecimal readDecimal(JsonNode body, String... fields) {
+        if (body == null) {
+            return null;
+        }
+        for (String f : fields) {
+            JsonNode v = body.path(f);
+            if (v.isMissingNode() || v.isNull()) continue;
+            if (v.isNumber()) {
+                return v.decimalValue();
+            }
+            String s = v.asText(null);
+            if (s != null && !s.isBlank()) {
+                try {
+                    return new BigDecimal(s);
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+        return null;
+    }
+
+    protected static Long readLong(JsonNode body, String... fields) {
+        if (body == null) {
+            return null;
+        }
+        for (String f : fields) {
+            JsonNode v = body.path(f);
+            if (v.isMissingNode() || v.isNull()) continue;
+            if (v.canConvertToLong()) {
+                return v.asLong();
+            }
+            String s = v.asText(null);
+            if (s != null && !s.isBlank()) {
+                try {
+                    return Long.parseLong(s);
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+        return null;
     }
 }

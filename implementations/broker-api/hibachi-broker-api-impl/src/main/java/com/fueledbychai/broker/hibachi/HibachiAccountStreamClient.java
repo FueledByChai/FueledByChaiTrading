@@ -36,6 +36,11 @@ public class HibachiAccountStreamClient {
     protected volatile ScheduledFuture<?> pingTask;
     protected final AtomicLong listenKeyHolder = new AtomicLong();
     protected volatile String listenKey;
+    protected volatile HibachiAccountEventListener eventListener;
+
+    public void setEventListener(HibachiAccountEventListener listener) {
+        this.eventListener = listener;
+    }
 
     public HibachiAccountStreamClient(HibachiConfiguration config, long accountId, String apiKey) {
         this.config = config;
@@ -123,12 +128,49 @@ public class HibachiAccountStreamClient {
         if (message == null) {
             return;
         }
-        // Capture listenKey from stream.start response.
+        HibachiAccountEventListener l = eventListener;
+
         JsonNode result = message.path("result");
         if (result.has("listenKey")) {
             listenKey = result.path("listenKey").asText(null);
             listenKeyHolder.set(System.currentTimeMillis());
             logger.info("Hibachi account stream started; listenKey={}", listenKey);
+        }
+        if (l != null && result.has("accountSnapshot")) {
+            safeDispatch(() -> l.onAccountSnapshot(result.path("accountSnapshot")));
+        }
+
+        if (l == null) {
+            return;
+        }
+        String topic = message.path("topic").asText(null);
+        if (topic == null && message.path("params").has("topic")) {
+            topic = message.path("params").path("topic").asText(null);
+        }
+        if (topic == null) {
+            return;
+        }
+        String t = topic.toLowerCase();
+        if (t.contains("fill") || t.contains("trade")) {
+            safeDispatch(() -> l.onFill(message));
+        } else if (t.contains("order")) {
+            safeDispatch(() -> l.onOrderUpdate(message));
+        } else if (t.contains("position")) {
+            safeDispatch(() -> l.onPositionUpdate(message));
+        } else if (t.contains("balance") || t.contains("equity") || t.contains("account")) {
+            safeDispatch(() -> l.onBalanceUpdate(message));
+        } else {
+            final String topicFinal = topic;
+            safeDispatch(() -> l.onUnknownFrame(topicFinal, message));
+            logger.info("Hibachi account WS unknown topic={} frame={}", topic, message);
+        }
+    }
+
+    private void safeDispatch(Runnable r) {
+        try {
+            r.run();
+        } catch (Exception e) {
+            logger.warn("Hibachi account event listener threw", e);
         }
     }
 
