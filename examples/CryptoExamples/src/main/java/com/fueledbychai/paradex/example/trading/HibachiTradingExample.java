@@ -53,11 +53,11 @@ import com.fueledbychai.websocket.ProxyConfig;
 public class HibachiTradingExample {
 
     protected static final Logger logger = LoggerFactory.getLogger(HibachiTradingExample.class);
-    protected static final String DEFAULT_SYMBOL = "BTC";
+    protected static final String DEFAULT_SYMBOL = "SOL";
     protected static final BigDecimal DEFAULT_SIZE = new BigDecimal("0.0001");
     protected static final Duration INITIAL_QUOTE_TIMEOUT = Duration.ofSeconds(10);
     protected static final Duration ORDER_OBSERVATION_WINDOW = Duration.ofSeconds(30);
-    protected static final BigDecimal FALLBACK_TICK_SIZE = new BigDecimal("0.1");
+    protected static final BigDecimal FALLBACK_TICK_SIZE = new BigDecimal("0.001");
 
     public void executeTrade(String symbol) throws Exception {
         ProxyConfig.getInstance().setRunningLocally(
@@ -89,9 +89,9 @@ public class HibachiTradingExample {
         quoteEngine.startEngine();
         quoteEngine.subscribeLevel1(ticker, quote -> {
             latestQuote.set(quote);
-            logger.info("L1 {} bid={} ask={} mark={}", quote.getTicker().getSymbol(),
-                    value(quote, QuoteType.BID), value(quote, QuoteType.ASK),
-                    value(quote, QuoteType.MARK_PRICE));
+            // logger.info("L1 {} bid={} ask={} mark={}", quote.getTicker().getSymbol(),
+            //         value(quote, QuoteType.BID), value(quote, QuoteType.ASK),
+            //         value(quote, QuoteType.MARK_PRICE));
             if (quote.containsType(QuoteType.BID) || quote.containsType(QuoteType.ASK)) {
                 initialQuoteLatch.countDown();
             }
@@ -125,7 +125,7 @@ public class HibachiTradingExample {
                     .setSize(DEFAULT_SIZE)
                     .setType(Type.LIMIT)
                     .setDuration(OrderTicket.Duration.GOOD_UNTIL_CANCELED)
-                    .setLimitPrice(new BigDecimal("75700.00"))
+                    .setLimitPrice(new BigDecimal("80.00"))
                     .addModifier(Modifier.POST_ONLY);
 
             logger.info("Placing Hibachi post-only limit order for {} size={} price={}",
