@@ -78,6 +78,13 @@ public class HibachiBroker extends AbstractBasicBroker {
         this.tradeWs = new HibachiTradeWebSocketClient(config, accountId, config.getApiKey());
         this.accountWs = new HibachiAccountStreamClient(config, accountId, config.getApiKey());
         this.accountWs.setEventListener(new AccountListener());
+        this.tradeWs.setConnectionStateListener(this::onWsStateChanged);
+        this.accountWs.setConnectionStateListener(this::onWsStateChanged);
+    }
+
+    protected void onWsStateChanged(boolean ignored) {
+        // We don't keep a per-WS flag here; isConnected() polls the WS clients directly.
+        // The hook exists so subclasses (or future logic) can react to up/down transitions.
     }
 
     @Override
@@ -114,12 +121,12 @@ public class HibachiBroker extends AbstractBasicBroker {
 
     @Override
     public boolean isConnected() {
-        return connected;
+        return connected && tradeWs.isConnected() && accountWs.isConnected();
     }
 
     @Override
     public BrokerStatus getBrokerStatus() {
-        return connected ? BrokerStatus.OK : BrokerStatus.UNKNOWN;
+        return isConnected() ? BrokerStatus.OK : BrokerStatus.UNKNOWN;
     }
 
     @Override
@@ -141,14 +148,26 @@ public class HibachiBroker extends AbstractBasicBroker {
                     order, contract, accountId, nonce, config.getOrderMaxFeesPercent(), signer);
             orderRegistry.addOpenOrder(order);
             JsonNode response = tradeWs.placeOrder(request.params, request.signature, order.getClientOrderId());
+            logger.info("Hibachi placeOrder response: {}", response);
             BrokerRequestResult result = interpretResponse(response, "placeOrder");
-            if (result.isSuccess()) {
-                String exchangeOrderId = response.path("result").path("orderId").asText(null);
-                if (exchangeOrderId != null && !exchangeOrderId.isBlank()) {
-                    order.setOrderId(exchangeOrderId);
-                    orderRegistry.addOpenOrder(order);
-                }
+            if (!result.isSuccess()) {
+                return result;
             }
+            String exchangeOrderId = response.path("result").path("orderId").asText(null);
+            if (exchangeOrderId == null || exchangeOrderId.isBlank()) {
+                return new BrokerRequestResult(false, true, response.toString(),
+                        BrokerRequestResult.FailureType.UNKNOWN);
+            }
+            // Hibachi's WS gateway returns 200 + orderId before its risk engine validates
+            // the order, so a min-notional / margin / risk rejection looks identical to a
+            // successful place at the WS layer. Verify with a REST lookup — if Hibachi
+            // can't find the order, it was silently rejected post-ack.
+            BrokerRequestResult rejection = verifyOrderLanded(exchangeOrderId);
+            if (rejection != null) {
+                return rejection;
+            }
+            order.setOrderId(exchangeOrderId);
+            orderRegistry.addOpenOrder(order);
             return result;
         } catch (Exception e) {
             logger.error("Hibachi placeOrder failed", e);
@@ -369,11 +388,79 @@ public class HibachiBroker extends AbstractBasicBroker {
         if (response == null) {
             return new BrokerRequestResult(false, true, op + " returned null", BrokerRequestResult.FailureType.UNKNOWN);
         }
-        if (response.has("error") && !response.path("error").isNull()) {
-            String msg = response.path("error").toString();
-            return new BrokerRequestResult(false, true, msg, BrokerRequestResult.FailureType.UNKNOWN);
+        // Hibachi reports order failures in several shapes — check all of them, otherwise
+        // a notional-too-small / risk-rejected order silently looks like a success.
+        if (response.has("error") && !response.path("error").isNull() && !response.path("error").isMissingNode()) {
+            return new BrokerRequestResult(false, true, response.path("error").toString(),
+                    BrokerRequestResult.FailureType.UNKNOWN);
+        }
+        if (isFailedStatus(response) || isNonZeroErrorCode(response)) {
+            return new BrokerRequestResult(false, true, response.toString(),
+                    BrokerRequestResult.FailureType.UNKNOWN);
+        }
+        JsonNode result = response.path("result");
+        if (!result.isMissingNode() && !result.isNull()
+                && (isFailedStatus(result) || isNonZeroErrorCode(result))) {
+            return new BrokerRequestResult(false, true, result.toString(),
+                    BrokerRequestResult.FailureType.UNKNOWN);
         }
         return new BrokerRequestResult();
+    }
+
+    private static boolean isFailedStatus(JsonNode node) {
+        JsonNode status = node.path("status");
+        if (status.isMissingNode() || status.isNull()) {
+            return false;
+        }
+        String s = status.asText("");
+        return s.equalsIgnoreCase("failed") || s.equalsIgnoreCase("rejected") || s.equalsIgnoreCase("error");
+    }
+
+    /**
+     * After a successful WS place ack, asks the REST API for the order to confirm it's
+     * actually on the book. Returns a failure {@link BrokerRequestResult} if Hibachi
+     * reports the order as not-found (post-ack risk rejection) or {@code null} if the
+     * order is live or the verification can't be performed.
+     */
+    protected BrokerRequestResult verifyOrderLanded(String orderId) {
+        try {
+            JsonNode verify = restApi.getOrder(orderId);
+            if (isNotFoundResponse(verify)) {
+                logger.warn("Hibachi rejected order {} after WS ack: {}", orderId, verify);
+                return new BrokerRequestResult(false, true, verify.toString(),
+                        BrokerRequestResult.FailureType.UNKNOWN);
+            }
+        } catch (Exception e) {
+            logger.debug("Post-place verification for {} failed; assuming order is live", orderId, e);
+        }
+        return null;
+    }
+
+    private static boolean isNotFoundResponse(JsonNode response) {
+        if (response == null || response.isNull() || response.isMissingNode()) {
+            return false;
+        }
+        if (isFailedStatus(response)) {
+            JsonNode code = response.path("errorCode");
+            if (code.isNumber() && code.asInt() == 3) {
+                return true;
+            }
+            String msg = response.path("message").asText("");
+            return msg.toLowerCase().contains("not found");
+        }
+        return false;
+    }
+
+    private static boolean isNonZeroErrorCode(JsonNode node) {
+        JsonNode code = node.path("errorCode");
+        if (code.isMissingNode() || code.isNull()) {
+            return false;
+        }
+        if (code.isNumber()) {
+            return code.asLong() != 0L;
+        }
+        String s = code.asText("");
+        return !s.isBlank() && !s.equals("0");
     }
 
     protected long nextNonce() {
