@@ -5,6 +5,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +23,8 @@ import com.fueledbychai.hibachi.common.api.ws.trade.HibachiTradeEnvelope;
  * <p>On connect: sends {@code stream.start}, captures the {@code listenKey} from the
  * response, then schedules {@code stream.ping} every
  * {@link HibachiConfiguration#getAccountWsPingSeconds()} (default 14s).
+ *
+ * <p>Auto-reconnects with exponential backoff if the WS closes unexpectedly.
  */
 public class HibachiAccountStreamClient {
 
@@ -34,59 +37,88 @@ public class HibachiAccountStreamClient {
     protected volatile HibachiJsonProcessor processor;
     protected volatile ScheduledExecutorService pingScheduler;
     protected volatile ScheduledFuture<?> pingTask;
+    protected volatile ScheduledExecutorService reconnectScheduler;
+    protected volatile ScheduledFuture<?> reconnectTask;
+    protected volatile long reconnectBackoffMs;
+    protected volatile boolean shutdown;
     protected final AtomicLong listenKeyHolder = new AtomicLong();
     protected volatile String listenKey;
     protected volatile HibachiAccountEventListener eventListener;
+    protected volatile Consumer<Boolean> connectionStateListener;
 
     public void setEventListener(HibachiAccountEventListener listener) {
         this.eventListener = listener;
+    }
+
+    /** Notified with {@code true} when the account WS opens, {@code false} when it closes. */
+    public void setConnectionStateListener(Consumer<Boolean> listener) {
+        this.connectionStateListener = listener;
     }
 
     public HibachiAccountStreamClient(HibachiConfiguration config, long accountId, String apiKey) {
         this.config = config;
         this.accountId = accountId;
         this.apiKey = apiKey;
+        this.reconnectBackoffMs = Math.max(100L, config.getWsReconnectInitialBackoffMs());
     }
 
     public synchronized void connect() {
         if (client != null && client.isOpen()) {
             return;
         }
+        shutdown = false;
         try {
-            processor = new HibachiJsonProcessor(this::onClosed);
-            processor.addEventListener(this::onMessage);
-            client = HibachiWebSocketClient.createPrivate(
-                    config.getAccountWsUrl(), String.valueOf(accountId), processor, apiKey, config.getClient());
-            if (!client.connectBlocking(15, TimeUnit.SECONDS)) {
-                throw new IllegalStateException("Hibachi account WS handshake timed out");
-            }
-            sendStreamStart();
-            startPing();
+            doConnect();
         } catch (Exception e) {
             throw new IllegalStateException("Failed to open Hibachi account WS", e);
         }
     }
 
     public synchronized void disconnect() {
+        shutdown = true;
+        cancelReconnect();
         stopPing();
+        cleanupClient();
+        listenKey = null;
+        notifyState(false);
+    }
+
+    public boolean isConnected() {
+        HibachiWebSocketClient c = client;
+        return c != null && c.isOpen();
+    }
+
+    public String getListenKey() {
+        return listenKey;
+    }
+
+    protected synchronized void doConnect() throws Exception {
+        cleanupClient();
+        processor = new HibachiJsonProcessor(this::onClosed);
+        processor.addEventListener(this::onMessage);
+        client = HibachiWebSocketClient.createPrivate(
+                config.getAccountWsUrl(), String.valueOf(accountId), processor, apiKey, config.getClient());
+        if (!client.connectBlocking(15, TimeUnit.SECONDS)) {
+            cleanupClient();
+            throw new IllegalStateException("Hibachi account WS handshake timed out");
+        }
+        sendStreamStart();
+        startPing();
+        cancelReconnect();
+        reconnectBackoffMs = Math.max(100L, config.getWsReconnectInitialBackoffMs());
+        notifyState(true);
+    }
+
+    protected synchronized void cleanupClient() {
         HibachiWebSocketClient c = client;
         client = null;
         if (c != null) {
             try { c.close(); } catch (Exception ignored) {}
         }
         if (processor != null) {
-            processor.shutdown();
+            try { processor.shutdown(); } catch (Exception ignored) {}
             processor = null;
         }
-        listenKey = null;
-    }
-
-    public boolean isConnected() {
-        return client != null && client.isOpen();
-    }
-
-    public String getListenKey() {
-        return listenKey;
     }
 
     protected void sendStreamStart() {
@@ -95,6 +127,7 @@ public class HibachiAccountStreamClient {
     }
 
     protected void startPing() {
+        stopPing();
         long intervalSeconds = Math.max(1L, config.getAccountWsPingSeconds());
         pingScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "hibachi-account-ping");
@@ -121,6 +154,58 @@ public class HibachiAccountStreamClient {
         if (pingScheduler != null) {
             pingScheduler.shutdownNow();
             pingScheduler = null;
+        }
+    }
+
+    protected void scheduleReconnect() {
+        if (shutdown) {
+            return;
+        }
+        synchronized (this) {
+            if (reconnectTask != null && !reconnectTask.isDone()) {
+                return;
+            }
+            if (reconnectScheduler == null) {
+                reconnectScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "hibachi-account-reconnect");
+                    t.setDaemon(true);
+                    return t;
+                });
+            }
+            long delay = reconnectBackoffMs;
+            long max = Math.max(delay, config.getWsReconnectMaxBackoffMs());
+            reconnectBackoffMs = Math.min(max, Math.max(delay * 2L, delay + 250L));
+            logger.info("Scheduling Hibachi account WS reconnect in {}ms", delay);
+            reconnectTask = reconnectScheduler.schedule(this::tryReconnect, delay, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    protected void tryReconnect() {
+        if (shutdown) {
+            return;
+        }
+        try {
+            synchronized (this) {
+                if (isConnected()) {
+                    return;
+                }
+                doConnect();
+                logger.info("Hibachi account WS reconnected");
+            }
+        } catch (Exception e) {
+            logger.warn("Hibachi account WS reconnect failed; rescheduling", e);
+            scheduleReconnect();
+        }
+    }
+
+    protected synchronized void cancelReconnect() {
+        if (reconnectTask != null) {
+            reconnectTask.cancel(false);
+            reconnectTask = null;
+        }
+        if (reconnectScheduler != null) {
+            reconnectScheduler.shutdownNow();
+            reconnectScheduler = null;
         }
     }
 
@@ -176,5 +261,22 @@ public class HibachiAccountStreamClient {
 
     protected void onClosed() {
         stopPing();
+        listenKey = null;
+        notifyState(false);
+        if (!shutdown) {
+            scheduleReconnect();
+        }
+    }
+
+    protected void notifyState(boolean connected) {
+        Consumer<Boolean> listener = connectionStateListener;
+        if (listener == null) {
+            return;
+        }
+        try {
+            listener.accept(connected);
+        } catch (Exception e) {
+            logger.warn("Hibachi account WS connection-state listener failed", e);
+        }
     }
 }
