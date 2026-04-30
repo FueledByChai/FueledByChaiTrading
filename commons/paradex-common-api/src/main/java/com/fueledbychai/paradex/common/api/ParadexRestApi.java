@@ -491,31 +491,19 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
     }
 
     @Override
-    public RestResponse cancelOrderBatch(String jwtToken, List<String> orderIds, List<String> clientOrderIds) {
+    public RestResponse cancelOrderBatch(String jwtToken, List<String> orderIds) {
         checkPrivateApi();
 
-        boolean hasOrderIds = orderIds != null && !orderIds.isEmpty();
-        boolean hasClientOrderIds = clientOrderIds != null && !clientOrderIds.isEmpty();
-        if (!hasOrderIds && !hasClientOrderIds) {
-            throw new IllegalArgumentException(
-                    "cancelOrderBatch requires at least one of orderIds or clientOrderIds");
+        if (orderIds == null || orderIds.isEmpty()) {
+            throw new IllegalArgumentException("cancelOrderBatch requires at least one orderId");
         }
 
         JsonObject body = new JsonObject();
-        if (hasOrderIds) {
-            JsonArray ids = new JsonArray();
-            for (String id : orderIds) {
-                ids.add(id);
-            }
-            body.add("order_ids", ids);
+        JsonArray ids = new JsonArray();
+        for (String id : orderIds) {
+            ids.add(id);
         }
-        if (hasClientOrderIds) {
-            JsonArray ids = new JsonArray();
-            for (String id : clientOrderIds) {
-                ids.add(id);
-            }
-            body.add("client_order_ids", ids);
-        }
+        body.add("order_ids", ids);
 
         try {
             String path = "/orders/batch";
@@ -527,8 +515,7 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
             logger.info("Request: " + request);
 
             Response response;
-            try (var s = Span.start("PD_CANCEL_ORDER_BATCH_REST_CALL", String.valueOf(
-                    (hasOrderIds ? orderIds.size() : 0) + (hasClientOrderIds ? clientOrderIds.size() : 0)),
+            try (var s = Span.start("PD_CANCEL_ORDER_BATCH_REST_CALL", String.valueOf(orderIds.size()),
                     LATENCY_LOGGER)) {
                 response = client.newCall(request).execute();
                 if (!response.isSuccessful()) {
