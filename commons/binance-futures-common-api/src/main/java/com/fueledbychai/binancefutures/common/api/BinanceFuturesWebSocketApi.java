@@ -28,6 +28,16 @@ public class BinanceFuturesWebSocketApi implements IBinanceFuturesWebSocketApi {
     protected final String futuresWebSocketUrl;
     protected final String optionsWebSocketUrl;
     protected final String webSocketUrl;
+    // Binance announced a WS URL split (legacy /ws decommissioned 2026-04-23)
+    // routing channels into traffic categories: bookTicker + depth land on
+    // /public/ws; ticker, markPrice, aggTrade, kline, miniTicker, etc. land
+    // on /market/ws. Connecting to the legacy /ws URL silently drops
+    // anything outside the public set — SUBSCRIBE is acked but no frames
+    // flow. We derive both per-category URLs from whatever base the caller
+    // configured so existing BINANCE_FUTURES_MAINNET_WS_URL overrides keep
+    // working without a config schema change.
+    protected final String futuresPublicWebSocketUrl;
+    protected final String futuresMarketWebSocketUrl;
     protected volatile boolean connected = false;
     protected volatile boolean orderEntryConnected = false;
     protected volatile boolean shuttingDown = false;
@@ -55,6 +65,33 @@ public class BinanceFuturesWebSocketApi implements IBinanceFuturesWebSocketApi {
         this.futuresWebSocketUrl = futuresWebSocketUrl;
         this.optionsWebSocketUrl = optionsWebSocketUrl;
         this.webSocketUrl = futuresWebSocketUrl;
+        String futuresBase = stripLegacyPath(futuresWebSocketUrl);
+        this.futuresPublicWebSocketUrl = futuresBase + "/public/ws";
+        this.futuresMarketWebSocketUrl = futuresBase + "/market/ws";
+    }
+
+    /**
+     * Strip a trailing /ws, /public/ws, /market/ws, or /stream from a
+     * configured Binance Futures WS URL so we can append the per-category
+     * suffix. Tolerant of all the path forms the legacy + new docs use.
+     */
+    private static String stripLegacyPath(String url) {
+        return url.replaceFirst("/(public/ws|market/ws|stream|ws)$", "");
+    }
+
+    /**
+     * Maps a Binance Futures stream channel name to the new traffic
+     * category Binance introduced after the 2026-04-23 URL split.
+     * Public-category channels (bookTicker, depth, diff-depth) push only
+     * to /public/ws; everything else (ticker, markPrice, aggTrade, kline,
+     * miniTicker, forceOrder, etc.) pushes only to /market/ws.
+     */
+    static boolean isPublicChannel(String channel) {
+        if (channel == null) {
+            return false;
+        }
+        return channel.contains("@bookTicker") || channel.equals("!bookTicker")
+                || channel.contains("@depth");
     }
 
     @Override
@@ -127,8 +164,9 @@ public class BinanceFuturesWebSocketApi implements IBinanceFuturesWebSocketApi {
         connected = true;
 
         String streamKey = streamKey(ticker, channel);
+        String url = resolveWebSocketUrl(ticker, channel);
         streamChannels.put(streamKey, channel);
-        streamUrls.put(streamKey, resolveWebSocketUrl(ticker));
+        streamUrls.put(streamKey, url);
 
         BinanceFuturesJsonProcessor processor = processors.computeIfAbsent(streamKey, this::newProcessor);
         processor.addEventListener(listener);
@@ -138,7 +176,7 @@ public class BinanceFuturesWebSocketApi implements IBinanceFuturesWebSocketApi {
             return existing;
         }
 
-        BinanceFuturesWebSocketClient client = newClient(resolveWebSocketUrl(ticker), channel, processor);
+        BinanceFuturesWebSocketClient client = newClient(url, channel, processor);
         clients.put(streamKey, client);
         client.connect();
         return client;
@@ -181,18 +219,25 @@ public class BinanceFuturesWebSocketApi implements IBinanceFuturesWebSocketApi {
         }
     }
 
-    protected String resolveWebSocketUrl(Ticker ticker) {
+    /**
+     * Resolves the right WS endpoint for (ticker, channel). Options keep
+     * the dedicated options URL (already on /public/ws). For futures, the
+     * URL is selected by the channel's traffic category — see
+     * {@link #isPublicChannel(String)} for the public/market split that
+     * Binance enforces server-side after the 2026-04-23 cutover.
+     */
+    protected String resolveWebSocketUrl(Ticker ticker, String channel) {
         if (ticker != null) {
             InstrumentType instrumentType = ticker.getInstrumentType();
             if (instrumentType == InstrumentType.OPTION || instrumentType == InstrumentType.PERPETUAL_OPTION) {
                 return optionsWebSocketUrl;
             }
         }
-        return futuresWebSocketUrl;
+        return isPublicChannel(channel) ? futuresPublicWebSocketUrl : futuresMarketWebSocketUrl;
     }
 
     protected String streamKey(Ticker ticker, String channel) {
-        return resolveWebSocketUrl(ticker) + "|" + channel;
+        return resolveWebSocketUrl(ticker, channel) + "|" + channel;
     }
 
     protected BinanceFuturesWebSocketClient newClient(String streamUrl, String channel,
