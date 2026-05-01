@@ -213,39 +213,58 @@ public class ParadexBroker extends AbstractBasicBroker {
             return new BrokerRequestResult();
         }
 
+        // Paradex /orders/batch only accepts order_ids; client_order_ids are rejected with
+        // "Client order IDs are not currently supported. Please use order IDs instead."
+        // For orders that haven't received an exchange orderId yet, fall back to the
+        // per-clientId singular endpoint.
         java.util.List<String> orderIds = new java.util.ArrayList<>();
-        java.util.List<String> clientOrderIds = new java.util.ArrayList<>();
+        java.util.List<OrderTicket> clientIdFallbacks = new java.util.ArrayList<>();
         for (OrderTicket order : orders) {
             if (order == null) {
                 continue;
             }
-            String clientOrderId = order.getClientOrderId();
-            if (clientOrderId != null && !clientOrderId.isEmpty()) {
-                clientOrderIds.add(clientOrderId);
-            } else if (order.getOrderId() != null && !order.getOrderId().isEmpty()) {
-                orderIds.add(order.getOrderId());
+            String exchangeOrderId = order.getOrderId();
+            if (exchangeOrderId != null && !exchangeOrderId.isEmpty()) {
+                orderIds.add(exchangeOrderId);
+            } else if (order.getClientOrderId() != null && !order.getClientOrderId().isEmpty()) {
+                clientIdFallbacks.add(order);
             } else {
                 logger.warn("Skipping order with no orderId or clientOrderId: {}", order);
             }
         }
 
-        if (orderIds.isEmpty() && clientOrderIds.isEmpty()) {
+        if (orderIds.isEmpty() && clientIdFallbacks.isEmpty()) {
             return new BrokerRequestResult(false, true, "No identifiable orders to cancel");
         }
 
-        logger.info("Batch canceling {} orders ({} by id, {} by clientId)",
-                orderIds.size() + clientOrderIds.size(), orderIds.size(), clientOrderIds.size());
+        logger.info("Batch canceling {} orders ({} by id via batch, {} by clientId via singular endpoint)",
+                orderIds.size() + clientIdFallbacks.size(), orderIds.size(), clientIdFallbacks.size());
 
-        RestResponse response;
-        try (var s = Span.start("PD_CANCEL_ORDER_BATCH_API_CALL",
-                String.valueOf(orderIds.size() + clientOrderIds.size()), LATENCY_LOGGER)) {
-            response = restApi.cancelOrderBatch(jwtToken, orderIds, clientOrderIds);
+        RestResponse response = null;
+        if (!orderIds.isEmpty()) {
+            try (var s = Span.start("PD_CANCEL_ORDER_BATCH_API_CALL",
+                    String.valueOf(orderIds.size()), LATENCY_LOGGER)) {
+                response = restApi.cancelOrderBatch(jwtToken, orderIds);
+            }
+            logger.info("Batch cancel response code: {}", response.getHttpCode());
+            if (!response.isSuccessful()) {
+                logger.error("Batch cancel failed: {}", response.getBody());
+                return new BrokerRequestResult(false, true, response.getBody());
+            }
         }
-        logger.info("Batch cancel response code: {}", response.getHttpCode());
 
-        if (!response.isSuccessful()) {
-            logger.error("Batch cancel failed: {}", response.getBody());
-            return new BrokerRequestResult(false, true, response.getBody());
+        for (OrderTicket order : clientIdFallbacks) {
+            String clientId = order.getClientOrderId();
+            try (var s = Span.start("PD_CANCEL_ORDER_BY_CLIENT_ID_FROM_BATCH", clientId, LATENCY_LOGGER)) {
+                RestResponse r = restApi.cancelOrderByClientOrderId(jwtToken, clientId);
+                if (!r.isSuccessful()) {
+                    logger.error("Per-clientId cancel failed for {}: {}", clientId, r.getBody());
+                    return new BrokerRequestResult(false, true, r.getBody());
+                }
+            } catch (Exception e) {
+                logger.error("Per-clientId cancel threw for {}", clientId, e);
+                return new BrokerRequestResult(false, true, e.getMessage());
+            }
         }
 
         for (OrderTicket order : orders) {
