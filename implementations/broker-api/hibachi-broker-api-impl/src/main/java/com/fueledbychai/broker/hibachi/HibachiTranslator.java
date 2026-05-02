@@ -4,6 +4,9 @@ import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.hibachi.common.api.HibachiContract;
@@ -21,6 +24,8 @@ import com.fueledbychai.hibachi.common.api.signer.IHibachiSigner;
  * map (full-precision strings via {@link BigDecimal#toPlainString()}).
  */
 public class HibachiTranslator {
+
+    private static final Logger logger = LoggerFactory.getLogger(HibachiTranslator.class);
 
     public static class SignedRequest {
         public final byte[] signedBytes;
@@ -170,15 +175,31 @@ public class HibachiTranslator {
     }
 
     public HibachiOrderFlag toFlag(OrderTicket order) {
-        if (order == null || order.getDuration() == null) {
+        if (order == null) {
             return null;
         }
-        switch (order.getDuration()) {
-            case IMMEDIATE_OR_CANCEL:
-                return HibachiOrderFlag.IOC;
-            default:
-                return null;
+        // Hibachi's `orderFlags` is a single value, not a list. Pick by priority and warn
+        // if the caller asked for more than one — POST_ONLY beats IOC (they're contradictory)
+        // and both beat REDUCE_ONLY (orthogonal but only one slot on the wire).
+        boolean postOnly = hasModifier(order, OrderTicket.Modifier.POST_ONLY);
+        boolean ioc = order.getDuration() == OrderTicket.Duration.IMMEDIATE_OR_CANCEL
+                || order.getDuration() == OrderTicket.Duration.FILL_OR_KILL;
+        boolean reduceOnly = hasModifier(order, OrderTicket.Modifier.REDUCE_ONLY);
+
+        int set = (postOnly ? 1 : 0) + (ioc ? 1 : 0) + (reduceOnly ? 1 : 0);
+        if (set > 1) {
+            logger.warn("Hibachi accepts only one orderFlag; got postOnly={} ioc={} reduceOnly={} — sending POST_ONLY > IOC > REDUCE_ONLY",
+                    postOnly, ioc, reduceOnly);
         }
+        if (postOnly) return HibachiOrderFlag.POST_ONLY;
+        if (ioc) return HibachiOrderFlag.IOC;
+        if (reduceOnly) return HibachiOrderFlag.REDUCE_ONLY;
+        return null;
+    }
+
+    private static boolean hasModifier(OrderTicket order, OrderTicket.Modifier modifier) {
+        java.util.List<OrderTicket.Modifier> mods = order.getModifiers();
+        return mods != null && mods.contains(modifier);
     }
 
     private static Long parseLongOrNull(String value) {

@@ -4,8 +4,9 @@ public class BrokerRequestResult {
 
     public enum FailureType {
         NONE, ORDER_NOT_OPEN, ORDER_NOT_FOUND, ORDER_ALREADY_FILLED, ORDER_ALREADY_CANCELED, ORDER_ALREADY_COMPLETE, VALIDATION_FAILED, NO_ORDER_PARAMS_CHANGED, INVALID_SIZE, INSUFFICIENT_FUNDS, INVALID_PRICE,
+        POST_ONLY_REJECTED,
         UNKNOWN
-    
+
     }
 
     protected boolean success;
