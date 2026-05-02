@@ -43,6 +43,12 @@ public class HibachiRestApi extends BaseRestApi implements IHibachiRestApi {
     protected final String tradingBaseUrl;
     protected final String dataBaseUrl;
     protected final String apiKey;
+    // Hibachi requires accountId as a query parameter on every authenticated
+    // /trade/* and /capital/* endpoint. Without it the server returns
+    // {"errorCode":4,"message":"Missing accountId"} even when the
+    // Authorization header is correct. Captured at construction so
+    // privateRequest can inject it into every call.
+    protected final String accountId;
     protected final String hibachiClient;
     protected final boolean publicApiOnly;
     protected final OkHttpClient client;
@@ -52,10 +58,15 @@ public class HibachiRestApi extends BaseRestApi implements IHibachiRestApi {
     protected volatile boolean exchangeInfoLoaded;
 
     public HibachiRestApi(String tradingBaseUrl, String dataBaseUrl, String hibachiClient) {
-        this(tradingBaseUrl, dataBaseUrl, hibachiClient, null);
+        this(tradingBaseUrl, dataBaseUrl, hibachiClient, null, null);
     }
 
     public HibachiRestApi(String tradingBaseUrl, String dataBaseUrl, String hibachiClient, String apiKey) {
+        this(tradingBaseUrl, dataBaseUrl, hibachiClient, apiKey, null);
+    }
+
+    public HibachiRestApi(String tradingBaseUrl, String dataBaseUrl, String hibachiClient, String apiKey,
+            String accountId) {
         if (tradingBaseUrl == null || tradingBaseUrl.isBlank()) {
             throw new IllegalArgumentException("tradingBaseUrl is required");
         }
@@ -65,6 +76,7 @@ public class HibachiRestApi extends BaseRestApi implements IHibachiRestApi {
         this.tradingBaseUrl = normalizeBaseUrl(tradingBaseUrl);
         this.dataBaseUrl = normalizeBaseUrl(dataBaseUrl);
         this.apiKey = apiKey;
+        this.accountId = accountId;
         this.hibachiClient = hibachiClient == null || hibachiClient.isBlank()
                 ? "FueledByChaiJavaSDK"
                 : hibachiClient;

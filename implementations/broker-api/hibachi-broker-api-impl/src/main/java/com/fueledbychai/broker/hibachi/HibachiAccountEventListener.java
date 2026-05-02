@@ -18,6 +18,13 @@ public interface HibachiAccountEventListener {
     /** Order lifecycle update (NEW / PARTIAL_FILL / FILLED / CANCELED / REJECTED). */
     default void onOrderUpdate(JsonNode frame) {}
 
+    /**
+     * Risk-engine rejection arriving as {@code event="order_request_rejected"}. The trade WS
+     * gateway returns 200 + orderId before the risk engine validates, so this is the only
+     * authoritative signal for rejections like {@code TooSmallNotionalValue}.
+     */
+    default void onOrderRejected(String orderId, String reason, JsonNode frame) {}
+
     /** A new fill / trade execution for the account. */
     default void onFill(JsonNode frame) {}
 

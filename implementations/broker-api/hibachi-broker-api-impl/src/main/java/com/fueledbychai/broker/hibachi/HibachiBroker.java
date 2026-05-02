@@ -6,11 +6,14 @@ import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
@@ -55,6 +58,13 @@ public class HibachiBroker extends AbstractBasicBroker {
     protected final HibachiAccountStreamClient accountWs;
     protected final AtomicLong nextClientOrderId = new AtomicLong(System.currentTimeMillis());
     protected final Map<String, Position> positionsCache = new ConcurrentHashMap<>();
+    protected final Map<String, PendingPlace> pendingPlaces = new ConcurrentHashMap<>();
+    /**
+     * How long {@link #placeOrder} waits after the WS gateway ack for a risk-engine rejection
+     * to arrive on the account WS. Rejections in practice land within ~10ms; we give a
+     * generous margin without adding noticeable latency to successful places.
+     */
+    protected static final long PLACE_REJECTION_WAIT_MILLIS = 500L;
     protected volatile boolean connected;
 
     public HibachiBroker() {
@@ -98,6 +108,7 @@ public class HibachiBroker extends AbstractBasicBroker {
             return;
         }
         try {
+            tradeWs.setRawMessageListener(node -> logger.info("Hibachi trade WS raw <- {}", node));
             tradeWs.connect();
             accountWs.connect();
             // Eagerly warm contract cache; the trade-WS signer needs contractIds.
@@ -158,16 +169,21 @@ public class HibachiBroker extends AbstractBasicBroker {
                 return new BrokerRequestResult(false, true, response.toString(),
                         BrokerRequestResult.FailureType.UNKNOWN);
             }
-            // Hibachi's WS gateway returns 200 + orderId before its risk engine validates
-            // the order, so a min-notional / margin / risk rejection looks identical to a
-            // successful place at the WS layer. Verify with a REST lookup — if Hibachi
-            // can't find the order, it was silently rejected post-ack.
-            BrokerRequestResult rejection = verifyOrderLanded(exchangeOrderId);
-            if (rejection != null) {
-                return rejection;
-            }
             order.setOrderId(exchangeOrderId);
-            orderRegistry.addOpenOrder(order);
+            // Hibachi's WS gateway returns 200 + orderId before its risk engine validates
+            // the order. Rejections (e.g. TooSmallNotionalValue) arrive ~10ms later as an
+            // {"event":"order_request_rejected"} frame on the account WS. Wait briefly for
+            // one before declaring the place a success.
+            BrokerRequestResult asyncRejection = awaitAccountRejection(exchangeOrderId, order);
+            if (asyncRejection != null) {
+                return asyncRejection;
+            }
+            // Fall back to the REST verify in case the rejection arrived in some other shape
+            // we haven't observed yet.
+            BrokerRequestResult restRejection = verifyOrderLanded(exchangeOrderId);
+            if (restRejection != null) {
+                return restRejection;
+            }
             return result;
         } catch (Exception e) {
             logger.error("Hibachi placeOrder failed", e);
@@ -417,6 +433,107 @@ public class HibachiBroker extends AbstractBasicBroker {
     }
 
     /**
+     * Waits up to {@link #PLACE_REJECTION_WAIT_MILLIS} for an {@code order_request_rejected}
+     * frame on the account WS keyed to {@code exchangeOrderId}. Returns a failure result if
+     * one arrives, {@code null} if the wait times out (i.e. the order is presumed live).
+     */
+    protected BrokerRequestResult awaitAccountRejection(String exchangeOrderId, OrderTicket order) {
+        // Atomic install: if a rejection already arrived (listener stashed an "early" slot),
+        // pick it up immediately without waiting; otherwise install our waiter so a rejection
+        // arriving later wakes us up.
+        PendingPlace pending = pendingPlaces.compute(exchangeOrderId, (k, existing) -> {
+            if (existing != null) {
+                existing.order = order;
+                return existing;
+            }
+            return new PendingPlace(order);
+        });
+        if (pending.earlyRejection != null) {
+            try {
+                fireRejectedEvent(order, exchangeOrderId, pending.earlyRejection.reason);
+                return new BrokerRequestResult(false, true, pending.earlyRejection.reason,
+                        classifyRejection(pending.earlyRejection.reason));
+            } finally {
+                pendingPlaces.remove(exchangeOrderId);
+            }
+        }
+        try {
+            RejectionInfo info = pending.future.get(PLACE_REJECTION_WAIT_MILLIS, TimeUnit.MILLISECONDS);
+            return new BrokerRequestResult(false, true, info.reason,
+                    classifyRejection(info.reason));
+        } catch (TimeoutException te) {
+            return null;
+        } catch (Exception e) {
+            logger.debug("awaitAccountRejection({}) interrupted", exchangeOrderId, e);
+            return null;
+        } finally {
+            pendingPlaces.remove(exchangeOrderId);
+        }
+    }
+
+    /** Tracks an in-flight place-order so the account-WS rejection handler can find both
+     *  the waiter and the original {@link OrderTicket}. {@code earlyRejection} carries a
+     *  rejection that arrived before {@link #placeOrder} got around to installing the waiter
+     *  (the trade-WS ack and account-WS rejection can interleave on different threads). */
+    protected static final class PendingPlace {
+        volatile OrderTicket order;
+        final CompletableFuture<RejectionInfo> future = new CompletableFuture<>();
+        volatile RejectionInfo earlyRejection;
+        PendingPlace(OrderTicket order) { this.order = order; }
+        PendingPlace() {}
+    }
+
+    private static BrokerRequestResult.FailureType classifyRejection(String reason) {
+        if (reason == null) {
+            return BrokerRequestResult.FailureType.UNKNOWN;
+        }
+        String r = reason.toLowerCase();
+        // Check post-only first — Hibachi's "PostOnlyOrderDoesNotAddLiquidity" contains
+        // "liquidity" which would otherwise match nothing meaningful.
+        if (r.contains("postonly") || r.contains("post_only") || r.contains("liquidity")
+                || r.contains("wouldcross") || r.contains("would_cross")) {
+            return BrokerRequestResult.FailureType.POST_ONLY_REJECTED;
+        }
+        if (r.startsWith("toosmall") || r.contains("notional") || r.contains("size")
+                || r.contains("quantity")) {
+            return BrokerRequestResult.FailureType.INVALID_SIZE;
+        }
+        if (r.contains("price") || r.contains("tick")) {
+            return BrokerRequestResult.FailureType.INVALID_PRICE;
+        }
+        // RiskLimitExceeded / margin / balance / position-too-large all map to "you don't
+        // have the funds for this" from the caller's perspective.
+        if (r.contains("margin") || r.contains("balance") || r.contains("fund")
+                || r.contains("collateral") || r.contains("risk") || r.contains("limit")
+                || r.contains("exceed") || r.contains("leverage")) {
+            return BrokerRequestResult.FailureType.INSUFFICIENT_FUNDS;
+        }
+        return BrokerRequestResult.FailureType.UNKNOWN;
+    }
+
+    private static OrderStatus.CancelReason classifyCancelReason(String reason) {
+        if (reason == null) {
+            return OrderStatus.CancelReason.UNKNOWN;
+        }
+        String r = reason.toLowerCase();
+        if (r.contains("postonly") || r.contains("post_only") || r.contains("liquidity")
+                || r.contains("wouldcross") || r.contains("would_cross")) {
+            return OrderStatus.CancelReason.POST_ONLY_WOULD_CROSS;
+        }
+        return OrderStatus.CancelReason.UNKNOWN;
+    }
+
+    /** Carries an account-WS rejection back to a waiting {@link #placeOrder}. */
+    protected static final class RejectionInfo {
+        final String reason;
+        final JsonNode frame;
+        RejectionInfo(String reason, JsonNode frame) {
+            this.reason = reason;
+            this.frame = frame;
+        }
+    }
+
+    /**
      * After a successful WS place ack, asks the REST API for the order to confirm it's
      * actually on the book. Returns a failure {@link BrokerRequestResult} if Hibachi
      * reports the order as not-found (post-ack risk rejection) or {@code null} if the
@@ -540,6 +657,45 @@ public class HibachiBroker extends AbstractBasicBroker {
             }
             fireFillEvent(fill);
         }
+
+        @Override
+        public void onOrderRejected(String orderId, String reason, JsonNode frame) {
+            if (orderId == null || orderId.isBlank()) {
+                logger.warn("Hibachi rejection frame with no orderId: {}", frame);
+                return;
+            }
+            RejectionInfo info = new RejectionInfo(reason, frame);
+            // Atomic: either complete an existing waiter, or stash the rejection for a
+            // waiter that hasn't registered yet (race when the rejection arrives on the
+            // account WS before placeOrder has installed its PendingPlace).
+            PendingPlace pending = pendingPlaces.compute(orderId, (k, existing) -> {
+                if (existing == null) {
+                    PendingPlace pp = new PendingPlace();
+                    pp.earlyRejection = info;
+                    return pp;
+                }
+                existing.future.complete(info);
+                return existing;
+            });
+            OrderTicket order = pending.order != null ? pending.order : orderRegistry.getOrderById(orderId);
+            if (order == null) {
+                // Place hasn't registered yet — the OrderEvent will be fired when placeOrder
+                // picks up the early rejection and we have the OrderTicket reference.
+                return;
+            }
+            fireRejectedEvent(order, orderId, reason);
+        }
+    }
+
+    private void fireRejectedEvent(OrderTicket order, String orderId, String reason) {
+        order.setCurrentStatus(OrderStatus.Status.REJECTED);
+        OrderStatus status = new OrderStatus(OrderStatus.Status.REJECTED, orderId,
+                BigDecimal.ZERO, order.getSize(), null, order.getTicker(),
+                ZonedDateTime.now(ZoneOffset.UTC));
+        status.setClientOrderId(order.getClientOrderId());
+        status.setCancelReason(classifyCancelReason(reason));
+        fireOrderEvent(new OrderEvent(order, status));
+        orderRegistry.addCompletedOrder(order);
     }
 
     protected void applyBalance(JsonNode body) {
