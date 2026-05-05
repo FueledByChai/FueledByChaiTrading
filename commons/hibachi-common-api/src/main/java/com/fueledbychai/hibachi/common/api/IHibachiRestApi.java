@@ -77,6 +77,27 @@ public interface IHibachiRestApi {
     /** Single order by id. */
     JsonNode getOrder(String orderId);
 
+    /**
+     * Single order by clientId. Hibachi's /trade/order endpoint accepts
+     * either {@code orderId} or {@code clientId} as a query parameter; this
+     * method dispatches to the latter so callers that only retain the
+     * client id (e.g. recovering a stuck place where the WS gateway
+     * response was lost) can still resolve the order.
+     */
+    JsonNode getOrderByClientId(String clientId);
+
     /** Capital balance (deposits/withdrawals). */
     JsonNode getCapitalBalance();
+
+    /**
+     * Modify an existing open order via the documented PUT /trade/order endpoint.
+     *
+     * <p>The trade WebSocket exposes an {@code order.modify} method, but the venue
+     * does not actually respond to it — calls hang until the WS-await timer fires.
+     * Modifies must therefore go through this REST endpoint. The body should already
+     * carry: {@code nonce}, {@code quantity}, {@code price}, {@code signature},
+     * {@code maxFeesPercent}, and exactly one of {@code orderId} / {@code clientId} /
+     * the original placement nonce. The implementation injects {@code accountId}.
+     */
+    JsonNode modifyOrder(java.util.Map<String, Object> body);
 }
