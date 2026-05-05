@@ -21,8 +21,10 @@ import com.fueledbychai.http.BaseRestApi;
 import com.fueledbychai.http.OkHttpClientFactory;
 
 import okhttp3.HttpUrl;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import okhttp3.RequestBody;
 import okhttp3.Response;
 
 /**
@@ -213,6 +215,43 @@ public class HibachiRestApi extends BaseRestApi implements IHibachiRestApi {
     }
 
     @Override
+    public JsonNode getOrderByClientId(String clientId) {
+        requirePrivateApi();
+        if (clientId == null || clientId.isBlank()) {
+            throw new IllegalArgumentException("clientId is required");
+        }
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("clientId", clientId);
+        return privateRequest(tradingBaseUrl, "/trade/order", params);
+    }
+
+    /**
+     * Modify an existing order via Hibachi's documented PUT /trade/order endpoint.
+     *
+     * <p>The trade WebSocket has an `order.modify` method but in practice the venue
+     * does not respond — the request times out at the WS-await layer with no
+     * acknowledgement. Modifies must go through this REST endpoint instead.
+     *
+     * <p>The body is sent as JSON; {@code accountId} is injected automatically (Hibachi
+     * requires it on every private call). Per the API doc the caller's body should
+     * already contain: {@code nonce}, {@code quantity}, {@code price}, {@code signature},
+     * {@code maxFeesPercent}, and exactly one of {@code orderId} / {@code clientId} /
+     * the original placement nonce.
+     */
+    @Override
+    public JsonNode modifyOrder(Map<String, Object> body) {
+        requirePrivateApi();
+        if (body == null) {
+            throw new IllegalArgumentException("body is required");
+        }
+        Map<String, Object> effective = new LinkedHashMap<>(body);
+        if (accountId != null && !accountId.isBlank()) {
+            effective.putIfAbsent("accountId", accountId);
+        }
+        return privatePutJson(tradingBaseUrl, "/trade/order", effective);
+    }
+
+    @Override
     public JsonNode getCapitalBalance() {
         requirePrivateApi();
         return privateRequest(tradingBaseUrl, "/capital/balance", null);
@@ -382,13 +421,49 @@ public class HibachiRestApi extends BaseRestApi implements IHibachiRestApi {
     }
 
     protected JsonNode privateRequest(String baseUrl, String path, Map<String, String> params) {
-        HttpUrl url = buildUrl(baseUrl, path, params);
+        // Hibachi requires accountId on every private GET. Inject it from
+        // construction-time config when callers pass null/empty params, and
+        // don't overwrite if the caller already supplied one.
+        Map<String, String> effectiveParams = params;
+        if (accountId != null && !accountId.isBlank()) {
+            effectiveParams = params == null ? new LinkedHashMap<>() : new LinkedHashMap<>(params);
+            effectiveParams.putIfAbsent("accountId", accountId);
+        }
+        HttpUrl url = buildUrl(baseUrl, path, effectiveParams);
         Request.Builder builder = new Request.Builder()
                 .url(url)
                 .get()
                 .addHeader("Authorization", apiKey)
                 .addHeader("Hibachi-Client", hibachiClient)
                 .addHeader("Accept", "application/json");
+        return execute(builder.build());
+    }
+
+    /**
+     * PUT a JSON body to a private trading endpoint. Used by {@link #modifyOrder(Map)};
+     * mirrors {@link #privateRequest} for header / auth handling but with a JSON body
+     * instead of query parameters.
+     */
+    protected JsonNode privatePutJson(String baseUrl, String path, Map<String, Object> body) {
+        String json;
+        try {
+            json = objectMapper.writeValueAsString(body == null ? Collections.emptyMap() : body);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new RuntimeException("Failed to serialize Hibachi request body", e);
+        }
+        // Hibachi's gateway rejects any Content-Type with parameters
+        // (e.g. "application/json; charset=utf-8") with errorCode=8 —
+        // it only accepts an exact "application/json" string. OkHttp
+        // appends "; charset=utf-8" if we hand RequestBody a MediaType,
+        // so pass null here and set the header manually.
+        RequestBody requestBody = RequestBody.create(json, null);
+        Request.Builder builder = new Request.Builder()
+                .url(baseUrl + path)
+                .put(requestBody)
+                .addHeader("Authorization", apiKey)
+                .addHeader("Hibachi-Client", hibachiClient)
+                .addHeader("Accept", "application/json")
+                .addHeader("Content-Type", "application/json");
         return execute(builder.build());
     }
 

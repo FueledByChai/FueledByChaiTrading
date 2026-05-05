@@ -56,7 +56,7 @@ public class HibachiTradingExample {
     protected static final String DEFAULT_SYMBOL = "SOL";
     protected static final BigDecimal DEFAULT_SIZE = new BigDecimal("0.1");
     protected static final Duration INITIAL_QUOTE_TIMEOUT = Duration.ofSeconds(10);
-    protected static final Duration ORDER_OBSERVATION_WINDOW = Duration.ofSeconds(30);
+    protected static final Duration ORDER_OBSERVATION_WINDOW = Duration.ofSeconds(60);
     protected static final BigDecimal FALLBACK_TICK_SIZE = new BigDecimal("0.001");
 
     public void executeTrade(String symbol) throws Exception {

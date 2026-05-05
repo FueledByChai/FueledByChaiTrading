@@ -177,6 +177,7 @@ public class HibachiTradeWebSocketClient {
         if (c == null || !c.isOpen()) {
             throw new IllegalStateException("Hibachi trade WS is not connected");
         }
+        logger.info("Hibachi trade WS raw -> {}", message);
         c.send(message);
     }
 
