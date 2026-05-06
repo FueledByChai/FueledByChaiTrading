@@ -25,6 +25,7 @@ public final class OkHttpClientFactory {
         if (proxy != null && proxy != Proxy.NO_PROXY) {
             builder.proxy(proxy);
         }
+        builder.addInterceptor(new WireTapInterceptor());
         return builder.build();
     }
 

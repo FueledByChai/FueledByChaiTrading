@@ -4,7 +4,6 @@ import java.math.BigDecimal;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -44,7 +43,7 @@ import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.ITickerRegistry;
 import com.fueledbychai.util.TickerRegistryFactory;
 
-public class HibachiBroker extends AbstractBasicBroker {
+public class HibachiBrokerOLD extends AbstractBasicBroker {
 
     private static final Logger logger = LoggerFactory.getLogger(HibachiBroker.class);
     protected static final String LATENCY_LOGGER = "latency.hibachi";
@@ -58,20 +57,6 @@ public class HibachiBroker extends AbstractBasicBroker {
     protected final HibachiTradeWebSocketClient tradeWs;
     protected final HibachiAccountStreamClient accountWs;
     protected final AtomicLong nextClientOrderId = new AtomicLong(System.currentTimeMillis());
-    /**
-     * Strictly-monotonic nonce source. Hibachi rejects any nonce it has
-     * already seen; the previous implementation returned
-     * {@code System.currentTimeMillis() * 1000} which collided whenever
-     * two place/modify/cancel calls fired in the same millisecond — a
-     * common case when chaiwala emits BUY+SELL L0 in the same quote
-     * cycle. We seed with the same epoch-microseconds form for wire-level
-     * compatibility with the Python SDK, then incrementAndGet so every
-     * caller gets a unique value regardless of clock granularity. If
-     * wall-clock ever advances past our counter, we jump forward to it
-     * (preserves "nonces look like timestamps" — useful for debugging).
-     */
-    protected final AtomicLong nonceCounter =
-            new AtomicLong(System.currentTimeMillis() * 1_000L);
     protected final Map<String, Position> positionsCache = new ConcurrentHashMap<>();
     protected final Map<String, PendingPlace> pendingPlaces = new ConcurrentHashMap<>();
     /**
@@ -80,27 +65,16 @@ public class HibachiBroker extends AbstractBasicBroker {
      * generous margin without adding noticeable latency to successful places.
      */
     protected static final long PLACE_REJECTION_WAIT_MILLIS = 500L;
-    /**
-     * TTL for the REST open-orders snapshot. {@link #getOpenOrders()} pulls from the
-     * venue (not the local registry) so the reconcile loop sees orders that the
-     * account WS may have missed (modify async-rejected, dropped frames, etc.). A
-     * short cache keeps multiple callers in the same reconcile cycle from each
-     * firing their own REST round-trip.
-     */
-    protected static final long OPEN_ORDERS_CACHE_TTL_MILLIS = 1500L;
     protected volatile boolean connected;
-    protected final Object openOrdersCacheLock = new Object();
-    protected volatile List<OrderTicket> openOrdersCache;
-    protected volatile long openOrdersCacheStamp;
 
-    public HibachiBroker() {
+    public HibachiBrokerOLD() {
         this(ExchangeRestApiFactory.getPrivateApi(Exchange.HIBACHI, IHibachiRestApi.class),
                 HibachiConfiguration.getInstance(),
                 new HibachiTranslator(),
                 HibachiSignerFactory.create());
     }
 
-    public HibachiBroker(IHibachiRestApi restApi, HibachiConfiguration config,
+    public HibachiBrokerOLD(IHibachiRestApi restApi, HibachiConfiguration config,
                          HibachiTranslator translator, IHibachiSigner signer) {
         if (restApi == null) throw new IllegalArgumentException("restApi is required");
         if (config == null) throw new IllegalArgumentException("config is required");
@@ -200,16 +174,6 @@ public class HibachiBroker extends AbstractBasicBroker {
                         BrokerRequestResult.FailureType.UNKNOWN);
             }
             order.setOrderId(exchangeOrderId);
-            // Re-register so the registry's orderId-keyed map is populated.
-            // The earlier addOpenOrder() before the WS round-trip skipped
-            // orderId indexing because exchangeOrderId was still null at
-            // that point — and getOpenOrders() reads only the orderId-keyed
-            // map. Without this re-register, the registry knows the order
-            // exists by clientOrderId but getOpenOrders() returns empty,
-            // which is what made chaiwala's reconcile loop drop active
-            // orders that were still alive at the exchange.
-            orderRegistry.addOpenOrder(order);
-            invalidateOpenOrdersCache();
             // Hibachi's WS gateway returns 200 + orderId before its risk engine validates
             // the order. Rejections (e.g. TooSmallNotionalValue) arrive ~10ms later as an
             // {"event":"order_request_rejected"} frame on the account WS. Wait briefly for
@@ -238,9 +202,6 @@ public class HibachiBroker extends AbstractBasicBroker {
             return new BrokerRequestResult(false, true, "order is required",
                     BrokerRequestResult.FailureType.VALIDATION_FAILED);
         }
-        // WS `order.modify` path stubbed out — the gateway never responds,
-        // so callers always time out. Route through REST PUT /trade/order
-        // until that's resolved with the venue.
         try (var s = Span.start("HB_MODIFY_ORDER", order.getClientOrderId(), LATENCY_LOGGER)) {
             String symbol = order.getTicker().getSymbol();
             HibachiContract contract = restApi.getContract(symbol);
@@ -251,62 +212,16 @@ public class HibachiBroker extends AbstractBasicBroker {
             long nonce = nextNonce();
             HibachiTranslator.SignedRequest request = translator.translateModify(
                     order, contract, accountId, nonce, config.getOrderMaxFeesPercent(), signer);
-            // REST requires `signature` to ride inside the JSON body.
-            Map<String, Object> body = new LinkedHashMap<>(request.params);
-            body.putIfAbsent("signature", request.signature);
-            logger.info("HB_LIFECYCLE modify SEND (REST) clientId={} orderId={} symbol={} side={} newPrice={} newSize={} nonce={}",
+            logger.info("HB_LIFECYCLE modify SEND clientId={} orderId={} symbol={} side={} newPrice={} newSize={} nonce={}",
                     order.getClientOrderId(), order.getOrderId(), symbol, order.getTradeDirection(),
                     order.getLimitPrice(), order.getSize(), nonce);
-            // Install a waiter BEFORE the REST call so an order_request_rejected
-            // frame that races the REST 200 doesn't get stashed as an "early"
-            // rejection that the next caller picks up by mistake.
-            String exchangeOrderId = order.getOrderId();
-            if (exchangeOrderId != null && !exchangeOrderId.isBlank()) {
-                pendingPlaces.compute(exchangeOrderId, (k, existing) -> {
-                    if (existing != null) {
-                        existing.order = order;
-                        return existing;
-                    }
-                    return new PendingPlace(order);
-                });
-            }
-            JsonNode response = restApi.modifyOrder(body);
-            logger.info("HB_LIFECYCLE modify RECV (REST) clientId={} orderId={} response={}",
+            JsonNode response = tradeWs.modifyOrder(request.params, request.signature, order.getClientOrderId());
+            logger.info("HB_LIFECYCLE modify RECV clientId={} orderId={} response={}",
                     order.getClientOrderId(), order.getOrderId(), response);
-            BrokerRequestResult restResult = interpretResponse(response, "modifyOrder");
-            // Invalidate regardless of REST outcome: the venue may have moved
-            // even on a failure (e.g. risk-engine partial-match path).
-            invalidateOpenOrdersCache();
-            if (!restResult.isSuccess()) {
-                if (exchangeOrderId != null && !exchangeOrderId.isBlank()) {
-                    pendingPlaces.remove(exchangeOrderId);
-                }
-                return restResult;
-            }
-            // REST returned 200 — but Hibachi still validates the modify on
-            // its risk engine and may emit {"event":"order_request_rejected",
-            // "data":{"requestType":"Update",...}} a few ms later. If we
-            // return success without waiting, chaiwala runs
-            // applyDesiredStateToTrackedOrder and its local limitPrice
-            // diverges from the venue's actual price (UI looks like the
-            // order is updating; exchange shows it stuck at the prior level).
-            if (exchangeOrderId != null && !exchangeOrderId.isBlank()) {
-                BrokerRequestResult asyncRejection = awaitAccountRejection(exchangeOrderId, order);
-                if (asyncRejection != null) {
-                    logger.info("HB_LIFECYCLE modify async-rejected clientId={} orderId={} reason={}",
-                            order.getClientOrderId(), exchangeOrderId, asyncRejection.getMessage());
-                    return asyncRejection;
-                }
-            }
-            return restResult;
+            return interpretResponse(response, "modifyOrder");
         } catch (Exception e) {
             logger.error("Hibachi modifyOrder failed", e);
-            // Run the REST-error message through classifyRejection so callers
-            // can see ORDER_NOT_FOUND / ORDER_ALREADY_COMPLETE / etc.
-            // (e.g. {"errorCode":3,"message":"Not found: Order ID …"}) and
-            // route to placeFresh / no-op instead of a blind cancel+replace.
-            BrokerRequestResult.FailureType ft = classifyRejection(e.getMessage());
-            return new BrokerRequestResult(false, true, e.getMessage(), ft);
+            return new BrokerRequestResult(false, true, e.getMessage(), BrokerRequestResult.FailureType.UNKNOWN);
         }
     }
 
@@ -327,7 +242,6 @@ public class HibachiBroker extends AbstractBasicBroker {
             JsonNode response = tradeWs.cancelOrder(request.params, request.signature, traceId);
             logger.info("HB_LIFECYCLE cancel RECV clientId={} orderId={} response={}",
                     order.getClientOrderId(), order.getOrderId(), response);
-            invalidateOpenOrdersCache();
             return interpretResponse(response, "cancelOrder");
         } catch (Exception e) {
             logger.error("Hibachi cancelOrder failed", e);
@@ -355,32 +269,6 @@ public class HibachiBroker extends AbstractBasicBroker {
     }
 
     @Override
-    public OrderTicket requestOrderStatusByClientOrderId(String clientOrderId) {
-        if (clientOrderId == null || clientOrderId.isBlank()) {
-            return null;
-        }
-        OrderTicket cached = orderRegistry.getOrderByClientId(clientOrderId);
-        if (!isConnected()) {
-            return cached;
-        }
-        try (var s = Span.start("HB_REQUEST_ORDER_STATUS_BY_CLOID", clientOrderId, LATENCY_LOGGER)) {
-            JsonNode response = restApi.getOrderByClientId(clientOrderId);
-            if (response == null || response.isNull() || response.isMissingNode()) {
-                return cached;
-            }
-            applyOrderUpdateToRegistry(response);
-            // Prefer the now-current registry entry (resolved by either id),
-            // falling back to the cached one if the apply path didn't match.
-            OrderTicket refreshed = orderRegistry.getOrderByClientId(clientOrderId);
-            return refreshed != null ? refreshed : cached;
-        } catch (Exception e) {
-            logger.warn("Hibachi requestOrderStatusByClientOrderId({}) failed; returning cached",
-                    clientOrderId, e);
-            return cached;
-        }
-    }
-
-    @Override
     public OrderTicket requestOrderStatus(String orderId) {
         if (orderId == null || orderId.isBlank()) {
             return null;
@@ -404,166 +292,13 @@ public class HibachiBroker extends AbstractBasicBroker {
 
     @Override
     public List<OrderTicket> getOpenOrders() {
-        // Pull from the venue, not the local registry. The registry is fed by
-        // place/modify acks + account WS events, both of which can drop orders:
-        // a modify can be REST-200'd then async-rejected (order stays alive at
-        // the prior price), and WS frames occasionally arrive with a key the
-        // listener can't match (logged as "event_orphan"). When that happens
-        // the local registry shows N open orders while the venue holds N+1 —
-        // chaiwala's reconcile loop never sees the leak because it's comparing
-        // two views with the same blind spot. Reading directly from
-        // /trade/orders makes the venue the source of truth.
-        long now = System.currentTimeMillis();
-        List<OrderTicket> cached = openOrdersCache;
-        if (cached != null && (now - openOrdersCacheStamp) < OPEN_ORDERS_CACHE_TTL_MILLIS) {
-            return new ArrayList<>(cached);
-        }
-        synchronized (openOrdersCacheLock) {
-            cached = openOrdersCache;
-            now = System.currentTimeMillis();
-            if (cached != null && (now - openOrdersCacheStamp) < OPEN_ORDERS_CACHE_TTL_MILLIS) {
-                return new ArrayList<>(cached);
-            }
-            List<OrderTicket> fresh = fetchOpenOrdersFromRest();
-            if (fresh != null) {
-                openOrdersCache = fresh;
-                openOrdersCacheStamp = System.currentTimeMillis();
-                return new ArrayList<>(fresh);
-            }
-            // REST failed — fall back to registry so the reconcile loop has
-            // something to work with. Don't cache the fallback; we want the
-            // next call to retry REST.
-            List<OrderTicket> fallback = new ArrayList<>();
-            if (orderRegistry != null) {
-                orderRegistry.getOpenOrders().forEach(fallback::add);
-            }
-            return fallback;
-        }
-    }
-
-    /**
-     * Fetches /trade/orders, parses each entry into an {@link OrderTicket}, and
-     * returns the list. Returns {@code null} on any error so callers can fall
-     * back to the registry.
-     */
-    protected List<OrderTicket> fetchOpenOrdersFromRest() {
-        try {
-            JsonNode response = restApi.getOpenOrders();
-            if (response == null || response.isMissingNode() || response.isNull()) {
-                logger.warn("HB_LIFECYCLE getOpenOrders REST returned null/missing");
-                return null;
-            }
-            JsonNode arr = response;
-            if (response.isObject()) {
-                // Hibachi has shipped both a bare array and {"orders":[...]} /
-                // {"data":[...]} shapes — accept either.
-                if (response.has("orders") && response.path("orders").isArray()) {
-                    arr = response.path("orders");
-                } else if (response.has("data") && response.path("data").isArray()) {
-                    arr = response.path("data");
-                } else if (response.has("result") && response.path("result").isArray()) {
-                    arr = response.path("result");
-                }
-            }
-            if (!arr.isArray()) {
-                logger.warn("HB_LIFECYCLE getOpenOrders REST unexpected shape: {}", response);
-                return null;
-            }
-            List<OrderTicket> out = new ArrayList<>(arr.size());
-            for (JsonNode node : arr) {
-                OrderTicket parsed = parseRestOrder(node);
-                if (parsed != null) {
-                    out.add(parsed);
-                }
-            }
-            return out;
-        } catch (Exception e) {
-            logger.warn("HB_LIFECYCLE getOpenOrders REST failed: {}", e.getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * Builds an {@link OrderTicket} from a single Hibachi REST open-order entry.
-     * Prefers the registry's existing OrderTicket instance when the orderId or
-     * clientOrderId matches so caller-side state (modifiers, originalEntryTime,
-     * etc.) carries through; falls back to a freshly-built ticket for orders
-     * the registry has never seen (the orphan-leak case this fix targets).
-     */
-    protected OrderTicket parseRestOrder(JsonNode node) {
-        if (node == null || node.isMissingNode() || node.isNull()) {
-            return null;
-        }
-        String orderId = textOrNull(node, "orderId", "id");
-        String clientOrderId = textOrNull(node, "clientOrderId", "clientId");
-        BigDecimal price = readDecimal(node, "price", "limitPrice");
-        // Hibachi REST /trade/orders shape: totalQuantity = original size,
-        // availableQuantity = unfilled remaining. There is no explicit
-        // "filledQuantity" field — derive it.
-        BigDecimal totalQty = readDecimal(node, "totalQuantity", "quantity", "size", "originalQuantity");
-        BigDecimal availableQty = readDecimal(node, "availableQuantity", "remainingQuantity", "remaining");
-        BigDecimal filled = readDecimal(node, "filledQuantity", "executedQuantity",
-                "executed_quantity", "filled", "matchedQuantity");
-        if (filled == null && totalQty != null && availableQty != null) {
-            filled = totalQty.subtract(availableQty);
-            if (filled.signum() < 0) {
-                filled = BigDecimal.ZERO;
-            }
-        }
-        String symbol = textOrNull(node, "symbol", "contract");
-        String sideRaw = textOrNull(node, "side", "direction");
-        Ticker ticker = lookupTicker(symbol);
-
-        OrderTicket existing = null;
+        // Best-effort: rely on registry. A production implementation should reconcile
+        // against restApi.getOpenOrders() periodically.
+        List<OrderTicket> open = new ArrayList<>();
         if (orderRegistry != null) {
-            if (orderId != null) {
-                existing = orderRegistry.getOrderById(orderId);
-            }
-            if (existing == null && clientOrderId != null) {
-                existing = orderRegistry.getOrderByClientId(clientOrderId);
-            }
+            orderRegistry.getOpenOrders().forEach(open::add);
         }
-
-        OrderTicket out = existing != null ? existing : new OrderTicket();
-        if (orderId != null) {
-            out.setOrderId(orderId);
-        }
-        if (clientOrderId != null) {
-            out.setClientOrderId(clientOrderId);
-        }
-        if (ticker != null) {
-            out.setTicker(ticker);
-        }
-        if (price != null) {
-            // Refresh from venue truth — fixes the "UI shows the new price but
-            // exchange has the old one" symptom from a modify that REST-200'd
-            // and was then async-rejected.
-            out.setLimitPrice(price);
-        }
-        if (totalQty != null) {
-            out.setSize(totalQty);
-        }
-        if (filled != null) {
-            out.setFilledSize(filled);
-        }
-        if (sideRaw != null && out.getTradeDirection() == null) {
-            String s = sideRaw.toUpperCase();
-            if (s.equals("BID") || s.equals("BUY") || s.equals("LONG")) {
-                out.setTradeDirection(TradeDirection.BUY);
-            } else if (s.equals("ASK") || s.equals("SELL") || s.equals("SHORT")) {
-                out.setTradeDirection(TradeDirection.SELL);
-            }
-        }
-        return out;
-    }
-
-    /**
-     * Drops the cached open-orders snapshot. Call after place/modify/cancel
-     * acks so the next reconcile sees the venue-truth view including any side
-     * effects (especially modify rejections that leave the prior order alive).
-     */
-    protected void invalidateOpenOrdersCache() {
-        openOrdersCache = null;
+        return open;
     }
 
     @Override
@@ -586,7 +321,6 @@ public class HibachiBroker extends AbstractBasicBroker {
                     .packCancelAll(nonce);
             String signature = signer.sign(bytes);
             JsonNode response = tradeWs.cancelAll(nonce, signature);
-            invalidateOpenOrdersCache();
             return interpretResponse(response, "cancelAllOrders");
         } catch (Exception e) {
             logger.error("Hibachi cancelAllOrders failed", e);
@@ -774,21 +508,6 @@ public class HibachiBroker extends AbstractBasicBroker {
                 || r.contains("wouldcross") || r.contains("would_cross")) {
             return BrokerRequestResult.FailureType.POST_ONLY_REJECTED;
         }
-        // "UpdatingPartiallyMatchedOrder": Hibachi forbids modify on a
-        // partially-filled order. The order remains alive at the original
-        // price with reduced qty — chaiwala's correct response is cancel
-        // the remainder and place fresh, which is what the default
-        // (UNKNOWN → cancel+replace) branch does. We map it explicitly
-        // anyway so audit logs / dashboards can surface the reason.
-        if (r.contains("partiallymatched") || r.contains("partially_matched")
-                || r.contains("partiallyfilled") || r.contains("partially_filled")) {
-            return BrokerRequestResult.FailureType.ORDER_ALREADY_COMPLETE;
-        }
-        // Hibachi REST returns errorCode:3 with message "Not found: Order ID …"
-        // when the order has been fully filled / canceled / never existed.
-        if (r.contains("not found") || r.contains("notfound") || r.contains("errorcode\":3")) {
-            return BrokerRequestResult.FailureType.ORDER_NOT_FOUND;
-        }
         if (r.startsWith("toosmall") || r.contains("notional") || r.contains("size")
                 || r.contains("quantity")) {
             return BrokerRequestResult.FailureType.INVALID_SIZE;
@@ -877,12 +596,7 @@ public class HibachiBroker extends AbstractBasicBroker {
 
     protected long nextNonce() {
         // Microseconds since epoch, matches Python SDK (api.py:1315 etc.).
-        // Strictly monotonic: if wall-clock advanced past our counter, jump
-        // to wall-clock; otherwise advance the counter by 1us. Either way
-        // every call returns a unique, strictly-increasing value — Hibachi
-        // rejects duplicates with "Invalid input: Nonce already used".
-        long wallNow = System.currentTimeMillis() * 1_000L;
-        return nonceCounter.updateAndGet(prev -> prev < wallNow ? wallNow : prev + 1L);
+        return System.currentTimeMillis() * 1_000L;
     }
 
     protected void checkConnected() {
@@ -955,14 +669,7 @@ public class HibachiBroker extends AbstractBasicBroker {
         @Override
         public void onOrderUpdate(JsonNode frame) {
             logger.info("HB_LIFECYCLE ws_event onOrderUpdate frame={}", frame);
-            // Pass the full frame so applyOrderUpdateToRegistry can read the
-            // top-level "event" field (order_creation / order_matched /
-            // order_cancellation). Hibachi puts the lifecycle status in the
-            // event name, not as a "status" field on the body — without
-            // this the body has no status and the update is silently
-            // dropped, leaving chaiwala unaware its orders even reached
-            // the exchange.
-            applyOrderUpdateToRegistry(frame);
+            applyOrderUpdateToRegistry(bodyOf(frame));
         }
 
         @Override
@@ -981,26 +688,10 @@ public class HibachiBroker extends AbstractBasicBroker {
                 logger.warn("Hibachi rejection frame with no orderId: {}", frame);
                 return;
             }
-            // Hibachi distinguishes between a rejected New (place) and a rejected
-            // Update (modify) via data.requestType. Both flow through the same
-            // pendingPlaces waiter map so place/modify callers can react —
-            // but the post-await behaviour differs:
-            //   - "New" rejected: order never opened. Fire REJECTED event so
-            //     chaiwala drops the level and the place caller returns failure.
-            //   - "Update" rejected: original order is still alive on the book.
-            //     We MUST NOT fire REJECTED (would move the order to the
-            //     completed map and have chaiwala stack a duplicate order at
-            //     the next cycle's price). Just unblock the modify waiter so
-            //     it can return failure, and chaiwala's handleSpecModifyFailure
-            //     will avoid running applyDesiredStateToTrackedOrder — keeping
-            //     the locally-tracked limitPrice consistent with what Hibachi
-            //     actually has on the book.
-            String requestType = frame.path("data").path("requestType").asText("");
-            boolean isUpdate = "Update".equalsIgnoreCase(requestType);
             RejectionInfo info = new RejectionInfo(reason, frame);
             // Atomic: either complete an existing waiter, or stash the rejection for a
             // waiter that hasn't registered yet (race when the rejection arrives on the
-            // account WS before placeOrder/modifyOrder has installed its PendingPlace).
+            // account WS before placeOrder has installed its PendingPlace).
             PendingPlace pending = pendingPlaces.compute(orderId, (k, existing) -> {
                 if (existing == null) {
                     PendingPlace pp = new PendingPlace();
@@ -1010,15 +701,6 @@ public class HibachiBroker extends AbstractBasicBroker {
                 existing.future.complete(info);
                 return existing;
             });
-            if (isUpdate) {
-                OrderTicket order = pending.order != null ? pending.order : orderRegistry.getOrderById(orderId);
-                logger.warn("Hibachi modify request rejected (order remains alive) "
-                                + "orderId={} clientId={} reason={}",
-                        orderId,
-                        order != null ? order.getClientOrderId() : null,
-                        reason);
-                return;
-            }
             OrderTicket order = pending.order != null ? pending.order : orderRegistry.getOrderById(orderId);
             if (order == null) {
                 // Place hasn't registered yet — the OrderEvent will be fired when placeOrder
@@ -1045,18 +727,12 @@ public class HibachiBroker extends AbstractBasicBroker {
             logger.info("HB_LIFECYCLE balance applyBalance no-op (null body)");
             return;
         }
-        // The initial onAccountSnapshot frame puts collateral under "balance";
-        // subsequent balance_update events use "updatedCollateralBalance".
-        // Read both so the dashboard balance keeps tracking after fills.
-        BigDecimal available = readDecimal(body, "balance", "updatedCollateralBalance");
+        BigDecimal equity = readDecimal(body, "equity", "totalEquity", "accountEquity");
+        BigDecimal available = readDecimal(body, "availableFunds", "availableBalance", "balance", "freeBalance");
         // INFO so we see EXACTLY which keys hit and which didn't. If both
         // are null, dump the body so we can spot the actual field names
         // Hibachi is sending — that's the diagnostic for "$0 in UI even
         // though the account has money".
-
-
-        //For Hibachi, available and equity are the same thing, they just use "balance" as the key. So we read "balance" into both variables to keep the logging and event-firing logic consistent with other brokers that have separate equity vs. available keys.
-        BigDecimal equity = available;
         if (equity == null && available == null) {
             logger.info("HB_LIFECYCLE balance applyBalance found neither equity-style nor available-style key. body={}", body);
         } else {
@@ -1073,22 +749,12 @@ public class HibachiBroker extends AbstractBasicBroker {
         }
     }
 
-    protected void applyOrderUpdateToRegistry(JsonNode frame) {
-        if (frame == null || frame.isMissingNode() || frame.isNull()) {
+    protected void applyOrderUpdateToRegistry(JsonNode body) {
+        if (body == null || body.isMissingNode() || body.isNull()) {
             return;
         }
-        // Any order WS event means the venue's open-orders set may have moved.
-        // Drop the cache so the next reconcile sees the post-event view.
-        invalidateOpenOrdersCache();
-        // Frame may be either the wrapped form ({"event":"...","data":{...}})
-        // or a raw body. Tolerate both.
-        String eventName = textOrNull(frame, "event");
-        JsonNode body = bodyOf(frame);
-        if (body == null || body.isMissingNode() || body.isNull()) {
-            body = frame;
-        }
         String exchangeOrderId = textOrNull(body, "orderId", "id");
-        String clientOrderId = textOrNull(body, "clientOrderId", "clientId");
+        String clientOrderId = textOrNull(body, "clientOrderId", "clientId", "nonce");
         OrderTicket order = null;
         if (exchangeOrderId != null) {
             order = orderRegistry.getOrderById(exchangeOrderId);
@@ -1103,23 +769,20 @@ public class HibachiBroker extends AbstractBasicBroker {
             // event doesn't match what placeOrder() stored, or the WS frame
             // arrived before the registry write. Either way we want to see
             // it without enabling broad-package DEBUG.
-            logger.info("HB_LIFECYCLE event_orphan event={} exchangeOrderId={} clientId={} body={}",
-                    eventName, exchangeOrderId, clientOrderId, body);
+            logger.info("HB_LIFECYCLE event_orphan exchangeOrderId={} clientId={} body={}",
+                    exchangeOrderId, clientOrderId, body);
             return;
         }
-        logger.info("HB_LIFECYCLE event_match event={} exchangeOrderId={} clientId={} filled={} remaining={}",
-                eventName, exchangeOrderId, clientOrderId,
-                readDecimal(body, "filledQuantity", "executedQuantity", "executed_quantity", "filled", "matchedQuantity"),
+        logger.info("HB_LIFECYCLE event_match exchangeOrderId={} clientId={} status={} filled={} remaining={}",
+                exchangeOrderId, clientOrderId,
+                textOrNull(body, "status", "orderStatus"),
+                readDecimal(body, "filledQuantity", "executedQuantity", "filled"),
                 readDecimal(body, "remainingQuantity", "remaining"));
         if (exchangeOrderId != null && order.getOrderId() == null) {
             order.setOrderId(exchangeOrderId);
-            // Same reason as in placeOrder() — re-register so the registry's
-            // orderId-keyed map is populated. The WS event can race ahead of
-            // the place-RECV path on a fast venue.
-            orderRegistry.addOpenOrder(order);
         }
 
-        BigDecimal filled = readDecimal(body, "filledQuantity", "executedQuantity", "executed_quantity", "filled", "matchedQuantity");
+        BigDecimal filled = readDecimal(body, "filledQuantity", "executedQuantity", "filled");
         BigDecimal remaining = readDecimal(body, "remainingQuantity", "remaining");
         if (filled == null) {
             filled = order.getFilledSize() != null ? order.getFilledSize() : BigDecimal.ZERO;
@@ -1129,16 +792,8 @@ public class HibachiBroker extends AbstractBasicBroker {
         }
         BigDecimal fillPrice = readDecimal(body, "averagePrice", "avgFillPrice", "price");
 
-        // Hibachi reports lifecycle via top-level event name, not a status
-        // field on body. Fall back to body.status for forward compatibility
-        // with any future shape change.
-        OrderStatus.Status status = parseHibachiEventStatus(eventName, filled, remaining);
+        OrderStatus.Status status = parseOrderStatus(textOrNull(body, "status", "orderStatus"));
         if (status == null) {
-            status = parseOrderStatus(textOrNull(body, "status", "orderStatus"));
-        }
-        if (status == null) {
-            logger.info("HB_LIFECYCLE event_unknown_status event={} clientId={} skipping (registry retains entry)",
-                    eventName, clientOrderId);
             return;
         }
         order.setCurrentStatus(status);
@@ -1147,16 +802,6 @@ public class HibachiBroker extends AbstractBasicBroker {
         }
         if (fillPrice != null) {
             order.setFilledPrice(fillPrice);
-        }
-        // Move terminal-status orders out of the open-orders map so
-        // getOpenOrders() doesn't return them. Without this, a FILLED or
-        // CANCELED order sticks in the registry forever — chaiwala's
-        // reconcile loop then sees it as a "live" orphan, fires modifies
-        // against it, and Hibachi answers "Not found: Order ID …".
-        if (status == OrderStatus.Status.FILLED
-                || status == OrderStatus.Status.CANCELED
-                || status == OrderStatus.Status.REJECTED) {
-            orderRegistry.addCompletedOrder(order);
         }
         OrderStatus s = new OrderStatus(status, order.getOrderId(), filled, remaining,
                 fillPrice, order.getTicker(), ZonedDateTime.now(ZoneOffset.UTC));
@@ -1192,21 +837,8 @@ public class HibachiBroker extends AbstractBasicBroker {
         }
         Long ts = readLong(body, "timestamp", "time", "tradeTime");
         if (ts != null) {
-            // Hibachi's trade_update frames carry "timestamp" as 10-digit
-            // seconds-since-epoch (with the sub-second part separately in
-            // "timestampNsPartial"). Other Hibachi endpoints have surfaced
-            // millis and microseconds, so cover all three magnitudes.
-            // The previous heuristic only handled micros (>1e15) and treated
-            // seconds as if they were millis — fills landed at 1970-01-21,
-            // making the inventory-holding-time UI show ~493,000h ages.
-            long millis;
-            if (ts < 1_000_000_000_000L) {           // ≤ 12 digits → seconds
-                millis = ts * 1_000L;
-            } else if (ts < 1_000_000_000_000_000L) { // ≤ 15 digits → millis
-                millis = ts;
-            } else {                                  // ≥ 16 digits → micros
-                millis = ts / 1_000L;
-            }
+            // Heuristic: Hibachi nonces are microseconds; trade timestamps appear in millis.
+            long millis = ts > 1_000_000_000_000_000L ? ts / 1_000L : ts;
             fill.setTime(ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(millis), ZoneOffset.UTC));
         } else {
             fill.setTime(ZonedDateTime.now(ZoneOffset.UTC));
@@ -1256,54 +888,6 @@ public class HibachiBroker extends AbstractBasicBroker {
             t = registry.lookupByCommonSymbol(InstrumentType.PERPETUAL_FUTURES, symbol);
         }
         return t;
-    }
-
-    /**
-     * Maps Hibachi's account-WS event names to the broker-API status enum.
-     * Hibachi puts lifecycle in the top-level {@code event} field rather
-     * than a body-level status, so direct {@link #parseOrderStatus} doesn't
-     * apply. {@code order_matched} resolves to FILLED when remaining quantity
-     * is zero, otherwise PARTIAL_FILL — the same semantics other brokers
-     * deliver via FULLY_FILLED / PARTIAL_FILL.
-     */
-    protected static OrderStatus.Status parseHibachiEventStatus(String eventName,
-            BigDecimal filled, BigDecimal remaining) {
-        if (eventName == null) {
-            return null;
-        }
-        switch (eventName.toLowerCase()) {
-            case "order_creation":
-            case "order_placed":
-                return OrderStatus.Status.NEW;
-            case "order_update":
-            case "order_modify":
-            case "order_modified":
-            case "order_replaced":
-                // Hibachi sends "order_update" as the modify-ack event. Body
-                // contains the new price/quantity; we already extract those
-                // upstream and update the OrderTicket, so REPLACED is the
-                // right status to forward to chaiwala.
-                return OrderStatus.Status.REPLACED;
-            case "order_cancellation":
-            case "order_cancel":
-            case "order_cancelled":
-            case "order_canceled":
-                return OrderStatus.Status.CANCELED;
-            case "order_rejected":
-                return OrderStatus.Status.REJECTED;
-            case "order_matched":
-            case "order_filled":
-            case "trade_update":
-                if (remaining != null && remaining.signum() == 0) {
-                    return OrderStatus.Status.FILLED;
-                }
-                if (filled != null && filled.signum() > 0) {
-                    return OrderStatus.Status.PARTIAL_FILL;
-                }
-                return OrderStatus.Status.PARTIAL_FILL;
-            default:
-                return null;
-        }
     }
 
     protected static OrderStatus.Status parseOrderStatus(String raw) {

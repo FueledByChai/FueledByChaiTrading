@@ -4,6 +4,9 @@ import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.fueledbychai.broker.order.OrderTicket;
 import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.hibachi.common.api.HibachiContract;
@@ -21,6 +24,8 @@ import com.fueledbychai.hibachi.common.api.signer.IHibachiSigner;
  * map (full-precision strings via {@link BigDecimal#toPlainString()}).
  */
 public class HibachiTranslator {
+
+    private static final Logger logger = LoggerFactory.getLogger(HibachiTranslator.class);
 
     public static class SignedRequest {
         public final byte[] signedBytes;
@@ -71,7 +76,39 @@ public class HibachiTranslator {
             params.put("orderFlags", flag.getWireValue());
         }
         params.put("accountId", accountId);
+        // Echo the caller's clientOrderId as Hibachi's optional `clientId`.
+        // Without this, every account-WS event ({order_creation,
+        // order_matched, order_cancellation, ...}) arrives with
+        // clientId=null, and our matcher in HibachiBroker can't find the
+        // OrderTicket in the registry — causing place/modify/cancel state
+        // to silently diverge from reality. Hibachi's clientId rules:
+        // 1-32 chars, [A-Za-z0-9-]. chaiwala uses millisecond timestamps
+        // which fit cleanly.
+        String clientId = sanitizeClientId(order.getClientOrderId());
+        if (clientId != null) {
+            params.put("clientId", clientId);
+        }
         return new SignedRequest(signedBytes, params, signature);
+    }
+
+    /**
+     * Hibachi rejects clientIds outside [1,32] chars or with chars other than
+     * ASCII letters/digits/dash. We don't want to fail the place because of a
+     * cosmetic mismatch — return null to skip the field if the caller's id
+     * isn't compliant. chaiwala's millisecond-timestamp client ids satisfy
+     * the rule by construction; this is defensive.
+     */
+    private static String sanitizeClientId(String raw) {
+        if (raw == null) return null;
+        String trimmed = raw.trim();
+        if (trimmed.isEmpty() || trimmed.length() > 32) return null;
+        for (int i = 0; i < trimmed.length(); i++) {
+            char c = trimmed.charAt(i);
+            boolean ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+                    || (c >= '0' && c <= '9') || c == '-';
+            if (!ok) return null;
+        }
+        return trimmed;
     }
 
     public SignedRequest translateModify(OrderTicket order,
@@ -95,24 +132,30 @@ public class HibachiTranslator {
         byte[] signedBytes = HibachiPayloadPacker.packPlaceOrder(nonce, contract, qty, side, price, maxFeesPercent);
         String signature = signer.sign(signedBytes);
 
+        // Hibachi modify body per the venue's example payload:
+        //   { orderId|clientId, accountId, nonce, updatedQuantity,
+        //     updatedPrice, maxFeesPercent, signature }
+        // The docs prose says "you can only update quantity and price" but the
+        // wire field names are `updatedQuantity` / `updatedPrice`, not
+        // `quantity` / `price`. accountId is required despite not being listed
+        // explicitly in the docs body section — Hibachi returns errorCode=4
+        // ("Missing accountId") if absent.
         Map<String, Object> params = new LinkedHashMap<>();
-        params.put("nonce", nonce);
-        params.put("maxFeesPercent", maxFeesPercent.toPlainString());
         if (order.getOrderId() != null && !order.getOrderId().isBlank()) {
             params.put("orderId", order.getOrderId());
-        }
-        // SDK quirk: emit both `quantity` and `updatedQuantity` (same value); same for price.
-        params.put("quantity", qty.toPlainString());
-        params.put("updatedQuantity", qty.toPlainString());
-        if (price != null) {
-            params.put("price", price.toPlainString());
-            params.put("updatedPrice", price.toPlainString());
-        }
-        HibachiOrderFlag flag = toFlag(order);
-        if (flag != null) {
-            params.put("orderFlags", flag.getWireValue());
+        } else {
+            String clientId = sanitizeClientId(order.getClientOrderId());
+            if (clientId != null) {
+                params.put("clientId", clientId);
+            }
         }
         params.put("accountId", accountId);
+        params.put("nonce", nonce);
+        params.put("updatedQuantity", qty.toPlainString());
+        if (price != null) {
+            params.put("updatedPrice", price.toPlainString());
+        }
+        params.put("maxFeesPercent", maxFeesPercent.toPlainString());
         return new SignedRequest(signedBytes, params, signature);
     }
 
@@ -170,15 +213,31 @@ public class HibachiTranslator {
     }
 
     public HibachiOrderFlag toFlag(OrderTicket order) {
-        if (order == null || order.getDuration() == null) {
+        if (order == null) {
             return null;
         }
-        switch (order.getDuration()) {
-            case IMMEDIATE_OR_CANCEL:
-                return HibachiOrderFlag.IOC;
-            default:
-                return null;
+        // Hibachi's `orderFlags` is a single value, not a list. Pick by priority and warn
+        // if the caller asked for more than one — POST_ONLY beats IOC (they're contradictory)
+        // and both beat REDUCE_ONLY (orthogonal but only one slot on the wire).
+        boolean postOnly = hasModifier(order, OrderTicket.Modifier.POST_ONLY);
+        boolean ioc = order.getDuration() == OrderTicket.Duration.IMMEDIATE_OR_CANCEL
+                || order.getDuration() == OrderTicket.Duration.FILL_OR_KILL;
+        boolean reduceOnly = hasModifier(order, OrderTicket.Modifier.REDUCE_ONLY);
+
+        int set = (postOnly ? 1 : 0) + (ioc ? 1 : 0) + (reduceOnly ? 1 : 0);
+        if (set > 1) {
+            logger.warn("Hibachi accepts only one orderFlag; got postOnly={} ioc={} reduceOnly={} — sending POST_ONLY > IOC > REDUCE_ONLY",
+                    postOnly, ioc, reduceOnly);
         }
+        if (postOnly) return HibachiOrderFlag.POST_ONLY;
+        if (ioc) return HibachiOrderFlag.IOC;
+        if (reduceOnly) return HibachiOrderFlag.REDUCE_ONLY;
+        return null;
+    }
+
+    private static boolean hasModifier(OrderTicket order, OrderTicket.Modifier modifier) {
+        java.util.List<OrderTicket.Modifier> mods = order.getModifiers();
+        return mods != null && mods.contains(modifier);
     }
 
     private static Long parseLongOrNull(String value) {

@@ -22,6 +22,9 @@ public class HibachiConfiguration {
     public static final String HIBACHI_PRIVATE_KEY = "hibachi.private.key";
     public static final String HIBACHI_CLIENT = "hibachi.client";
     public static final String HIBACHI_ACCOUNT_WS_PING_SECONDS = "hibachi.account.ws.ping.seconds";
+    public static final String HIBACHI_TRADE_WS_PING_SECONDS = "hibachi.trade.ws.ping.seconds";
+    public static final String HIBACHI_WS_RECONNECT_INITIAL_BACKOFF_MS = "hibachi.ws.reconnect.initial.backoff.ms";
+    public static final String HIBACHI_WS_RECONNECT_MAX_BACKOFF_MS = "hibachi.ws.reconnect.max.backoff.ms";
     public static final String HIBACHI_ORDER_MAX_FEES_PERCENT = "hibachi.order.max.fees.percent";
 
     private static final String DEFAULT_ENVIRONMENT = "prod";
@@ -37,6 +40,9 @@ public class HibachiConfiguration {
     private static final String DEFAULT_TESTNET_WS_TRADE_URL = "wss://api-test.hibachi.xyz/ws/trade";
     private static final String DEFAULT_CLIENT = "FueledByChaiJavaSDK";
     private static final long DEFAULT_ACCOUNT_WS_PING_SECONDS = 14L;
+    private static final long DEFAULT_TRADE_WS_PING_SECONDS = 14L;
+    private static final long DEFAULT_WS_RECONNECT_INITIAL_BACKOFF_MS = 500L;
+    private static final long DEFAULT_WS_RECONNECT_MAX_BACKOFF_MS = 30_000L;
     // Hibachi fee schedule (as of the integration work): maker = 0 bps, taker = 5 bps.
     // maxFeesPercent is a cap, so default to the taker rate (0.05% = 5 bps) to cover both sides.
     private static final BigDecimal DEFAULT_ORDER_MAX_FEES_PERCENT = new BigDecimal("0.05");
@@ -57,6 +63,9 @@ public class HibachiConfiguration {
     private final String privateKey;
     private final String client;
     private final long accountWsPingSeconds;
+    private final long tradeWsPingSeconds;
+    private final long wsReconnectInitialBackoffMs;
+    private final long wsReconnectMaxBackoffMs;
     private final BigDecimal orderMaxFeesPercent;
 
     public static HibachiConfiguration getInstance() {
@@ -96,6 +105,11 @@ public class HibachiConfiguration {
         this.privateKey = read(HIBACHI_PRIVATE_KEY, null);
         this.client = read(HIBACHI_CLIENT, DEFAULT_CLIENT);
         this.accountWsPingSeconds = readLong(HIBACHI_ACCOUNT_WS_PING_SECONDS, DEFAULT_ACCOUNT_WS_PING_SECONDS);
+        this.tradeWsPingSeconds = readLong(HIBACHI_TRADE_WS_PING_SECONDS, DEFAULT_TRADE_WS_PING_SECONDS);
+        this.wsReconnectInitialBackoffMs = readLong(HIBACHI_WS_RECONNECT_INITIAL_BACKOFF_MS,
+                DEFAULT_WS_RECONNECT_INITIAL_BACKOFF_MS);
+        this.wsReconnectMaxBackoffMs = readLong(HIBACHI_WS_RECONNECT_MAX_BACKOFF_MS,
+                DEFAULT_WS_RECONNECT_MAX_BACKOFF_MS);
         this.orderMaxFeesPercent = readBigDecimal(HIBACHI_ORDER_MAX_FEES_PERCENT, DEFAULT_ORDER_MAX_FEES_PERCENT);
     }
 
@@ -147,6 +161,9 @@ public class HibachiConfiguration {
     public String getPrivateKey() { return privateKey; }
     public String getClient() { return client; }
     public long getAccountWsPingSeconds() { return accountWsPingSeconds; }
+    public long getTradeWsPingSeconds() { return tradeWsPingSeconds; }
+    public long getWsReconnectInitialBackoffMs() { return wsReconnectInitialBackoffMs; }
+    public long getWsReconnectMaxBackoffMs() { return wsReconnectMaxBackoffMs; }
     public BigDecimal getOrderMaxFeesPercent() { return orderMaxFeesPercent; }
 
     public boolean hasPrivateApiConfiguration() {
