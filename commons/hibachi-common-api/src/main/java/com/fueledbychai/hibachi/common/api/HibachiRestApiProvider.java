@@ -43,6 +43,6 @@ public class HibachiRestApiProvider implements ExchangeRestApiProvider<IHibachiR
                             + HibachiConfiguration.HIBACHI_ACCOUNT_ID + " configuration.");
         }
         return new HibachiRestApi(config.getRestUrl(), config.getDataRestUrl(), config.getClient(),
-                config.getApiKey());
+                config.getApiKey(), config.getAccountId());
     }
 }
