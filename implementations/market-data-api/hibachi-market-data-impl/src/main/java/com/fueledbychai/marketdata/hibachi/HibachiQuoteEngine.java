@@ -73,6 +73,21 @@ public class HibachiQuoteEngine extends QuoteEngine {
 
     protected final Set<String> volumePollingSymbols = ConcurrentHashMap.newKeySet();
     protected volatile ScheduledExecutorService volumeScheduler;
+
+    // Per-ticker accumulated order book state. Hibachi sends an initial
+    // {messageType:"Snapshot"} containing the full visible depth, then
+    // {messageType:"Update"} frames carrying ONLY changed levels (qty=0
+    // means "remove this level"). Treating every frame as a snapshot the way
+    // the previous implementation did caused fresh OrderBooks to contain
+    // only the deltas — best ask would flicker from 84 → 86 when the only
+    // levels echoed back were a couple of mid-book changes around 86.
+    protected static final class BookState {
+        final java.util.TreeMap<BigDecimal, BigDecimal> bids =
+                new java.util.TreeMap<>(java.util.Comparator.reverseOrder());
+        final java.util.TreeMap<BigDecimal, BigDecimal> asks = new java.util.TreeMap<>();
+    }
+
+    protected final java.util.Map<String, BookState> bookBySymbol = new ConcurrentHashMap<>();
     protected volatile ScheduledFuture<?> volumeTask;
 
     // Auto-reconnect state. First retry is ~500ms for fast recovery from
@@ -401,15 +416,70 @@ public class HibachiQuoteEngine extends QuoteEngine {
 
     protected void onOrderBookUpdate(Ticker ticker, JsonNode message) {
         JsonNode data = message.path("data");
-        List<OrderBook.PriceLevel> bids = parseLevels(data.path("bid").path("levels"));
-        List<OrderBook.PriceLevel> asks = parseLevels(data.path("ask").path("levels"));
-        if (bids.isEmpty() && asks.isEmpty()) {
+        // Hibachi orderbook frames carry messageType=Snapshot for full state
+        // and messageType=Update for incremental level changes. On Update
+        // frames a level with quantity=0 means "remove". Without honoring
+        // this distinction the cached book gets reset to whatever 1-2
+        // levels were in the latest delta, producing the 84→86 best-ask
+        // flicker and OBI imbalance jumping to ±100.
+        String messageType = message.path("messageType").asText("");
+        boolean isSnapshot = "Snapshot".equalsIgnoreCase(messageType);
+        BookState state = bookBySymbol.computeIfAbsent(ticker.getSymbol(), k -> new BookState());
+        synchronized (state) {
+            if (isSnapshot) {
+                state.bids.clear();
+                state.asks.clear();
+            }
+            applyLevelDeltas(state.bids, data.path("bid").path("levels"));
+            applyLevelDeltas(state.asks, data.path("ask").path("levels"));
+            // Snapshots without any levels (rare but seen on reconnect) leave
+            // both sides empty — skip the publish so we don't push a zero book
+            // downstream that would crater OBI / midpoint.
+            if (state.bids.isEmpty() && state.asks.isEmpty()) {
+                return;
+            }
+            OrderBook orderBook = new OrderBook(ticker, ticker.getMinimumTickSize());
+            ZonedDateTime timestamp = toTimestamp(message, "timestamp_ms");
+            orderBook.updateFromSnapshot(toLevels(state.bids), toLevels(state.asks), timestamp);
+            fireMarketDepthQuote(new Level2Quote(ticker, orderBook, timestamp));
+        }
+    }
+
+    private static void applyLevelDeltas(java.util.Map<BigDecimal, BigDecimal> side, JsonNode levels) {
+        if (levels == null || !levels.isArray()) {
             return;
         }
-        OrderBook orderBook = new OrderBook(ticker, ticker.getMinimumTickSize());
-        ZonedDateTime timestamp = toTimestamp(message, "timestamp_ms");
-        orderBook.updateFromSnapshot(bids, asks, timestamp);
-        fireMarketDepthQuote(new Level2Quote(ticker, orderBook, timestamp));
+        for (JsonNode lvl : levels) {
+            BigDecimal price = parseDecimal(lvl.path("price"));
+            BigDecimal qty = parseDecimal(lvl.path("quantity"));
+            if (price == null || qty == null) {
+                continue;
+            }
+            if (qty.signum() <= 0) {
+                side.remove(price);
+            } else {
+                side.put(price, qty);
+            }
+        }
+    }
+
+    private static List<OrderBook.PriceLevel> toLevels(java.util.Map<BigDecimal, BigDecimal> side) {
+        List<OrderBook.PriceLevel> out = new ArrayList<>(side.size());
+        for (java.util.Map.Entry<BigDecimal, BigDecimal> e : side.entrySet()) {
+            out.add(new OrderBook.PriceLevel(e.getKey(), e.getValue().doubleValue()));
+        }
+        return out;
+    }
+
+    private static BigDecimal parseDecimal(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        try {
+            return new BigDecimal(node.asText());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     protected void onTradesUpdate(Ticker ticker, JsonNode message) {

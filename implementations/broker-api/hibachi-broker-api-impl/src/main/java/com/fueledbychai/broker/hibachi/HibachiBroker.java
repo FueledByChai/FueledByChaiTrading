@@ -80,7 +80,18 @@ public class HibachiBroker extends AbstractBasicBroker {
      * generous margin without adding noticeable latency to successful places.
      */
     protected static final long PLACE_REJECTION_WAIT_MILLIS = 500L;
+    /**
+     * TTL for the REST open-orders snapshot. {@link #getOpenOrders()} pulls from the
+     * venue (not the local registry) so the reconcile loop sees orders that the
+     * account WS may have missed (modify async-rejected, dropped frames, etc.). A
+     * short cache keeps multiple callers in the same reconcile cycle from each
+     * firing their own REST round-trip.
+     */
+    protected static final long OPEN_ORDERS_CACHE_TTL_MILLIS = 1500L;
     protected volatile boolean connected;
+    protected final Object openOrdersCacheLock = new Object();
+    protected volatile List<OrderTicket> openOrdersCache;
+    protected volatile long openOrdersCacheStamp;
 
     public HibachiBroker() {
         this(ExchangeRestApiFactory.getPrivateApi(Exchange.HIBACHI, IHibachiRestApi.class),
@@ -198,6 +209,7 @@ public class HibachiBroker extends AbstractBasicBroker {
             // which is what made chaiwala's reconcile loop drop active
             // orders that were still alive at the exchange.
             orderRegistry.addOpenOrder(order);
+            invalidateOpenOrdersCache();
             // Hibachi's WS gateway returns 200 + orderId before its risk engine validates
             // the order. Rejections (e.g. TooSmallNotionalValue) arrive ~10ms later as an
             // {"event":"order_request_rejected"} frame on the account WS. Wait briefly for
@@ -262,6 +274,9 @@ public class HibachiBroker extends AbstractBasicBroker {
             logger.info("HB_LIFECYCLE modify RECV (REST) clientId={} orderId={} response={}",
                     order.getClientOrderId(), order.getOrderId(), response);
             BrokerRequestResult restResult = interpretResponse(response, "modifyOrder");
+            // Invalidate regardless of REST outcome: the venue may have moved
+            // even on a failure (e.g. risk-engine partial-match path).
+            invalidateOpenOrdersCache();
             if (!restResult.isSuccess()) {
                 if (exchangeOrderId != null && !exchangeOrderId.isBlank()) {
                     pendingPlaces.remove(exchangeOrderId);
@@ -312,6 +327,7 @@ public class HibachiBroker extends AbstractBasicBroker {
             JsonNode response = tradeWs.cancelOrder(request.params, request.signature, traceId);
             logger.info("HB_LIFECYCLE cancel RECV clientId={} orderId={} response={}",
                     order.getClientOrderId(), order.getOrderId(), response);
+            invalidateOpenOrdersCache();
             return interpretResponse(response, "cancelOrder");
         } catch (Exception e) {
             logger.error("Hibachi cancelOrder failed", e);
@@ -388,13 +404,166 @@ public class HibachiBroker extends AbstractBasicBroker {
 
     @Override
     public List<OrderTicket> getOpenOrders() {
-        // Best-effort: rely on registry. A production implementation should reconcile
-        // against restApi.getOpenOrders() periodically.
-        List<OrderTicket> open = new ArrayList<>();
-        if (orderRegistry != null) {
-            orderRegistry.getOpenOrders().forEach(open::add);
+        // Pull from the venue, not the local registry. The registry is fed by
+        // place/modify acks + account WS events, both of which can drop orders:
+        // a modify can be REST-200'd then async-rejected (order stays alive at
+        // the prior price), and WS frames occasionally arrive with a key the
+        // listener can't match (logged as "event_orphan"). When that happens
+        // the local registry shows N open orders while the venue holds N+1 —
+        // chaiwala's reconcile loop never sees the leak because it's comparing
+        // two views with the same blind spot. Reading directly from
+        // /trade/orders makes the venue the source of truth.
+        long now = System.currentTimeMillis();
+        List<OrderTicket> cached = openOrdersCache;
+        if (cached != null && (now - openOrdersCacheStamp) < OPEN_ORDERS_CACHE_TTL_MILLIS) {
+            return new ArrayList<>(cached);
         }
-        return open;
+        synchronized (openOrdersCacheLock) {
+            cached = openOrdersCache;
+            now = System.currentTimeMillis();
+            if (cached != null && (now - openOrdersCacheStamp) < OPEN_ORDERS_CACHE_TTL_MILLIS) {
+                return new ArrayList<>(cached);
+            }
+            List<OrderTicket> fresh = fetchOpenOrdersFromRest();
+            if (fresh != null) {
+                openOrdersCache = fresh;
+                openOrdersCacheStamp = System.currentTimeMillis();
+                return new ArrayList<>(fresh);
+            }
+            // REST failed — fall back to registry so the reconcile loop has
+            // something to work with. Don't cache the fallback; we want the
+            // next call to retry REST.
+            List<OrderTicket> fallback = new ArrayList<>();
+            if (orderRegistry != null) {
+                orderRegistry.getOpenOrders().forEach(fallback::add);
+            }
+            return fallback;
+        }
+    }
+
+    /**
+     * Fetches /trade/orders, parses each entry into an {@link OrderTicket}, and
+     * returns the list. Returns {@code null} on any error so callers can fall
+     * back to the registry.
+     */
+    protected List<OrderTicket> fetchOpenOrdersFromRest() {
+        try {
+            JsonNode response = restApi.getOpenOrders();
+            if (response == null || response.isMissingNode() || response.isNull()) {
+                logger.warn("HB_LIFECYCLE getOpenOrders REST returned null/missing");
+                return null;
+            }
+            JsonNode arr = response;
+            if (response.isObject()) {
+                // Hibachi has shipped both a bare array and {"orders":[...]} /
+                // {"data":[...]} shapes — accept either.
+                if (response.has("orders") && response.path("orders").isArray()) {
+                    arr = response.path("orders");
+                } else if (response.has("data") && response.path("data").isArray()) {
+                    arr = response.path("data");
+                } else if (response.has("result") && response.path("result").isArray()) {
+                    arr = response.path("result");
+                }
+            }
+            if (!arr.isArray()) {
+                logger.warn("HB_LIFECYCLE getOpenOrders REST unexpected shape: {}", response);
+                return null;
+            }
+            List<OrderTicket> out = new ArrayList<>(arr.size());
+            for (JsonNode node : arr) {
+                OrderTicket parsed = parseRestOrder(node);
+                if (parsed != null) {
+                    out.add(parsed);
+                }
+            }
+            return out;
+        } catch (Exception e) {
+            logger.warn("HB_LIFECYCLE getOpenOrders REST failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Builds an {@link OrderTicket} from a single Hibachi REST open-order entry.
+     * Prefers the registry's existing OrderTicket instance when the orderId or
+     * clientOrderId matches so caller-side state (modifiers, originalEntryTime,
+     * etc.) carries through; falls back to a freshly-built ticket for orders
+     * the registry has never seen (the orphan-leak case this fix targets).
+     */
+    protected OrderTicket parseRestOrder(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        String orderId = textOrNull(node, "orderId", "id");
+        String clientOrderId = textOrNull(node, "clientOrderId", "clientId");
+        BigDecimal price = readDecimal(node, "price", "limitPrice");
+        // Hibachi REST /trade/orders shape: totalQuantity = original size,
+        // availableQuantity = unfilled remaining. There is no explicit
+        // "filledQuantity" field — derive it.
+        BigDecimal totalQty = readDecimal(node, "totalQuantity", "quantity", "size", "originalQuantity");
+        BigDecimal availableQty = readDecimal(node, "availableQuantity", "remainingQuantity", "remaining");
+        BigDecimal filled = readDecimal(node, "filledQuantity", "executedQuantity",
+                "executed_quantity", "filled", "matchedQuantity");
+        if (filled == null && totalQty != null && availableQty != null) {
+            filled = totalQty.subtract(availableQty);
+            if (filled.signum() < 0) {
+                filled = BigDecimal.ZERO;
+            }
+        }
+        String symbol = textOrNull(node, "symbol", "contract");
+        String sideRaw = textOrNull(node, "side", "direction");
+        Ticker ticker = lookupTicker(symbol);
+
+        OrderTicket existing = null;
+        if (orderRegistry != null) {
+            if (orderId != null) {
+                existing = orderRegistry.getOrderById(orderId);
+            }
+            if (existing == null && clientOrderId != null) {
+                existing = orderRegistry.getOrderByClientId(clientOrderId);
+            }
+        }
+
+        OrderTicket out = existing != null ? existing : new OrderTicket();
+        if (orderId != null) {
+            out.setOrderId(orderId);
+        }
+        if (clientOrderId != null) {
+            out.setClientOrderId(clientOrderId);
+        }
+        if (ticker != null) {
+            out.setTicker(ticker);
+        }
+        if (price != null) {
+            // Refresh from venue truth — fixes the "UI shows the new price but
+            // exchange has the old one" symptom from a modify that REST-200'd
+            // and was then async-rejected.
+            out.setLimitPrice(price);
+        }
+        if (totalQty != null) {
+            out.setSize(totalQty);
+        }
+        if (filled != null) {
+            out.setFilledSize(filled);
+        }
+        if (sideRaw != null && out.getTradeDirection() == null) {
+            String s = sideRaw.toUpperCase();
+            if (s.equals("BID") || s.equals("BUY") || s.equals("LONG")) {
+                out.setTradeDirection(TradeDirection.BUY);
+            } else if (s.equals("ASK") || s.equals("SELL") || s.equals("SHORT")) {
+                out.setTradeDirection(TradeDirection.SELL);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Drops the cached open-orders snapshot. Call after place/modify/cancel
+     * acks so the next reconcile sees the venue-truth view including any side
+     * effects (especially modify rejections that leave the prior order alive).
+     */
+    protected void invalidateOpenOrdersCache() {
+        openOrdersCache = null;
     }
 
     @Override
@@ -417,6 +586,7 @@ public class HibachiBroker extends AbstractBasicBroker {
                     .packCancelAll(nonce);
             String signature = signer.sign(bytes);
             JsonNode response = tradeWs.cancelAll(nonce, signature);
+            invalidateOpenOrdersCache();
             return interpretResponse(response, "cancelAllOrders");
         } catch (Exception e) {
             logger.error("Hibachi cancelAllOrders failed", e);
@@ -907,6 +1077,9 @@ public class HibachiBroker extends AbstractBasicBroker {
         if (frame == null || frame.isMissingNode() || frame.isNull()) {
             return;
         }
+        // Any order WS event means the venue's open-orders set may have moved.
+        // Drop the cache so the next reconcile sees the post-event view.
+        invalidateOpenOrdersCache();
         // Frame may be either the wrapped form ({"event":"...","data":{...}})
         // or a raw body. Tolerate both.
         String eventName = textOrNull(frame, "event");
