@@ -72,6 +72,17 @@ public class ParadexBroker extends AbstractBasicBroker {
     protected int jwtRefreshInSeconds = 60;
     protected String wsUrl;
     protected boolean connected = false;
+    /**
+     * Set true at the start of {@link #onDisconnect()} so that the close-listener
+     * closures wired on the WS processors (which trigger
+     * {@code startAccountInfoWSClient()} et al on socket close) bail out instead
+     * of spawning new connections after we've intentionally torn the broker down.
+     * Without this the WS readers reconnect indefinitely after disconnect, and
+     * every account/fill event submits to the now-shutdown {@code eventExecutor}
+     * — producing a permanent {@link RejectedExecutionException} storm and a
+     * thread + memory leak that lasts the rest of the JVM's life.
+     */
+    protected volatile boolean disconnecting = false;
 
     protected ParadexWebSocketClient accountInfoWSClient;
     protected ParadexWebSocketClient orderStatusWSClient;
@@ -328,6 +339,10 @@ public class ParadexBroker extends AbstractBasicBroker {
 
     @Override
     public void connect() {
+        // Reset the teardown flag so a connect() after disconnect() rewires
+        // cleanly. The flag's only purpose is to suppress reconnect closures
+        // during an intentional disconnect.
+        disconnecting = false;
         accountWebSocketProcessor = new AccountWebSocketProcessor(() -> {
             logger.info("Account info WebSocket closed, trying to restart...");
             startAccountInfoWSClient();
@@ -362,7 +377,34 @@ public class ParadexBroker extends AbstractBasicBroker {
 
     @Override
     protected void onDisconnect() {
+        // Set the flag BEFORE closing sockets so the close-listener closures
+        // (which schedule a reconnect on socket close) bail out rather than
+        // spawning a fresh connection during teardown.
+        disconnecting = true;
         stopAuthenticationScheduler();
+
+        closeQuietly(accountInfoWSClient);
+        closeQuietly(orderStatusWSClient);
+        closeQuietly(fillsWSClient);
+        accountInfoWSClient = null;
+        orderStatusWSClient = null;
+        fillsWSClient = null;
+
+        // Each processor owns its own ExecutorService for listener
+        // notification; without an explicit shutdown they leak as well.
+        if (accountWebSocketProcessor != null) {
+            try { accountWebSocketProcessor.shutdown(); } catch (Exception ignored) {}
+            accountWebSocketProcessor = null;
+        }
+        if (orderStatusProcessor != null) {
+            try { orderStatusProcessor.shutdown(); } catch (Exception ignored) {}
+            orderStatusProcessor = null;
+        }
+        if (fillsWebSocketProcessor != null) {
+            try { fillsWebSocketProcessor.shutdown(); } catch (Exception ignored) {}
+            fillsWebSocketProcessor = null;
+        }
+
         connected = false;
     }
 
@@ -561,6 +603,9 @@ public class ParadexBroker extends AbstractBasicBroker {
     }
 
     public void startAccountInfoWSClient() {
+        if (disconnecting) {
+            return;
+        }
         logger.info("Starting account info WebSocket client");
         closeQuietly(accountInfoWSClient);
         String jwtToken = restApi.getJwtToken();
@@ -576,6 +621,9 @@ public class ParadexBroker extends AbstractBasicBroker {
     }
 
     public void startOrderStatusWSClient() {
+        if (disconnecting) {
+            return;
+        }
         logger.info("Starting order status WebSocket client");
         closeQuietly(orderStatusWSClient);
         String jwtToken = restApi.getJwtToken();
@@ -590,6 +638,9 @@ public class ParadexBroker extends AbstractBasicBroker {
     }
 
     public void startFillsWSClient() {
+        if (disconnecting) {
+            return;
+        }
         logger.info("Starting fills WebSocket client");
         closeQuietly(fillsWSClient);
         String jwtToken = restApi.getJwtToken();

@@ -9,6 +9,7 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.RejectedExecutionException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -128,11 +129,33 @@ public abstract class AbstractBasicBroker implements IBroker {
         }
     }
 
+    /**
+     * Submits a listener-notification task to {@link #eventExecutor}, silently
+     * dropping the task if the executor has been shut down. Without this guard,
+     * any event fired after {@link #disconnect()} (typical when a stale WS
+     * reader outlives the broker — see ParadexBroker / HyperliquidBroker leak
+     * fixes 2026-05-08) produces a {@link RejectedExecutionException} per
+     * event, flooding the error log indefinitely. Post-disconnect listener
+     * notification is not useful, so dropping is the correct behavior.
+     */
+    private void dispatch(Runnable task) {
+        if (eventExecutor.isShutdown()) {
+            return;
+        }
+        try {
+            eventExecutor.submit(task);
+        } catch (RejectedExecutionException ex) {
+            // Race: the executor was shut down between the isShutdown() check
+            // and submit. Same disposition as the fast path — drop silently.
+            logger.debug("Dropped broker event submit after executor shutdown", ex);
+        }
+    }
+
     protected void fireOrderEvent(OrderEvent event) {
         logger.info("Firing order event: {}", event);
         synchronized (orderEventListeners) {
             for (OrderEventListener listener : orderEventListeners) {
-                eventExecutor.submit(() -> {
+                dispatch(() -> {
                     try {
                         listener.orderEvent(event);
                     } catch (Exception ex) {
@@ -146,7 +169,7 @@ public abstract class AbstractBasicBroker implements IBroker {
     protected void fireBrokerError(BrokerError error) {
         synchronized (brokerErrorListeners) {
             for (BrokerErrorListener listener : brokerErrorListeners) {
-                eventExecutor.submit(() -> {
+                dispatch(() -> {
                     try {
                         listener.brokerErrorFired(error);
                     } catch (Exception ex) {
@@ -160,7 +183,7 @@ public abstract class AbstractBasicBroker implements IBroker {
     protected void fireAccountEquityUpdated(double equity) {
         synchronized (brokerAccountInfoListeners) {
             for (BrokerAccountInfoListener listener : brokerAccountInfoListeners) {
-                eventExecutor.submit(() -> {
+                dispatch(() -> {
                     try {
                         listener.accountEquityUpdated(equity);
                     } catch (Exception ex) {
@@ -174,7 +197,7 @@ public abstract class AbstractBasicBroker implements IBroker {
     protected void fireAvailableFundsUpdated(double availableFunds) {
         synchronized (brokerAccountInfoListeners) {
             for (BrokerAccountInfoListener listener : brokerAccountInfoListeners) {
-                eventExecutor.submit(() -> {
+                dispatch(() -> {
                     try {
                         listener.availableFundsUpdated(availableFunds);
                     } catch (Exception ex) {
@@ -189,7 +212,7 @@ public abstract class AbstractBasicBroker implements IBroker {
         logger.info("Firing fill event: {}", fill);
         synchronized (fillEventListeners) {
             for (FillEventListener listener : fillEventListeners) {
-                eventExecutor.submit(() -> {
+                dispatch(() -> {
                     try {
                         listener.fillReceived(fill);
                     } catch (Exception ex) {

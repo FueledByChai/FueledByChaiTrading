@@ -26,6 +26,16 @@ public class HibachiConfiguration {
     public static final String HIBACHI_WS_RECONNECT_INITIAL_BACKOFF_MS = "hibachi.ws.reconnect.initial.backoff.ms";
     public static final String HIBACHI_WS_RECONNECT_MAX_BACKOFF_MS = "hibachi.ws.reconnect.max.backoff.ms";
     public static final String HIBACHI_ORDER_MAX_FEES_PERCENT = "hibachi.order.max.fees.percent";
+    /**
+     * When {@code true}, {@link com.fueledbychai.broker.hibachi.HibachiBroker#modifyOrder}
+     * routes through the trade WebSocket ({@code order.modify}) instead of the REST
+     * {@code PUT /trade/order} endpoint. The default is REST because the venue's
+     * WS gateway has historically not responded to {@code order.modify} (every
+     * call timed out at the WS-await layer). This flag exists so we can re-test
+     * the WS path after venue-side fixes or param-shape changes without an
+     * application redeploy.
+     */
+    public static final String HIBACHI_MODIFY_VIA_WS = "hibachi.modify.via.ws";
 
     private static final String DEFAULT_ENVIRONMENT = "prod";
     private static final String DEFAULT_PROD_REST_URL = "https://api.hibachi.xyz";
@@ -67,6 +77,7 @@ public class HibachiConfiguration {
     private final long wsReconnectInitialBackoffMs;
     private final long wsReconnectMaxBackoffMs;
     private final BigDecimal orderMaxFeesPercent;
+    private final boolean modifyViaWebSocket;
 
     public static HibachiConfiguration getInstance() {
         if (instance == null) {
@@ -111,6 +122,7 @@ public class HibachiConfiguration {
         this.wsReconnectMaxBackoffMs = readLong(HIBACHI_WS_RECONNECT_MAX_BACKOFF_MS,
                 DEFAULT_WS_RECONNECT_MAX_BACKOFF_MS);
         this.orderMaxFeesPercent = readBigDecimal(HIBACHI_ORDER_MAX_FEES_PERCENT, DEFAULT_ORDER_MAX_FEES_PERCENT);
+        this.modifyViaWebSocket = readBoolean(HIBACHI_MODIFY_VIA_WS, false);
     }
 
     private static String read(String key, String defaultValue) {
@@ -134,6 +146,21 @@ public class HibachiConfiguration {
         } catch (NumberFormatException ignored) {
             return defaultValue;
         }
+    }
+
+    private static boolean readBoolean(String key, boolean defaultValue) {
+        String value = read(key, null);
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        String trimmed = value.trim();
+        if ("true".equalsIgnoreCase(trimmed) || "1".equals(trimmed) || "yes".equalsIgnoreCase(trimmed)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(trimmed) || "0".equals(trimmed) || "no".equalsIgnoreCase(trimmed)) {
+            return false;
+        }
+        return defaultValue;
     }
 
     private static BigDecimal readBigDecimal(String key, BigDecimal defaultValue) {
@@ -165,6 +192,7 @@ public class HibachiConfiguration {
     public long getWsReconnectInitialBackoffMs() { return wsReconnectInitialBackoffMs; }
     public long getWsReconnectMaxBackoffMs() { return wsReconnectMaxBackoffMs; }
     public BigDecimal getOrderMaxFeesPercent() { return orderMaxFeesPercent; }
+    public boolean isModifyViaWebSocket() { return modifyViaWebSocket; }
 
     public boolean hasPrivateApiConfiguration() {
         return apiKey != null && !apiKey.isBlank()
