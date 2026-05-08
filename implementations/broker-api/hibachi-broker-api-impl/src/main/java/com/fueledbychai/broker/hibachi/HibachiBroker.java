@@ -238,9 +238,12 @@ public class HibachiBroker extends AbstractBasicBroker {
             return new BrokerRequestResult(false, true, "order is required",
                     BrokerRequestResult.FailureType.VALIDATION_FAILED);
         }
-        // WS `order.modify` path stubbed out — the gateway never responds,
-        // so callers always time out. Route through REST PUT /trade/order
-        // until that's resolved with the venue.
+        // Modify path is config-gated. Default is REST (PUT /trade/order)
+        // because the venue's WS `order.modify` historically did not respond.
+        // Set hibachi.modify.via.ws=true to route through the trade WS for
+        // testing — useful when REST is the rate-limit bottleneck (the REST
+        // global aperture is 350 req / 10s; WS modify is not subject to it).
+        boolean viaWs = config.isModifyViaWebSocket();
         try (var s = Span.start("HB_MODIFY_ORDER", order.getClientOrderId(), LATENCY_LOGGER)) {
             String symbol = order.getTicker().getSymbol();
             HibachiContract contract = restApi.getContract(symbol);
@@ -251,15 +254,13 @@ public class HibachiBroker extends AbstractBasicBroker {
             long nonce = nextNonce();
             HibachiTranslator.SignedRequest request = translator.translateModify(
                     order, contract, accountId, nonce, config.getOrderMaxFeesPercent(), signer);
-            // REST requires `signature` to ride inside the JSON body.
-            Map<String, Object> body = new LinkedHashMap<>(request.params);
-            body.putIfAbsent("signature", request.signature);
-            logger.info("HB_LIFECYCLE modify SEND (REST) clientId={} orderId={} symbol={} side={} newPrice={} newSize={} nonce={}",
-                    order.getClientOrderId(), order.getOrderId(), symbol, order.getTradeDirection(),
+            String transport = viaWs ? "WS" : "REST";
+            logger.info("HB_LIFECYCLE modify SEND ({}) clientId={} orderId={} symbol={} side={} newPrice={} newSize={} nonce={}",
+                    transport, order.getClientOrderId(), order.getOrderId(), symbol, order.getTradeDirection(),
                     order.getLimitPrice(), order.getSize(), nonce);
-            // Install a waiter BEFORE the REST call so an order_request_rejected
-            // frame that races the REST 200 doesn't get stashed as an "early"
-            // rejection that the next caller picks up by mistake.
+            // Install a waiter BEFORE the call so an order_request_rejected
+            // frame that races the success ack doesn't get stashed as an
+            // "early" rejection that the next caller picks up by mistake.
             String exchangeOrderId = order.getOrderId();
             if (exchangeOrderId != null && !exchangeOrderId.isBlank()) {
                 pendingPlaces.compute(exchangeOrderId, (k, existing) -> {
@@ -270,21 +271,29 @@ public class HibachiBroker extends AbstractBasicBroker {
                     return new PendingPlace(order);
                 });
             }
-            JsonNode response = restApi.modifyOrder(body);
-            logger.info("HB_LIFECYCLE modify RECV (REST) clientId={} orderId={} response={}",
-                    order.getClientOrderId(), order.getOrderId(), response);
-            BrokerRequestResult restResult = interpretResponse(response, "modifyOrder");
-            // Invalidate regardless of REST outcome: the venue may have moved
+            JsonNode response;
+            if (viaWs) {
+                response = tradeWs.modifyOrder(request.params, request.signature, order.getClientOrderId());
+            } else {
+                // REST requires `signature` to ride inside the JSON body.
+                Map<String, Object> body = new LinkedHashMap<>(request.params);
+                body.putIfAbsent("signature", request.signature);
+                response = restApi.modifyOrder(body);
+            }
+            logger.info("HB_LIFECYCLE modify RECV ({}) clientId={} orderId={} response={}",
+                    transport, order.getClientOrderId(), order.getOrderId(), response);
+            BrokerRequestResult result = interpretResponse(response, "modifyOrder");
+            // Invalidate regardless of outcome: the venue may have moved
             // even on a failure (e.g. risk-engine partial-match path).
             invalidateOpenOrdersCache();
-            if (!restResult.isSuccess()) {
+            if (!result.isSuccess()) {
                 if (exchangeOrderId != null && !exchangeOrderId.isBlank()) {
                     pendingPlaces.remove(exchangeOrderId);
                 }
-                return restResult;
+                return result;
             }
-            // REST returned 200 — but Hibachi still validates the modify on
-            // its risk engine and may emit {"event":"order_request_rejected",
+            // Success ack returned — but Hibachi still validates the modify
+            // on its risk engine and may emit {"event":"order_request_rejected",
             // "data":{"requestType":"Update",...}} a few ms later. If we
             // return success without waiting, chaiwala runs
             // applyDesiredStateToTrackedOrder and its local limitPrice
@@ -298,10 +307,10 @@ public class HibachiBroker extends AbstractBasicBroker {
                     return asyncRejection;
                 }
             }
-            return restResult;
+            return result;
         } catch (Exception e) {
             logger.error("Hibachi modifyOrder failed", e);
-            // Run the REST-error message through classifyRejection so callers
+            // Run the error message through classifyRejection so callers
             // can see ORDER_NOT_FOUND / ORDER_ALREADY_COMPLETE / etc.
             // (e.g. {"errorCode":3,"message":"Not found: Order ID …"}) and
             // route to placeFresh / no-op instead of a blind cancel+replace.
@@ -344,6 +353,20 @@ public class HibachiBroker extends AbstractBasicBroker {
         OrderTicket existing = orderRegistry.getOrderById(id);
         if (existing == null) {
             return new BrokerRequestResult(false, true, "Order not found: " + id,
+                    BrokerRequestResult.FailureType.ORDER_NOT_FOUND);
+        }
+        return cancelOrder(existing);
+    }
+
+    @Override
+    public BrokerRequestResult cancelOrderByClientOrderId(String clientOrderId) {
+        if (clientOrderId == null || clientOrderId.isBlank()) {
+            return new BrokerRequestResult(false, true, "clientOrderId is required",
+                    BrokerRequestResult.FailureType.VALIDATION_FAILED);
+        }
+        OrderTicket existing = orderRegistry.getOrderByClientId(clientOrderId);
+        if (existing == null) {
+            return new BrokerRequestResult(false, true, "Order not found: " + clientOrderId,
                     BrokerRequestResult.FailureType.ORDER_NOT_FOUND);
         }
         return cancelOrder(existing);
@@ -1193,15 +1216,23 @@ public class HibachiBroker extends AbstractBasicBroker {
         Long ts = readLong(body, "timestamp", "time", "tradeTime");
         if (ts != null) {
             // Hibachi's trade_update frames carry "timestamp" as 10-digit
-            // seconds-since-epoch (with the sub-second part separately in
-            // "timestampNsPartial"). Other Hibachi endpoints have surfaced
-            // millis and microseconds, so cover all three magnitudes.
+            // seconds-since-epoch with the sub-second part separately in
+            // "timestampNsPartial" (nanoseconds-within-the-second). Other
+            // Hibachi endpoints have surfaced millis and microseconds, so
+            // cover all three magnitudes.
             // The previous heuristic only handled micros (>1e15) and treated
             // seconds as if they were millis — fills landed at 1970-01-21,
             // making the inventory-holding-time UI show ~493,000h ages.
             long millis;
             if (ts < 1_000_000_000_000L) {           // ≤ 12 digits → seconds
                 millis = ts * 1_000L;
+                // Recover sub-second precision from the partial field. Without
+                // this, every Hibachi fill lands at HH:mm:ss.000 — the UI's
+                // "no milliseconds on Hibachi fills" symptom.
+                Long nsPartial = readLong(body, "timestampNsPartial", "nsPartial", "nanoseconds");
+                if (nsPartial != null && nsPartial >= 0 && nsPartial < 1_000_000_000L) {
+                    millis += nsPartial / 1_000_000L;
+                }
             } else if (ts < 1_000_000_000_000_000L) { // ≤ 15 digits → millis
                 millis = ts;
             } else {                                  // ≥ 16 digits → micros

@@ -95,9 +95,22 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
 
     protected HyperliquidWebSocketClient accountInfoWSClient;
     protected HyperliquidWebSocketClient orderStatusWSClient;
+    /**
+     * Was a local variable in {@link #startFillWSClient()} — promoted to a
+     * field so {@link #onDisconnect()} can close it. Without this it leaked
+     * forever once started.
+     */
+    protected HyperliquidWebSocketClient fillWSClient;
     protected AccountWebSocketProcessor accountWebSocketProcessor;
     protected WsOrderWebSocketProcessor orderStatusWebSocketProcessor;
     protected WsUserFillsWebSocketProcessor fillWebSocketProcessor;
+    /**
+     * Set true at the start of {@link #onDisconnect()} so the close-listener
+     * closures wired on the WS processors do NOT spawn a fresh connection
+     * after we've intentionally torn the broker down. See the same flag on
+     * ParadexBroker for the failure mode this prevents.
+     */
+    protected volatile boolean disconnecting = false;
 
     protected Set<OrderTicket> currencyOrderList = new HashSet<>();
     protected BlockingQueue<Integer> nextIdQueue = new LinkedBlockingQueue<>();
@@ -220,6 +233,10 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
 
     @Override
     public void connect() {
+        // Reset the teardown flag so connect() after disconnect() rewires
+        // cleanly. Used by the start*WSClient methods to bail out of the
+        // reconnect-on-close path during an intentional teardown.
+        disconnecting = false;
         // startAuthenticationScheduler();
         orderEventExecutor = Executors.newCachedThreadPool();
         startAccountInfoWSClient();
@@ -231,8 +248,44 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
 
     @Override
     protected void onDisconnect() {
+        // Set the flag BEFORE closing sockets so the close-listener closures
+        // (which schedule reconnects on socket close) bail out rather than
+        // spawning a fresh connection during teardown.
+        disconnecting = true;
         stopOrderEventExecutor();
+
+        closeQuietly(accountInfoWSClient);
+        closeQuietly(orderStatusWSClient);
+        closeQuietly(fillWSClient);
+        accountInfoWSClient = null;
+        orderStatusWSClient = null;
+        fillWSClient = null;
+
+        // Each processor owns an ExecutorService for listener notification;
+        // without explicit shutdown they leak on every disconnect.
+        if (accountWebSocketProcessor != null) {
+            try { accountWebSocketProcessor.shutdown(); } catch (Exception ignored) {}
+            accountWebSocketProcessor = null;
+        }
+        if (orderStatusWebSocketProcessor != null) {
+            try { orderStatusWebSocketProcessor.shutdown(); } catch (Exception ignored) {}
+            orderStatusWebSocketProcessor = null;
+        }
+        if (fillWebSocketProcessor != null) {
+            try { fillWebSocketProcessor.shutdown(); } catch (Exception ignored) {}
+            fillWebSocketProcessor = null;
+        }
+
         connected = false;
+    }
+
+    private void closeQuietly(HyperliquidWebSocketClient client) {
+        if (client == null) return;
+        try {
+            client.close();
+        } catch (Exception e) {
+            logger.debug("Error closing Hyperliquid websocket client", e);
+        }
     }
 
     @Override
@@ -288,6 +341,9 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
     }
 
     protected void startAccountInfoWSClient() {
+        if (disconnecting) {
+            return;
+        }
         logger.info("Starting account info WebSocket client");
 
         try {
@@ -309,6 +365,9 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
     }
 
     protected void startOrderStatusWSClient() {
+        if (disconnecting) {
+            return;
+        }
         logger.info("Starting order status WebSocket client");
 
         try {
@@ -330,6 +389,9 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
     }
 
     public void startFillWSClient() {
+        if (disconnecting) {
+            return;
+        }
         logger.info("Starting fill WebSocket client");
 
         try {
@@ -340,7 +402,9 @@ public class HyperliquidBroker extends AbstractBasicBroker implements Level1Quot
             fillWebSocketProcessor.addEventListener((WsUserFill event) -> {
                 fillEventWsReceived(event);
             });
-            HyperliquidWebSocketClient fillWSClient = HyperliquidWebSocketClientBuilder.buildUserFillsClient(wsUrl,
+            // Assign to the field (was a local variable) so onDisconnect can
+            // close it; otherwise it leaked forever once started.
+            fillWSClient = HyperliquidWebSocketClientBuilder.buildUserFillsClient(wsUrl,
                     accountAddress, fillWebSocketProcessor);
 
             fillWSClient.connect();
