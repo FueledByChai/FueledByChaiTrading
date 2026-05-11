@@ -173,6 +173,7 @@ public class HibachiBroker extends AbstractBasicBroker {
             return new BrokerRequestResult(false, true, "order is required",
                     BrokerRequestResult.FailureType.VALIDATION_FAILED);
         }
+        boolean viaWs = config.isPlaceViaWebSocket();
         try (var s = Span.start("HB_PLACE_ORDER", order.getClientOrderId(), LATENCY_LOGGER)) {
             String symbol = order.getTicker().getSymbol();
             HibachiContract contract = restApi.getContract(symbol);
@@ -181,20 +182,37 @@ public class HibachiBroker extends AbstractBasicBroker {
                         BrokerRequestResult.FailureType.VALIDATION_FAILED);
             }
             long nonce = nextNonce();
+            // creationDeadline is microseconds since epoch (same unit as nonce);
+            // the venue compares it to its process_time in micros and rejects with
+            // "Creation deadline exceeded" if it's smaller. We previously sent
+            // seconds, which the venue treats as a tiny number → instant rejection.
+            long deadline = nonce + config.getOrderDeadlineSeconds() * 1_000_000L;
             HibachiTranslator.SignedRequest request = translator.translatePlace(
-                    order, contract, accountId, nonce, config.getOrderMaxFeesPercent(), signer);
+                    order, contract, accountId, nonce, deadline, config.getOrderMaxFeesPercent(), signer);
             orderRegistry.addOpenOrder(order);
-            logger.info("HB_LIFECYCLE place SEND clientId={} symbol={} side={} price={} size={} nonce={}",
-                    order.getClientOrderId(), symbol, order.getTradeDirection(),
+            String transport = viaWs ? "WS" : "REST";
+            logger.info("HB_LIFECYCLE place SEND ({}) clientId={} symbol={} side={} price={} size={} nonce={}",
+                    transport, order.getClientOrderId(), symbol, order.getTradeDirection(),
                     order.getLimitPrice(), order.getSize(), nonce);
-            JsonNode response = tradeWs.placeOrder(request.params, request.signature, order.getClientOrderId());
-            logger.info("HB_LIFECYCLE place RECV clientId={} response={}",
-                    order.getClientOrderId(), response);
+            JsonNode response;
+            if (viaWs) {
+                response = tradeWs.placeOrder(request.params, request.signature, order.getClientOrderId());
+            } else {
+                // translatePlace already embeds `signature` in params, so the WS map
+                // doubles as the REST body without further transformation.
+                response = restApi.placeOrder(request.params);
+            }
+            logger.info("HB_LIFECYCLE place RECV ({}) clientId={} response={}",
+                    transport, order.getClientOrderId(), response);
             BrokerRequestResult result = interpretResponse(response, "placeOrder");
             if (!result.isSuccess()) {
                 return result;
             }
+            // WS shape: {"result":{"orderId":"…"}}; REST shape: {"orderId":"…"}.
             String exchangeOrderId = response.path("result").path("orderId").asText(null);
+            if (exchangeOrderId == null || exchangeOrderId.isBlank()) {
+                exchangeOrderId = response.path("orderId").asText(null);
+            }
             if (exchangeOrderId == null || exchangeOrderId.isBlank()) {
                 return new BrokerRequestResult(false, true, response.toString(),
                         BrokerRequestResult.FailureType.UNKNOWN);
@@ -252,8 +270,13 @@ public class HibachiBroker extends AbstractBasicBroker {
                         BrokerRequestResult.FailureType.VALIDATION_FAILED);
             }
             long nonce = nextNonce();
+            // creationDeadline is microseconds since epoch (same unit as nonce);
+            // the venue compares it to its process_time in micros and rejects with
+            // "Creation deadline exceeded" if it's smaller. We previously sent
+            // seconds, which the venue treats as a tiny number → instant rejection.
+            long deadline = nonce + config.getOrderDeadlineSeconds() * 1_000_000L;
             HibachiTranslator.SignedRequest request = translator.translateModify(
-                    order, contract, accountId, nonce, config.getOrderMaxFeesPercent(), signer);
+                    order, contract, accountId, nonce, deadline, config.getOrderMaxFeesPercent(), signer);
             String transport = viaWs ? "WS" : "REST";
             logger.info("HB_LIFECYCLE modify SEND ({}) clientId={} orderId={} symbol={} side={} newPrice={} newSize={} nonce={}",
                     transport, order.getClientOrderId(), order.getOrderId(), symbol, order.getTradeDirection(),
@@ -273,7 +296,28 @@ public class HibachiBroker extends AbstractBasicBroker {
             }
             JsonNode response;
             if (viaWs) {
-                response = tradeWs.modifyOrder(request.params, request.signature, order.getClientOrderId());
+                // REST and WS modify endpoints disagree on field names:
+                //   REST `PUT /trade/order` → updatedQuantity / updatedPrice
+                //   WS `order.modify`       → quantity / price (matches order.place)
+                // Sending updatedQuantity over WS gets back
+                //   {"error":"Invalid params: missing field `quantity`"}
+                // with no id, which the await() can't correlate → 10s timeout.
+                // Verified empirically 2026-05-08 22:51 in chaiwala prod.
+                // The translator emits REST-style names (what the documented
+                // REST body needs); we transform here for the WS branch only
+                // so the working REST path is untouched. Signature is computed
+                // over a binary pack of values, not field names, so renaming
+                // the JSON keys doesn't invalidate it.
+                Map<String, Object> wsParams = new LinkedHashMap<>(request.params);
+                Object updatedQty = wsParams.remove("updatedQuantity");
+                if (updatedQty != null) {
+                    wsParams.put("quantity", updatedQty);
+                }
+                Object updatedPx = wsParams.remove("updatedPrice");
+                if (updatedPx != null) {
+                    wsParams.put("price", updatedPx);
+                }
+                response = tradeWs.modifyOrder(wsParams, request.signature, order.getClientOrderId());
             } else {
                 // REST requires `signature` to ride inside the JSON body.
                 Map<String, Object> body = new LinkedHashMap<>(request.params);

@@ -156,7 +156,7 @@ public class HibachiBrokerOLD extends AbstractBasicBroker {
             }
             long nonce = nextNonce();
             HibachiTranslator.SignedRequest request = translator.translatePlace(
-                    order, contract, accountId, nonce, config.getOrderMaxFeesPercent(), signer);
+                    order, contract, accountId, nonce, 0L, config.getOrderMaxFeesPercent(), signer);
             orderRegistry.addOpenOrder(order);
             logger.info("HB_LIFECYCLE place SEND clientId={} symbol={} side={} price={} size={} nonce={}",
                     order.getClientOrderId(), symbol, order.getTradeDirection(),
@@ -211,7 +211,7 @@ public class HibachiBrokerOLD extends AbstractBasicBroker {
             }
             long nonce = nextNonce();
             HibachiTranslator.SignedRequest request = translator.translateModify(
-                    order, contract, accountId, nonce, config.getOrderMaxFeesPercent(), signer);
+                    order, contract, accountId, nonce, 0L, config.getOrderMaxFeesPercent(), signer);
             logger.info("HB_LIFECYCLE modify SEND clientId={} orderId={} symbol={} side={} newPrice={} newSize={} nonce={}",
                     order.getClientOrderId(), order.getOrderId(), symbol, order.getTradeDirection(),
                     order.getLimitPrice(), order.getSize(), nonce);

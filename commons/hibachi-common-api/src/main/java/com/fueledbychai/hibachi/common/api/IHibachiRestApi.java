@@ -11,8 +11,8 @@ import com.fueledbychai.data.InstrumentType;
  * Public + private REST contract for the Hibachi exchange.
  *
  * <p>Public market endpoints live on {@code https://data-api.hibachi.xyz}; private trading
- * endpoints live on {@code https://api.hibachi.xyz}. Order place/modify/cancel are NOT on
- * the REST surface — they are sent over the trade WebSocket. See the broker module.
+ * endpoints live on {@code https://api.hibachi.xyz}. Order place and modify are exposed
+ * here; cancel is WS-only.
  */
 public interface IHibachiRestApi {
 
@@ -100,4 +100,12 @@ public interface IHibachiRestApi {
      * the original placement nonce. The implementation injects {@code accountId}.
      */
     JsonNode modifyOrder(java.util.Map<String, Object> body);
+
+    /**
+     * Place a new order via POST /trade/order. The body should already carry the
+     * same fields the WS {@code order.place} call uses (symbol, side, quantity,
+     * price, orderType, nonce, maxFeesPercent, signature, clientOrderId, etc.).
+     * The implementation injects {@code accountId}.
+     */
+    JsonNode placeOrder(java.util.Map<String, Object> body);
 }
