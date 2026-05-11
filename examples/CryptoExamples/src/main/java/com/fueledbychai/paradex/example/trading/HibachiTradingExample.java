@@ -54,12 +54,19 @@ public class HibachiTradingExample {
 
     protected static final Logger logger = LoggerFactory.getLogger(HibachiTradingExample.class);
     protected static final String DEFAULT_SYMBOL = "SOL";
-    protected static final BigDecimal DEFAULT_SIZE = new BigDecimal("0.1");
+    protected static final BigDecimal DEFAULT_SIZE = new BigDecimal("0.15");
     protected static final Duration INITIAL_QUOTE_TIMEOUT = Duration.ofSeconds(10);
-    protected static final Duration ORDER_OBSERVATION_WINDOW = Duration.ofSeconds(60);
+    protected static final Duration ORDER_OBSERVATION_WINDOW = Duration.ofSeconds(10);
     protected static final BigDecimal FALLBACK_TICK_SIZE = new BigDecimal("0.001");
 
     public void executeTrade(String symbol) throws Exception {
+        // Route place orders through POST /trade/order instead of the trade
+        // WebSocket so this example exercises the REST path. reset() clears
+        // any cached HibachiConfiguration singleton so the flag is honored
+        // even if config was loaded earlier in the JVM.
+       // System.setProperty(HibachiConfiguration.HIBACHI_PLACE_VIA_WS, "true");
+        HibachiConfiguration.reset();
+
         ProxyConfig.getInstance().setRunningLocally(
                 Boolean.parseBoolean(System.getProperty("hibachi.run.proxy", "true")));
         logger.info("Proxy config: {}", ProxyConfig.getInstance().getProxy());
@@ -132,6 +139,16 @@ public class HibachiTradingExample {
                     ticker.getSymbol(), order.getSize(), order.getLimitPrice());
             BrokerRequestResult result = broker.placeOrder(order);
             logger.info("Place order result: {}", result);
+
+
+            Thread.sleep(10000); // Wait for a bit to observe fills/events before canceling any remainder.
+
+
+            order.setLimitPrice( new BigDecimal("85.00"));
+
+
+            BrokerRequestResult result2 = broker.modifyOrder(order);  
+            logger.info("Modify order result: {}", result2);
 
             Thread.sleep(ORDER_OBSERVATION_WINDOW.toMillis());
 

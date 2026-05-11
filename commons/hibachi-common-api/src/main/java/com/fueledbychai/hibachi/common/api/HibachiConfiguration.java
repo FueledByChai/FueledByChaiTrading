@@ -36,6 +36,21 @@ public class HibachiConfiguration {
      * application redeploy.
      */
     public static final String HIBACHI_MODIFY_VIA_WS = "hibachi.modify.via.ws";
+    /**
+     * When {@code true} (default), {@link com.fueledbychai.broker.hibachi.HibachiBroker#placeOrder}
+     * routes through the trade WebSocket ({@code order.place}). Set to {@code false} to
+     * route through the REST {@code POST /trade/order} endpoint instead — useful when
+     * the WS gateway is misbehaving or for A/B testing the two paths.
+     */
+    public static final String HIBACHI_PLACE_VIA_WS = "hibachi.place.via.ws";
+    /**
+     * Horizon (seconds) added to the order's nonce-derived send time to compute
+     * {@code creationDeadline} on each place/modify. Hibachi appears to interpret
+     * an absent or near-term {@code creationDeadline} as grounds to self-cancel
+     * the order with {@code reason=USER_CANCELED} a few hundred ms after it
+     * lands. Default is 24h.
+     */
+    public static final String HIBACHI_ORDER_DEADLINE_SECONDS = "hibachi.order.deadline.seconds";
 
     private static final String DEFAULT_ENVIRONMENT = "prod";
     private static final String DEFAULT_PROD_REST_URL = "https://api.hibachi.xyz";
@@ -56,6 +71,7 @@ public class HibachiConfiguration {
     // Hibachi fee schedule (as of the integration work): maker = 0 bps, taker = 5 bps.
     // maxFeesPercent is a cap, so default to the taker rate (0.05% = 5 bps) to cover both sides.
     private static final BigDecimal DEFAULT_ORDER_MAX_FEES_PERCENT = new BigDecimal("0.05");
+    private static final long DEFAULT_ORDER_DEADLINE_SECONDS = 86_400L;
 
     private static volatile HibachiConfiguration instance;
     private static final Object LOCK = new Object();
@@ -78,6 +94,8 @@ public class HibachiConfiguration {
     private final long wsReconnectMaxBackoffMs;
     private final BigDecimal orderMaxFeesPercent;
     private final boolean modifyViaWebSocket;
+    private final boolean placeViaWebSocket;
+    private final long orderDeadlineSeconds;
 
     public static HibachiConfiguration getInstance() {
         if (instance == null) {
@@ -122,7 +140,9 @@ public class HibachiConfiguration {
         this.wsReconnectMaxBackoffMs = readLong(HIBACHI_WS_RECONNECT_MAX_BACKOFF_MS,
                 DEFAULT_WS_RECONNECT_MAX_BACKOFF_MS);
         this.orderMaxFeesPercent = readBigDecimal(HIBACHI_ORDER_MAX_FEES_PERCENT, DEFAULT_ORDER_MAX_FEES_PERCENT);
-        this.modifyViaWebSocket = readBoolean(HIBACHI_MODIFY_VIA_WS, false);
+        this.modifyViaWebSocket = readBoolean(HIBACHI_MODIFY_VIA_WS, true);
+        this.placeViaWebSocket = readBoolean(HIBACHI_PLACE_VIA_WS, true);
+        this.orderDeadlineSeconds = readLong(HIBACHI_ORDER_DEADLINE_SECONDS, DEFAULT_ORDER_DEADLINE_SECONDS);
     }
 
     private static String read(String key, String defaultValue) {
@@ -193,6 +213,8 @@ public class HibachiConfiguration {
     public long getWsReconnectMaxBackoffMs() { return wsReconnectMaxBackoffMs; }
     public BigDecimal getOrderMaxFeesPercent() { return orderMaxFeesPercent; }
     public boolean isModifyViaWebSocket() { return modifyViaWebSocket; }
+    public boolean isPlaceViaWebSocket() { return placeViaWebSocket; }
+    public long getOrderDeadlineSeconds() { return orderDeadlineSeconds; }
 
     public boolean hasPrivateApiConfiguration() {
         return apiKey != null && !apiKey.isBlank()

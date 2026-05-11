@@ -43,6 +43,7 @@ public class HibachiTranslator {
                                         HibachiContract contract,
                                         long accountId,
                                         long nonce,
+                                        long creationDeadlineMicros,
                                         BigDecimal maxFeesPercent,
                                         IHibachiSigner signer) {
         if (order == null) throw new IllegalArgumentException("order is required");
@@ -74,6 +75,14 @@ public class HibachiTranslator {
         HibachiOrderFlag flag = toFlag(order);
         if (flag != null) {
             params.put("orderFlags", flag.getWireValue());
+        }
+        // creationDeadline is JSON-only (not in signed bytes). Microseconds
+        // since epoch — same unit as nonce. The venue compares it against its
+        // process_time in micros and rejects with errorCode=4 / "Creation
+        // deadline exceeded" when smaller; a far-future value lets the order
+        // rest until normal cancel/fill.
+        if (creationDeadlineMicros > 0L) {
+            params.put("creationDeadline", creationDeadlineMicros);
         }
         params.put("accountId", accountId);
         // Echo the caller's clientOrderId as Hibachi's optional `clientId`.
@@ -115,6 +124,7 @@ public class HibachiTranslator {
                                          HibachiContract contract,
                                          long accountId,
                                          long nonce,
+                                         long creationDeadlineMicros,
                                          BigDecimal maxFeesPercent,
                                          IHibachiSigner signer) {
         if (order == null) throw new IllegalArgumentException("order is required");
@@ -156,6 +166,11 @@ public class HibachiTranslator {
             params.put("updatedPrice", price.toPlainString());
         }
         params.put("maxFeesPercent", maxFeesPercent.toPlainString());
+        // Refresh the order's deadline on every modify so the venue doesn't
+        // self-cancel mid-life. JSON-only, not in signed bytes.
+        if (creationDeadlineMicros > 0L) {
+            params.put("creationDeadline", creationDeadlineMicros);
+        }
         return new SignedRequest(signedBytes, params, signature);
     }
 

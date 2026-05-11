@@ -252,6 +252,19 @@ public class HibachiRestApi extends BaseRestApi implements IHibachiRestApi {
     }
 
     @Override
+    public JsonNode placeOrder(Map<String, Object> body) {
+        requirePrivateApi();
+        if (body == null) {
+            throw new IllegalArgumentException("body is required");
+        }
+        Map<String, Object> effective = new LinkedHashMap<>(body);
+        if (accountId != null && !accountId.isBlank()) {
+            effective.putIfAbsent("accountId", accountId);
+        }
+        return privatePostJson(tradingBaseUrl, "/trade/order", effective);
+    }
+
+    @Override
     public JsonNode getCapitalBalance() {
         requirePrivateApi();
         return privateRequest(tradingBaseUrl, "/capital/balance", null);
@@ -460,6 +473,26 @@ public class HibachiRestApi extends BaseRestApi implements IHibachiRestApi {
         Request.Builder builder = new Request.Builder()
                 .url(baseUrl + path)
                 .put(requestBody)
+                .addHeader("Authorization", apiKey)
+                .addHeader("Hibachi-Client", hibachiClient)
+                .addHeader("Accept", "application/json")
+                .addHeader("Content-Type", "application/json");
+        return execute(builder.build());
+    }
+
+    /** POST a JSON body to a private trading endpoint. Same auth + content-type
+     *  handling as {@link #privatePutJson}; used by {@link #placeOrder(Map)}. */
+    protected JsonNode privatePostJson(String baseUrl, String path, Map<String, Object> body) {
+        String json;
+        try {
+            json = objectMapper.writeValueAsString(body == null ? Collections.emptyMap() : body);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new RuntimeException("Failed to serialize Hibachi request body", e);
+        }
+        RequestBody requestBody = RequestBody.create(json, null);
+        Request.Builder builder = new Request.Builder()
+                .url(baseUrl + path)
+                .post(requestBody)
                 .addHeader("Authorization", apiKey)
                 .addHeader("Hibachi-Client", hibachiClient)
                 .addHeader("Accept", "application/json")
