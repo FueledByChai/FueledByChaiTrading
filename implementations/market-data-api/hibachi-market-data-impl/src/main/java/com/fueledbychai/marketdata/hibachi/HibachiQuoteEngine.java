@@ -100,6 +100,21 @@ public class HibachiQuoteEngine extends QuoteEngine {
     protected volatile ScheduledExecutorService reconnectScheduler;
     protected final java.util.concurrent.atomic.AtomicInteger reconnectAttempt =
             new java.util.concurrent.atomic.AtomicInteger(0);
+    // Pending reconnect task — used to dedup. If non-null and not done, a
+    // reconnect is already scheduled and additional scheduleReconnect() calls
+    // are no-ops. Without this, the 2026-05-20 V4 cascade fired ~163
+    // overlapping reconnects within seconds: each close event scheduled a new
+    // task without checking whether one was already pending, and the
+    // tearDownPartialClient() call inside attemptReconnect() itself triggers
+    // onMarketWsClosed for the old client which would schedule yet another.
+    protected volatile java.util.concurrent.ScheduledFuture<?> reconnectTask;
+    // Generation counter incremented every time a new market WS client is
+    // created. The close-listener captures the generation at creation time;
+    // when a close event fires for a stale (already-replaced) client it's
+    // ignored. Prevents tearDownPartialClient()'s close from triggering a
+    // reconnect cascade as the old client is being intentionally retired.
+    protected final java.util.concurrent.atomic.AtomicLong clientGeneration =
+            new java.util.concurrent.atomic.AtomicLong(0L);
 
     public HibachiQuoteEngine() {
         this(ExchangeRestApiFactory.getPublicApi(Exchange.HIBACHI, IHibachiRestApi.class),
@@ -255,8 +270,12 @@ public class HibachiQuoteEngine extends QuoteEngine {
         if (marketClient != null && marketClient.isOpen()) {
             return true;
         }
+        // Capture this client's generation BEFORE constructing the processor —
+        // the close-listener uses it to ignore close events for already-
+        // superseded clients (see clientGeneration field docs).
+        long gen = clientGeneration.incrementAndGet();
         try {
-            marketProcessor = new HibachiJsonProcessor(this::onMarketWsClosed);
+            marketProcessor = new HibachiJsonProcessor(() -> onMarketWsClosed(gen));
             marketProcessor.addEventListener(this::onMarketMessage);
             marketClient = HibachiWebSocketClient.createMarket(
                     config.getMarketWsUrl(), marketProcessor, config.getClient(), null);
@@ -318,8 +337,24 @@ public class HibachiQuoteEngine extends QuoteEngine {
         }
     }
 
-    protected void onMarketWsClosed() {
+    /**
+     * Close-event handler for a specific market WS client. The {@code gen}
+     * argument is the {@link #clientGeneration} value at the time the
+     * processor was constructed in {@link #ensureMarketClient}. If a later
+     * client has already superseded this one (e.g. because we called
+     * {@link #tearDownPartialClient} as part of an in-flight reconnect),
+     * the stale-client close fires here AFTER the new client is live —
+     * ignoring those events is the only way to avoid the 2026-05-20
+     * reconnect cascade where every tearDown triggered a fresh
+     * scheduleReconnect that ran concurrently with the in-flight attempt.
+     */
+    protected void onMarketWsClosed(long gen) {
         if (!started) {
+            return;
+        }
+        long current = clientGeneration.get();
+        if (gen != current) {
+            // Stale close event — already replaced. Don't schedule.
             return;
         }
         int attempts = reconnectAttempt.get();
@@ -333,9 +368,18 @@ public class HibachiQuoteEngine extends QuoteEngine {
      * The attempt counter reads while scheduling (so the very first retry after
      * a healthy session has no delay growth) and resets to 0 once a reconnect
      * succeeds in {@link #attemptReconnect()}.
+     *
+     * <p>Deduplicates pending reconnects via {@link #reconnectTask}: if a
+     * task is already scheduled and not yet done, additional calls are
+     * no-ops. Without this, every close event + every internal failure
+     * path queued a new task, producing the 2026-05-20 V4 fan-out.
      */
     protected synchronized void scheduleReconnect() {
         if (!started) {
+            return;
+        }
+        if (reconnectTask != null && !reconnectTask.isDone()) {
+            // Already pending — don't pile on.
             return;
         }
         if (reconnectScheduler == null || reconnectScheduler.isShutdown()) {
@@ -349,7 +393,7 @@ public class HibachiQuoteEngine extends QuoteEngine {
         // Backoff: 500ms, 1s, 2s, 4s, 8s, 16s, 30s (capped), 30s, ...
         long delayMs = Math.min(RECONNECT_MAX_DELAY_MS,
                 RECONNECT_INITIAL_DELAY_MS * (1L << Math.min(attempt - 1, 6)));
-        reconnectScheduler.schedule(this::attemptReconnect, delayMs, TimeUnit.MILLISECONDS);
+        reconnectTask = reconnectScheduler.schedule(this::attemptReconnect, delayMs, TimeUnit.MILLISECONDS);
     }
 
     /**
