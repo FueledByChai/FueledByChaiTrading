@@ -231,9 +231,29 @@ public class HibachiQuoteEngine extends QuoteEngine {
 
     // ---------- WS plumbing ----------
 
-    protected synchronized void ensureMarketClient() {
+    /**
+     * Idempotently bring the market WS client to an open state. Returns
+     * {@code true} if the client is open on return, {@code false} otherwise.
+     *
+     * <p><b>Non-throwing</b> (as of 2026-05-20). If the connect attempt fails
+     * for any reason (timeout, network down, venue rejecting connections),
+     * this method logs the failure at WARN, schedules an async reconnect via
+     * the standard backoff path, and returns {@code false}. Callers that
+     * need to know the current state should check {@link #isConnected()} or
+     * the return value here.
+     *
+     * <p><b>Why non-throwing</b>: previously a venue-down at app startup
+     * threw out of {@code startEngine()} → propagated through
+     * {@code initStrategy()} → crashed the Spring boot. The 2026-05-20
+     * Hibachi recurrence showed this in production. Market makers running
+     * 24/7 on venues prone to transient outages need the app to start,
+     * park itself, and recover when the venue comes back — not refuse to
+     * boot until someone manually intervenes. Existing feed-staleness
+     * checks downstream prevent any quoting attempts while the WS is dead.
+     */
+    protected synchronized boolean ensureMarketClient() {
         if (marketClient != null && marketClient.isOpen()) {
-            return;
+            return true;
         }
         try {
             marketProcessor = new HibachiJsonProcessor(this::onMarketWsClosed);
@@ -241,14 +261,42 @@ public class HibachiQuoteEngine extends QuoteEngine {
             marketClient = HibachiWebSocketClient.createMarket(
                     config.getMarketWsUrl(), marketProcessor, config.getClient(), null);
             if (!marketClient.connectBlocking(10, TimeUnit.SECONDS)) {
-                throw new IllegalStateException("Timed out connecting to Hibachi market WS at "
-                        + config.getMarketWsUrl());
+                logger.warn("Timed out connecting to Hibachi market WS at {}; scheduling reconnect",
+                        config.getMarketWsUrl());
+                tearDownPartialClient();
+                if (started) scheduleReconnect();
+                return false;
             }
+            return true;
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted connecting to Hibachi market WS", ie);
+            logger.warn("Interrupted connecting to Hibachi market WS; scheduling reconnect");
+            tearDownPartialClient();
+            if (started) scheduleReconnect();
+            return false;
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to create Hibachi market WS client", e);
+            logger.warn("Failed to create Hibachi market WS client: {}; scheduling reconnect", e.toString());
+            tearDownPartialClient();
+            if (started) scheduleReconnect();
+            return false;
+        }
+    }
+
+    /**
+     * Drop any partially-initialized client/processor state from a failed
+     * connect attempt so the next try starts clean. Called by
+     * {@link #ensureMarketClient} on every failure path.
+     */
+    private void tearDownPartialClient() {
+        HibachiWebSocketClient stale = marketClient;
+        HibachiJsonProcessor staleProc = marketProcessor;
+        marketClient = null;
+        marketProcessor = null;
+        if (stale != null) {
+            try { stale.close(); } catch (Exception ignored) {}
+        }
+        if (staleProc != null) {
+            try { staleProc.shutdown(); } catch (Exception ignored) {}
         }
     }
 
@@ -334,24 +382,12 @@ public class HibachiQuoteEngine extends QuoteEngine {
         }
         // Drop the dead client & processor. ensureMarketClient() only
         // rebuilds if marketClient is null or closed, so we null them first.
-        HibachiWebSocketClient stale = marketClient;
-        HibachiJsonProcessor staleProcessor = marketProcessor;
-        marketClient = null;
-        marketProcessor = null;
-        if (stale != null) {
-            try { stale.close(); } catch (Exception ignored) {}
-        }
-        if (staleProcessor != null) {
-            staleProcessor.shutdown();
-        }
+        tearDownPartialClient();
 
-        try {
-            ensureMarketClient();
-        } catch (Exception e) {
-            // Subscriptions preserved — next attempt will see them and try again.
-            logger.warn("Hibachi market WS reconnect attempt {} failed: {} (subscriptions preserved: {})",
-                    reconnectAttempt.get(), e.toString(), activeSubscriptions.size());
-            scheduleReconnect();
+        if (!ensureMarketClient()) {
+            // ensureMarketClient already logged + scheduled the next attempt.
+            // Subscriptions stay intact because we haven't touched the set yet —
+            // see the 2026-05-19 outage note in this file.
             return;
         }
 
