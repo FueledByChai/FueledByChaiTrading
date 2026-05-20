@@ -309,35 +309,61 @@ public class HibachiQuoteEngine extends QuoteEngine {
      * every topic that was subscribed before the disconnect. If the rebuild
      * itself fails, logs and re-schedules another attempt on the same backoff
      * curve.
+     *
+     * <p><b>Subscription preservation</b>: the prior implementation snapshotted
+     * {@code activeSubscriptions}, cleared the set, then called
+     * {@code ensureMarketClient()}. If that call threw (e.g., "Failed to
+     * create Hibachi market WS client"), the snapshot was lost on the
+     * exception-return and the cleared set stayed empty. The next reconnect
+     * attempt then snapshotted an empty set, and on indefinitely — so when
+     * a reconnect FINALLY succeeded, "replayed 0 subscription(s)" was the
+     * result and the algo got a silently-healthy WS with zero data flow.
+     * Caused the 2026-05-19 Hibachi outage to look like a successful
+     * recovery from the broker side while quoting silently went dark.
+     *
+     * <p>Fix: don't touch {@code activeSubscriptions} until the new client
+     * is confirmed open. If {@code ensureMarketClient} throws, the set is
+     * untouched and the next attempt has the full subscription list to
+     * replay. The clear happens AFTER the new client exists and IMMEDIATELY
+     * before the replay loop, preserving the original "subscribeTopic is
+     * a no-op if already in set" guard.
      */
     protected synchronized void attemptReconnect() {
         if (!started) {
             return;
         }
+        // Drop the dead client & processor. ensureMarketClient() only
+        // rebuilds if marketClient is null or closed, so we null them first.
+        HibachiWebSocketClient stale = marketClient;
+        HibachiJsonProcessor staleProcessor = marketProcessor;
+        marketClient = null;
+        marketProcessor = null;
+        if (stale != null) {
+            try { stale.close(); } catch (Exception ignored) {}
+        }
+        if (staleProcessor != null) {
+            staleProcessor.shutdown();
+        }
+
         try {
-            // Drop the dead client & processor. ensureMarketClient() only
-            // rebuilds if marketClient is null or closed, so we null them first.
-            HibachiWebSocketClient stale = marketClient;
-            HibachiJsonProcessor staleProcessor = marketProcessor;
-            marketClient = null;
-            marketProcessor = null;
-            if (stale != null) {
-                try { stale.close(); } catch (Exception ignored) {}
-            }
-            if (staleProcessor != null) {
-                staleProcessor.shutdown();
-            }
-
-            // Snapshot subscriptions before clearing — subscribeTopic() is a
-            // no-op when the SubKey is already present, so we have to clear
-            // the set before replaying or nothing gets sent over the new wire.
-            List<SubKey> toReplay = new ArrayList<>(activeSubscriptions);
-            activeSubscriptions.clear();
-
             ensureMarketClient();
+        } catch (Exception e) {
+            // Subscriptions preserved — next attempt will see them and try again.
+            logger.warn("Hibachi market WS reconnect attempt {} failed: {} (subscriptions preserved: {})",
+                    reconnectAttempt.get(), e.toString(), activeSubscriptions.size());
+            scheduleReconnect();
+            return;
+        }
 
-            int replayed = 0;
-            for (SubKey key : toReplay) {
+        // Client is open. NOW it's safe to clear-then-replay; subscribeTopic
+        // is a no-op when the SubKey is still present, so we have to clear
+        // the set before replaying or nothing gets sent on the new wire.
+        List<SubKey> toReplay = new ArrayList<>(activeSubscriptions);
+        activeSubscriptions.clear();
+
+        int replayed = 0;
+        for (SubKey key : toReplay) {
+            try {
                 Ticker ticker = lookupTicker(key.symbol);
                 if (ticker == null) {
                     logger.warn("Cannot replay Hibachi subscription: ticker not found for symbol={} topic={}",
@@ -346,13 +372,21 @@ public class HibachiQuoteEngine extends QuoteEngine {
                 }
                 subscribeTopic(ticker, key.topic);
                 replayed++;
+            } catch (Exception e) {
+                logger.warn("Failed to replay Hibachi subscription symbol={} topic={}: {}",
+                        key.symbol, key.topic, e.toString());
             }
-            reconnectAttempt.set(0);
-            logger.info("Hibachi market WS reconnected; replayed {} subscription(s)", replayed);
-        } catch (Exception e) {
-            logger.warn("Hibachi market WS reconnect attempt {} failed: {}",
-                    reconnectAttempt.get(), e.toString());
-            scheduleReconnect();
+        }
+        reconnectAttempt.set(0);
+        if (toReplay.isEmpty()) {
+            // Empty toReplay AFTER the new client is open means we never had
+            // subscriptions in the first place — bootstrap from scratch path,
+            // or a startup race. Log louder so a "successful" reconnect with
+            // no data flow doesn't look healthy.
+            logger.warn("Hibachi market WS reconnected with NO subscriptions to replay — feed will be silent until a fresh subscribe() call");
+        } else {
+            logger.info("Hibachi market WS reconnected; replayed {} of {} subscription(s)",
+                    replayed, toReplay.size());
         }
     }
 
