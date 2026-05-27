@@ -88,6 +88,24 @@ public class HibachiQuoteEngine extends QuoteEngine {
     }
 
     protected final java.util.Map<String, BookState> bookBySymbol = new ConcurrentHashMap<>();
+
+    // Trade-vs-book mismatch telemetry (kept after the L1 sanity checker was
+    // removed 2026-05-27). Hibachi's WS pulses L1 and trades on the same
+    // 250ms heartbeat but snapshots them at different points within the
+    // window, so trade-inside-book is structural and not evidence of a
+    // stale L1. We still count the rate of these events for the support
+    // tickets we send to Hibachi. Per-symbol last-known top-of-book is
+    // recorded as L1 fires; emitTrade compares against it.
+    private static final class FeedConsistencyState {
+        volatile BigDecimal lastBid;
+        volatile BigDecimal lastAsk;
+        final java.util.concurrent.atomic.AtomicLong mismatchCount =
+                new java.util.concurrent.atomic.AtomicLong();
+        volatile long lastLogMs = 0L;
+    }
+    private static final long MISMATCH_LOG_THROTTLE_MS = 60_000L;
+    private final java.util.Map<String, FeedConsistencyState> feedConsistency = new ConcurrentHashMap<>();
+
     protected volatile ScheduledFuture<?> volumeTask;
 
     // Auto-reconnect state. First retry is ~500ms for fast recovery from
@@ -512,9 +530,21 @@ public class HibachiQuoteEngine extends QuoteEngine {
         if (ask != null) { quote.addQuote(QuoteType.ASK, ask); any = true; }
         BigDecimal askSize = decimal(data, "askSize");
         if (askSize != null) { quote.addQuote(QuoteType.ASK_SIZE, askSize); any = true; }
-        if (any) {
-            fireLevel1Quote(quote);
+        if (!any) return;
+        // Cache the latest top-of-book per symbol so trade events can
+        // detect inside-spread prints for telemetry. The earlier
+        // suppression behavior (HibachiL1SanityChecker) was removed
+        // 2026-05-27: per Hibachi, both L1 and trades pulse on the same
+        // 250ms heartbeat but snapshot at different points within the
+        // window, so trade-inside-spread is structural and rejecting L1
+        // updates on it was froze the cache without value.
+        if (bid != null && ask != null) {
+            FeedConsistencyState state = feedConsistency.computeIfAbsent(
+                    ticker.getSymbol(), k -> new FeedConsistencyState());
+            state.lastBid = bid;
+            state.lastAsk = ask;
         }
+        fireLevel1Quote(quote);
     }
 
     protected void onMarkPriceUpdate(Ticker ticker, JsonNode message) {
@@ -627,6 +657,32 @@ public class HibachiQuoteEngine extends QuoteEngine {
         ZonedDateTime ts = toTimestamp(trade, "timestamp_ms");
         OrderFlow flow = new OrderFlow(ticker, price, size, side, ts);
         fireOrderFlow(flow);
+
+        // Trade-vs-book mismatch telemetry. Count trades whose price lands
+        // strictly inside the most recent cached top-of-book on the same WS
+        // connection. Under Hibachi's 250ms pulsed architecture these are
+        // structural (trade and book streams snapshot at different points
+        // in the same window), not a stale-feed bug — but we still log the
+        // rate so we can keep the evidence current for Hibachi support and
+        // monitor for sudden changes.
+        FeedConsistencyState fcState = feedConsistency.get(ticker.getSymbol());
+        if (fcState != null) {
+            BigDecimal lastBid = fcState.lastBid;
+            BigDecimal lastAsk = fcState.lastAsk;
+            if (lastBid != null && lastAsk != null
+                    && price.compareTo(lastBid) > 0
+                    && price.compareTo(lastAsk) < 0) {
+                long count = fcState.mismatchCount.incrementAndGet();
+                long now = System.currentTimeMillis();
+                if (now - fcState.lastLogMs >= MISMATCH_LOG_THROTTLE_MS) {
+                    fcState.lastLogMs = now;
+                    logger.info(
+                            "Hibachi trade-inside-book for {}: trade {} inside cached [{}, {}] (cumulative_mismatches={})",
+                            ticker.getSymbol(), price.toPlainString(),
+                            lastBid.toPlainString(), lastAsk.toPlainString(), count);
+                }
+            }
+        }
 
         Level1Quote lastQuote = new Level1Quote(ticker, ts);
         lastQuote.addQuote(QuoteType.LAST, price);
