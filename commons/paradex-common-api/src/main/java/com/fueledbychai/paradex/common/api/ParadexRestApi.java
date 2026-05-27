@@ -1461,7 +1461,14 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
             Ticker ticker = TickerRegistryFactory.getInstance(Exchange.PARADEX)
                     .lookupByBrokerSymbol(InstrumentType.PERPETUAL_FUTURES, tickerString);
             Position position = new Position(ticker);
-            position.setSize(new BigDecimal(inventory));
+            // Paradex returns a SIGNED size (e.g. "-0.9" for a 0.9 short). The
+            // FBC Position contract — and every other broker parser
+            // (Hibachi etc.) — stores size as unsigned magnitude with the
+            // direction conveyed by `side`. Storing the signed value here
+            // caused downstream consumers (chaiwala startup) to double-negate
+            // SHORT positions into LONG. Strip the sign at the parser to
+            // restore the convention.
+            position.setSize(new BigDecimal(inventory).abs());
             position.setLiquidationPrice(new BigDecimal(liquidationPrice));
             position.setAverageCost(new BigDecimal(cost_usd));
             position.setSide(Side.valueOf(side.toUpperCase()));
