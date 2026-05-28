@@ -30,9 +30,11 @@ import com.fueledbychai.hibachi.common.api.ws.trade.HibachiTradeEnvelope;
  *   <li>The persistent trade WS connection (signed-payload order ops)</li>
  *   <li>A correlation map ({@code id} → {@link CompletableFuture}) for request/response</li>
  *   <li>A small fanout for unsolicited order-status frames</li>
- *   <li>A heartbeat that sends a WS-level ping every
- *       {@link HibachiConfiguration#getTradeWsPingSeconds()} seconds (Hibachi closes idle
- *       trade WS connections at ~60s)</li>
+ *   <li>An application-level keepalive (orders.status) every
+ *       {@link HibachiConfiguration#getTradeWsPingSeconds()} seconds. Hibachi closes idle
+ *       trade WS connections at ~60s and does NOT count WS-level PING frames as activity
+ *       — confirmed live 2026-05-28 by comparing against the account stream's
+ *       application-level `stream.ping` which keeps that connection alive indefinitely.</li>
  *   <li>Auto-reconnect with exponential backoff on unexpected close</li>
  * </ul>
  *
@@ -265,10 +267,24 @@ public class HibachiTradeWebSocketClient {
         if (c == null || !c.isOpen()) {
             return;
         }
+        // Hibachi's trade WS server closes connections after ~60s of no
+        // APPLICATION-LEVEL activity. WS-level PING frames (the prior
+        // c.sendPing() implementation) do NOT count as activity — observed
+        // live 2026-05-28 with the trade WS bouncing every 60s while the
+        // account stream (which uses application-level `stream.ping`) stayed
+        // up indefinitely. Mirror the account-stream pattern by sending the
+        // cheapest documented no-side-effect trade method (`orders.status`)
+        // as the keepalive. Response is bounded by open-order count and goes
+        // through the normal id-correlation path (with no pending future
+        // registered, so the response is consumed and discarded).
         try {
-            c.sendPing();
+            long id = HibachiTradeEnvelope.nextCorrelationId();
+            String message = HibachiTradeEnvelope.buildOrdersStatus(id, accountId);
+            logger.debug("Hibachi trade WS keepalive -> orders.status id={}", id);
+            c.send(message);
         } catch (Exception e) {
-            logger.warn("Hibachi trade WS ping failed; will rely on close handler to reconnect", e);
+            logger.warn("Hibachi trade WS application-level keepalive failed; "
+                    + "relying on close handler to reconnect", e);
         }
     }
 
