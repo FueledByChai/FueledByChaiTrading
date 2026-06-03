@@ -280,6 +280,24 @@ public class OrderBook implements IOrderBook {
     }
 
     @Override
+    public synchronized List<BidSizePair> getBids(int depth) {
+        return buySide.aggregateOrders(tickSize).entrySet().stream()
+                .sorted((e1, e2) -> e2.getKey().compareTo(e1.getKey())) // descending: best bid first
+                .limit(Math.max(0, depth))
+                .map(e -> new BidSizePair(e.getKey(), e.getValue()))
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public synchronized List<BidSizePair> getAsks(int depth) {
+        return sellSide.aggregateOrders(tickSize).entrySet().stream()
+                .sorted(Map.Entry.comparingByKey()) // ascending: best ask first
+                .limit(Math.max(0, depth))
+                .map(e -> new BidSizePair(e.getKey(), e.getValue()))
+                .collect(Collectors.toList());
+    }
+
+    @Override
     public BigDecimal getMidpoint() {
         return getMidpoint(tickSize);
     }

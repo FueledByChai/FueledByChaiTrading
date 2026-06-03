@@ -51,6 +51,28 @@ public interface IOrderBook {
 
     BidSizePair getBestAsk(BigDecimal tickSize);
 
+    /**
+     * Top {@code depth} bid levels, best (highest price) first. Lets callers see
+     * past the touch — e.g. to compute the market spread with their own resting
+     * orders removed. The default implementation returns only the BBO so existing
+     * {@link IOrderBook} implementors (mocks/tests) keep compiling; the real
+     * {@code OrderBook} overrides it with true depth.
+     */
+    default List<BidSizePair> getBids(int depth) {
+        BidSizePair b = getBestBid();
+        return (b == null || b.price == null) ? java.util.Collections.emptyList()
+                : java.util.Collections.singletonList(b);
+    }
+
+    /**
+     * Top {@code depth} ask levels, best (lowest price) first. See {@link #getBids(int)}.
+     */
+    default List<BidSizePair> getAsks(int depth) {
+        BidSizePair a = getBestAsk();
+        return (a == null || a.price == null) ? java.util.Collections.emptyList()
+                : java.util.Collections.singletonList(a);
+    }
+
     BigDecimal getMidpoint();
 
     BigDecimal getMidpoint(BigDecimal tickSize);
