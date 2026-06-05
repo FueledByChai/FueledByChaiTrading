@@ -85,6 +85,13 @@ public class HibachiQuoteEngine extends QuoteEngine {
         final java.util.TreeMap<BigDecimal, BigDecimal> bids =
                 new java.util.TreeMap<>(java.util.Comparator.reverseOrder());
         final java.util.TreeMap<BigDecimal, BigDecimal> asks = new java.util.TreeMap<>();
+        // Last top-of-book emitted as a book-derived L1 quote (live_book mode),
+        // so we only fire L1 when the touch actually changes — not on every
+        // 5ms book frame.
+        BigDecimal lastEmitBid;
+        BigDecimal lastEmitBidSize;
+        BigDecimal lastEmitAsk;
+        BigDecimal lastEmitAskSize;
     }
 
     protected final java.util.Map<String, BookState> bookBySymbol = new ConcurrentHashMap<>();
@@ -231,7 +238,14 @@ public class HibachiQuoteEngine extends QuoteEngine {
         requireTicker(ticker);
         super.subscribeMarketDepth(ticker, listener);
         ensureMarketClient();
-        subscribeTopic(ticker, HibachiTopicRouter.LEVEL2_TOPIC);
+        // MM-partner live_book channel (~5ms, 10 levels) when enabled, else the
+        // standard ~250-300ms orderbook. Same message schema → same handler.
+        String depthTopic = config.isMarketDataLiveBook()
+                ? HibachiTopicRouter.TOPIC_LIVE_BOOK
+                : HibachiTopicRouter.LEVEL2_TOPIC;
+        logger.info("Hibachi L2 depth feed for {}: topic={} ({})", ticker.getSymbol(), depthTopic,
+                config.isMarketDataLiveBook() ? "live_book ~5ms" : "orderbook ~250-300ms");
+        subscribeTopic(ticker, depthTopic);
     }
 
     @Override
@@ -509,6 +523,8 @@ public class HibachiQuoteEngine extends QuoteEngine {
                 case HibachiTopicRouter.TOPIC_ASK_BID_PRICE -> onAskBidUpdate(ticker, message);
                 case HibachiTopicRouter.TOPIC_MARK_PRICE -> onMarkPriceUpdate(ticker, message);
                 case HibachiTopicRouter.TOPIC_ORDERBOOK -> onOrderBookUpdate(ticker, message);
+                // live_book shares the orderbook schema (snapshot/delta levels) → same handler.
+                case HibachiTopicRouter.TOPIC_LIVE_BOOK -> onOrderBookUpdate(ticker, message);
                 case HibachiTopicRouter.TOPIC_TRADES -> onTradesUpdate(ticker, message);
                 case HibachiTopicRouter.TOPIC_FUNDING_RATE_ESTIMATION -> onFundingRateUpdate(ticker, message);
                 default -> { /* unhandled topic */ }
@@ -576,6 +592,18 @@ public class HibachiQuoteEngine extends QuoteEngine {
             }
             applyLevelDeltas(state.bids, data.path("bid").path("levels"));
             applyLevelDeltas(state.asks, data.path("ask").path("levels"));
+            // live_book is a BOUNDED 10-level window per side: Update frames
+            // only carry changes WITHIN [startPrice,endPrice] and never send a
+            // qty=0 removal for levels that scroll out of the window. Without
+            // trimming, those stale out-of-window levels persist in the
+            // TreeMap and, once price moves, become the "best" on their side —
+            // crossing the book by 100+ bps. Prune each side to the window the
+            // frame reports so only live levels remain. (Standard orderbook
+            // feed is unaffected — gated on live_book.)
+            if (config.isMarketDataLiveBook()) {
+                pruneToWindow(state.bids, data.path("bid"));
+                pruneToWindow(state.asks, data.path("ask"));
+            }
             // Snapshots without any levels (rare but seen on reconnect) leave
             // both sides empty — skip the publish so we don't push a zero book
             // downstream that would crater OBI / midpoint.
@@ -586,7 +614,83 @@ public class HibachiQuoteEngine extends QuoteEngine {
             ZonedDateTime timestamp = toTimestamp(message, "timestamp_ms");
             orderBook.updateFromSnapshot(toLevels(state.bids), toLevels(state.asks), timestamp);
             fireMarketDepthQuote(new Level2Quote(ticker, orderBook, timestamp));
+            // live_book mode: the book IS the fast feed (~5ms), so derive
+            // top-of-book L1 from it rather than lagging on the ~300ms
+            // ask_bid_price topic. No-op when live_book is off (standard
+            // orderbook feed) → L1 keeps coming solely from ask_bid_price.
+            if (config.isMarketDataLiveBook()) {
+                emitBookDerivedL1(ticker, state, timestamp);
+            }
         }
+    }
+
+    /**
+     * Derive a top-of-book L1 quote from the current order book (live_book
+     * mode). Fires only when the touch (price or size, either side) actually
+     * changes, so a 5ms book that mostly republishes the same top doesn't
+     * spam L1 at 200Hz. Caller holds the {@link BookState} lock.
+     */
+    private void emitBookDerivedL1(Ticker ticker, BookState state, ZonedDateTime timestamp) {
+        BigDecimal bid = state.bids.isEmpty() ? null : state.bids.firstKey();
+        BigDecimal ask = state.asks.isEmpty() ? null : state.asks.firstKey();
+        if (bid == null && ask == null) {
+            return;
+        }
+        // Safety net: never publish a crossed/locked top-of-book as L1. The
+        // window-prune above should keep the book uncrossed, but if a stale
+        // level ever slips through, holding the last good L1 beats pushing a
+        // bid >= ask downstream (which craters fair value / OBI / quoting).
+        if (bid != null && ask != null && bid.compareTo(ask) >= 0) {
+            return;
+        }
+        BigDecimal bidSize = bid != null ? state.bids.get(bid) : null;
+        BigDecimal askSize = ask != null ? state.asks.get(ask) : null;
+        if (java.util.Objects.equals(bid, state.lastEmitBid)
+                && java.util.Objects.equals(ask, state.lastEmitAsk)
+                && java.util.Objects.equals(bidSize, state.lastEmitBidSize)
+                && java.util.Objects.equals(askSize, state.lastEmitAskSize)) {
+            return;
+        }
+        state.lastEmitBid = bid;
+        state.lastEmitBidSize = bidSize;
+        state.lastEmitAsk = ask;
+        state.lastEmitAskSize = askSize;
+        Level1Quote quote = new Level1Quote(ticker, timestamp);
+        if (bid != null) { quote.addQuote(QuoteType.BID, bid); }
+        if (bidSize != null) { quote.addQuote(QuoteType.BID_SIZE, bidSize); }
+        if (ask != null) { quote.addQuote(QuoteType.ASK, ask); }
+        if (askSize != null) { quote.addQuote(QuoteType.ASK_SIZE, askSize); }
+        // Keep the trade-inside-book telemetry anchored on the fresh top too.
+        if (bid != null && ask != null) {
+            FeedConsistencyState fc = feedConsistency.computeIfAbsent(
+                    ticker.getSymbol(), k -> new FeedConsistencyState());
+            fc.lastBid = bid;
+            fc.lastAsk = ask;
+        }
+        fireLevel1Quote(quote);
+    }
+
+    /**
+     * Trim a side to the [startPrice, endPrice] window the live_book frame
+     * reports. live_book keeps only {@code depth} levels per side and does NOT
+     * emit qty=0 removals for levels that scroll out of that window, so the
+     * accumulated TreeMap must be pruned to the live window each frame —
+     * otherwise stale far-side levels eventually cross the book. No-op if the
+     * frame doesn't carry usable window bounds (e.g. empty side on reconnect).
+     */
+    private static void pruneToWindow(java.util.TreeMap<BigDecimal, BigDecimal> side, JsonNode sideNode) {
+        pruneOutsideWindow(side, parseDecimal(sideNode.path("startPrice")),
+                parseDecimal(sideNode.path("endPrice")));
+    }
+
+    /** Remove levels outside [min(start,end), max(start,end)]; no-op on null bounds. Package-private for test. */
+    static void pruneOutsideWindow(java.util.TreeMap<BigDecimal, BigDecimal> side, BigDecimal start, BigDecimal end) {
+        if (side == null || side.isEmpty() || start == null || end == null) {
+            return;
+        }
+        BigDecimal lo = start.min(end);
+        BigDecimal hi = start.max(end);
+        side.keySet().removeIf(price -> price.compareTo(lo) < 0 || price.compareTo(hi) > 0);
     }
 
     private static void applyLevelDeltas(java.util.Map<BigDecimal, BigDecimal> side, JsonNode levels) {

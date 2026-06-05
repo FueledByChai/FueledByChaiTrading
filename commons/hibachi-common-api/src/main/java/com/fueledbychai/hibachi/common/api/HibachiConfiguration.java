@@ -51,6 +51,15 @@ public class HibachiConfiguration {
      * lands. Default is 24h.
      */
     public static final String HIBACHI_ORDER_DEADLINE_SECONDS = "hibachi.order.deadline.seconds";
+    /**
+     * When {@code true}, the market-data L2 subscription uses Hibachi's
+     * MM-partner {@code live_book} channel (10 levels delivered at ~5ms)
+     * instead of the standard {@code orderbook} channel (~250-300ms heartbeat).
+     * Same message schema and endpoint — only the topic name differs — so it
+     * routes through the existing order-book handler. Default {@code false}
+     * (standard feed). See [[Chaiwala-V6-Hibachi]] / [[project_hibachi_l1_feed_staleness]].
+     */
+    public static final String HIBACHI_MARKET_DATA_LIVE_BOOK = "hibachi.market.data.live.book";
 
     private static final String DEFAULT_ENVIRONMENT = "prod";
     private static final String DEFAULT_PROD_REST_URL = "https://api.hibachi.xyz";
@@ -96,6 +105,7 @@ public class HibachiConfiguration {
     private final boolean modifyViaWebSocket;
     private final boolean placeViaWebSocket;
     private final long orderDeadlineSeconds;
+    private final boolean marketDataLiveBook;
 
     public static HibachiConfiguration getInstance() {
         if (instance == null) {
@@ -143,6 +153,7 @@ public class HibachiConfiguration {
         this.modifyViaWebSocket = readBoolean(HIBACHI_MODIFY_VIA_WS, true);
         this.placeViaWebSocket = readBoolean(HIBACHI_PLACE_VIA_WS, true);
         this.orderDeadlineSeconds = readLong(HIBACHI_ORDER_DEADLINE_SECONDS, DEFAULT_ORDER_DEADLINE_SECONDS);
+        this.marketDataLiveBook = readBoolean(HIBACHI_MARKET_DATA_LIVE_BOOK, false);
     }
 
     private static String read(String key, String defaultValue) {
@@ -215,6 +226,7 @@ public class HibachiConfiguration {
     public boolean isModifyViaWebSocket() { return modifyViaWebSocket; }
     public boolean isPlaceViaWebSocket() { return placeViaWebSocket; }
     public long getOrderDeadlineSeconds() { return orderDeadlineSeconds; }
+    public boolean isMarketDataLiveBook() { return marketDataLiveBook; }
 
     public boolean hasPrivateApiConfiguration() {
         return apiKey != null && !apiKey.isBlank()

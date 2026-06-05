@@ -14,6 +14,13 @@ public final class HibachiTopicRouter {
     public static final String TOPIC_KLINES = "klines";
     public static final String TOPIC_ORDERBOOK = "orderbook";
     public static final String TOPIC_ASK_BID_PRICE = "ask_bid_price";
+    /**
+     * MM-partner-only L2 channel: 10 levels delivered at ~5ms (vs the
+     * ~250-300ms {@link #TOPIC_ORDERBOOK} heartbeat). Same message schema as
+     * {@code orderbook}, so it routes through the identical book handler.
+     * Selected via {@code hibachi.market.data.live.book=true}.
+     */
+    public static final String TOPIC_LIVE_BOOK = "live_book";
 
     /** Topics that compose the framework's Level1 snapshot for Hibachi. */
     public static final String[] LEVEL1_TOPICS = {
