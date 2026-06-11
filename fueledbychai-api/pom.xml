@@ -44,6 +44,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     <module>fueledbychai-real-time-bar-api</module>
     <module>fueledbychai-strategy-api</module>
     <module>fueledbychai-reporting-api</module>
+    <module>fueledbychai-data-recording-api</module>
   </modules>
   
 </project>

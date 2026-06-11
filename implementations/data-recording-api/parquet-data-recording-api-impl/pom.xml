@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.fueledbychai</groupId>
+    <artifactId>data-recording-api</artifactId>
+    <version>0.2.0-SNAPSHOT</version>
+  </parent>
+
+  <groupId>com.fueledbychai</groupId>
+  <artifactId>parquet-data-recording-api-impl</artifactId>
+  <version>0.2.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <name>parquet-data-recording-api-impl</name>
+  <description>Partitioned-Parquet MarketDataRecorder backed by Carpet (Java records -> Parquet).
+    Writes one file per (dataType, exchange, symbol, date) partition, rolling on size or
+    time; a daily compaction job merges each partition's parts into one sorted file.</description>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <carpet.version>0.7.1</carpet.version>
+  </properties>
+
+  <dependencies>
+    <!-- The recording contract: MarketDataRecorder + Recorded* record types. -->
+    <dependency>
+      <groupId>com.fueledbychai</groupId>
+      <artifactId>fueledbychai-data-recording-api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- Java records <-> Parquet. Pulls parquet-mr + hadoop-common transitively;
+         isolated to this storage impl so the contract module stays Hadoop-free. -->
+    <dependency>
+      <groupId>com.jerolba</groupId>
+      <artifactId>carpet-record</artifactId>
+      <version>${carpet.version}</version>
+    </dependency>
+
+    <!-- Test dependencies -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter-engine</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.0.0-M9</version>
+        <configuration>
+          <includes>
+            <include>**/*Test.java</include>
+          </includes>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

@@ -133,6 +133,31 @@ public class BinanceFuturesRestApi extends BaseRestApi implements IBinanceFuture
     }
 
     @Override
+    public JsonNode getDepthSnapshot(String symbol, int limit) {
+        if (symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("symbol is required");
+        }
+        int lvls = limit <= 0 ? 1000 : limit;
+        try {
+            return getJson(futuresBaseUrl, "/fapi/v1/depth?symbol=" + symbol.trim() + "&limit=" + lvls);
+        } catch (IOException e) {
+            throw new RuntimeException("Unable to load depth snapshot for " + symbol, e);
+        }
+    }
+
+    @Override
+    public JsonNode getPremiumIndex(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("symbol is required");
+        }
+        try {
+            return getJson(futuresBaseUrl, "/fapi/v1/premiumIndex?symbol=" + symbol.trim());
+        } catch (IOException e) {
+            throw new RuntimeException("Unable to load premium index for " + symbol, e);
+        }
+    }
+
+    @Override
     public boolean isPublicApiOnly() {
         return publicApiOnly;
     }

@@ -36,6 +36,16 @@ public final class BinanceFuturesWebSocketClientBuilder {
         return normalizeSymbol(ticker) + "@depth" + depth + "@100ms";
     }
 
+    /**
+     * Full-depth incremental diff stream ({@code <symbol>@depth@100ms}). Unlike
+     * {@link #partialDepthChannel} (a throttled top-N snapshot), this delivers per-event
+     * inserts/updates/deletes with {@code U}/{@code u}/{@code pu} update ids — the order-flow
+     * primitive the recorder needs. Requires a REST depth snapshot to seed an absolute book.
+     */
+    public static String diffDepthChannel(Ticker ticker) {
+        return normalizeSymbol(ticker) + "@depth@100ms";
+    }
+
     public static String aggTradeChannel(Ticker ticker) {
         if (isOptionTicker(ticker)) {
             return normalizeSymbol(ticker) + "@optionTrade";

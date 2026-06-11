@@ -2,6 +2,7 @@ package com.fueledbychai.marketdata.paradex;
 
 import java.math.BigDecimal;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -13,6 +14,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.marketdata.OrderBook;
+import com.fueledbychai.marketdata.RawBookUpdate;
 
 public class ParadexOrderBook extends OrderBook implements IParadexOrderBook {
 
@@ -99,19 +101,25 @@ public class ParadexOrderBook extends OrderBook implements IParadexOrderBook {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> inserts = (List<Map<String, Object>>) snapshot.get("inserts");
 
-        for (Map<String, Object> orderData : inserts) {
-            BigDecimal price = new BigDecimal((String) orderData.get("price"));
-            Double size = Double.parseDouble((String) orderData.get("size"));
-            String side = (String) orderData.get("side");
+        List<RawBookUpdate.Entry> entries = new ArrayList<>(inserts != null ? inserts.size() : 0);
+        if (inserts != null) {
+            for (Map<String, Object> orderData : inserts) {
+                BigDecimal price = new BigDecimal((String) orderData.get("price"));
+                Double size = Double.parseDouble((String) orderData.get("size"));
+                String side = (String) orderData.get("side");
 
-            if ("BUY".equals(side)) {
-                buySide.insert(price, size, timestamp);
-            } else {
-                sellSide.insert(price, size, timestamp);
+                if ("BUY".equals(side)) {
+                    buySide.insert(price, size, timestamp);
+                } else {
+                    sellSide.insert(price, size, timestamp);
+                }
+                entries.add(new RawBookUpdate.Entry(sideOf(side), RawBookUpdate.Action.INSERT, price, size));
             }
         }
         initialized = true;
         markUpdated(timestamp);
+        // Raw tap: full-book resync anchor, carrying the exchange sequence for gap detection.
+        notifyRawOrderBookEventListeners(new RawBookUpdate(true, parseSeq(snapshot), timestamp, entries));
     }
 
     @Override
@@ -124,6 +132,8 @@ public class ParadexOrderBook extends OrderBook implements IParadexOrderBook {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> deletes = (List<Map<String, Object>>) delta.get("deletes");
 
+        List<RawBookUpdate.Entry> entries = new ArrayList<>();
+
         if (inserts != null) {
             for (Map<String, Object> orderData : inserts) {
                 BigDecimal price = new BigDecimal((String) orderData.get("price"));
@@ -135,6 +145,7 @@ public class ParadexOrderBook extends OrderBook implements IParadexOrderBook {
                 } else {
                     sellSide.insert(price, size, timestamp);
                 }
+                entries.add(new RawBookUpdate.Entry(sideOf(side), RawBookUpdate.Action.INSERT, price, size));
             }
         }
 
@@ -149,6 +160,7 @@ public class ParadexOrderBook extends OrderBook implements IParadexOrderBook {
                 } else {
                     sellSide.update(price, size, timestamp);
                 }
+                entries.add(new RawBookUpdate.Entry(sideOf(side), RawBookUpdate.Action.UPDATE, price, size));
             }
         }
 
@@ -162,10 +174,39 @@ public class ParadexOrderBook extends OrderBook implements IParadexOrderBook {
                 } else {
                     sellSide.remove(price, timestamp);
                 }
+                entries.add(new RawBookUpdate.Entry(sideOf(side), RawBookUpdate.Action.DELETE, price, 0.0));
             }
         }
 
         markUpdated(timestamp);
+        // Raw tap: incremental delta, carrying the exchange sequence for gap detection.
+        notifyRawOrderBookEventListeners(new RawBookUpdate(false, parseSeq(delta), timestamp, entries));
+    }
+
+    private static RawBookUpdate.Side sideOf(String side) {
+        return "BUY".equals(side) ? RawBookUpdate.Side.BUY : RawBookUpdate.Side.SELL;
+    }
+
+    /**
+     * Extract the Paradex order_book message sequence number ({@code seq_no}); returns -1 if
+     * absent or unparseable so downstream gap detection can treat it as "no sequence".
+     */
+    private static long parseSeq(Map<String, Object> data) {
+        Object v = data.get("seq_no");
+        if (v == null) {
+            v = data.get("sequence");
+        }
+        if (v instanceof Number n) {
+            return n.longValue();
+        }
+        if (v != null) {
+            try {
+                return Long.parseLong(v.toString().trim());
+            } catch (NumberFormatException ignore) {
+                // fall through
+            }
+        }
+        return -1L;
     }
 
 }

@@ -314,6 +314,11 @@ class BinanceFuturesQuoteEngineTest {
         }
 
         @Override
+        public JsonNode getDepthSnapshot(String symbol, int limit) {
+            return null;
+        }
+
+        @Override
         public boolean isPublicApiOnly() {
             return true;
         }
@@ -347,6 +352,12 @@ class BinanceFuturesQuoteEngineTest {
         @Override
         public BinanceFuturesWebSocketClient subscribePartialDepth(Ticker ticker, int depth,
                 IWebSocketEventListener<JsonNode> listener) {
+            depthSubscriptions.incrementAndGet();
+            return null;
+        }
+
+        @Override
+        public BinanceFuturesWebSocketClient subscribeDiffDepth(Ticker ticker, IWebSocketEventListener<JsonNode> listener) {
             depthSubscriptions.incrementAndGet();
             return null;
         }

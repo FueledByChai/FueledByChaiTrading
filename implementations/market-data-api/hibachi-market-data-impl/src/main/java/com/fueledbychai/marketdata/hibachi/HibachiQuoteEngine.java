@@ -53,7 +53,8 @@ import com.fueledbychai.util.TickerRegistryFactory;
  *   <li><b>OrderFlow</b> = {@code trades}</li>
  * </ul>
  */
-public class HibachiQuoteEngine extends QuoteEngine {
+public class HibachiQuoteEngine extends QuoteEngine
+        implements com.fueledbychai.marketdata.RawOrderBookSubscribable {
 
     private static final Logger logger = LoggerFactory.getLogger(HibachiQuoteEngine.class);
     private static final ZoneId UTC = ZoneId.of("UTC");
@@ -95,6 +96,14 @@ public class HibachiQuoteEngine extends QuoteEngine {
     }
 
     protected final java.util.Map<String, BookState> bookBySymbol = new ConcurrentHashMap<>();
+
+    // Raw, un-throttled book-frame listeners (the data recorder). Unlike the Paradex impl
+    // which fires from a persistent OrderBook, Hibachi builds a throwaway OrderBook per frame,
+    // so the raw tap lives on the engine and emits each WS frame verbatim — including the
+    // per-side window bounds — before any merge/prune. No sequence number is available, so the
+    // RawBookUpdate carries sequence=-1 and consumers anchor epochs on Snapshot frames instead.
+    protected final java.util.Map<Ticker, java.util.List<com.fueledbychai.marketdata.RawOrderBookEventListener>>
+            rawBookListenerMap = new ConcurrentHashMap<>();
 
     // Trade-vs-book mismatch telemetry (kept after the L1 sanity checker was
     // removed 2026-05-27). Hibachi's WS pulses L1 and trades on the same
@@ -584,6 +593,10 @@ public class HibachiQuoteEngine extends QuoteEngine {
         // flicker and OBI imbalance jumping to ±100.
         String messageType = message.path("messageType").asText("");
         boolean isSnapshot = "Snapshot".equalsIgnoreCase(messageType);
+        // Raw tap for the data recorder — emit the frame verbatim (both sides' level changes
+        // plus window bounds) before the merge/prune/empty-skip below, so even a no-net-change
+        // frame is captured as truth. Cheap no-op when no recorder is attached.
+        fireRawBookEvent(ticker, message, data, isSnapshot);
         BookState state = bookBySymbol.computeIfAbsent(ticker.getSymbol(), k -> new BookState());
         synchronized (state) {
             if (isSnapshot) {
@@ -621,6 +634,98 @@ public class HibachiQuoteEngine extends QuoteEngine {
             if (config.isMarketDataLiveBook()) {
                 emitBookDerivedL1(ticker, state, timestamp);
             }
+        }
+    }
+
+    /**
+     * Register a raw-book-frame listener (the data recorder) for {@code ticker}. Each Hibachi
+     * WS book frame is delivered verbatim as a {@link com.fueledbychai.marketdata.RawBookUpdate}
+     * with {@code sequence == -1} (Hibachi omits a sequence) and a populated
+     * {@link com.fueledbychai.marketdata.RawBookUpdate.Window}. Idempotent per listener instance.
+     */
+    public void subscribeRawOrderBook(Ticker ticker,
+            com.fueledbychai.marketdata.RawOrderBookEventListener listener) {
+        java.util.List<com.fueledbychai.marketdata.RawOrderBookEventListener> ls =
+                rawBookListenerMap.computeIfAbsent(ticker, k -> new java.util.concurrent.CopyOnWriteArrayList<>());
+        if (!ls.contains(listener)) {
+            ls.add(listener);
+        }
+        // Self-start the depth feed so the capability interface is self-contained (mirrors the
+        // Binance engines, which start their stream on subscribeRawOrderBook). live_book when
+        // enabled (public top-N ~5ms), else the standard orderbook topic. subscribeTopic is
+        // idempotent, so this composes cleanly with an L2 subscribeMarketDepth.
+        String depthTopic = config.isMarketDataLiveBook()
+                ? HibachiTopicRouter.TOPIC_LIVE_BOOK
+                : HibachiTopicRouter.LEVEL2_TOPIC;
+        subscribeTopic(ticker, depthTopic);
+    }
+
+    public void unsubscribeRawOrderBook(Ticker ticker,
+            com.fueledbychai.marketdata.RawOrderBookEventListener listener) {
+        java.util.List<com.fueledbychai.marketdata.RawOrderBookEventListener> ls = rawBookListenerMap.get(ticker);
+        if (ls != null) {
+            ls.remove(listener);
+        }
+    }
+
+    /**
+     * Translate a Hibachi book WS frame into a {@link com.fueledbychai.marketdata.RawBookUpdate}
+     * and deliver it to any raw listeners. Captures both sides' level changes (absolute size;
+     * {@code quantity==0} is a delete) and the per-side window bounds ({@code startPrice}/{@code
+     * endPrice}) so a consumer can prune scroll-out levels. No-op when no listener is attached.
+     */
+    private void fireRawBookEvent(Ticker ticker, JsonNode message, JsonNode data, boolean isSnapshot) {
+        java.util.List<com.fueledbychai.marketdata.RawOrderBookEventListener> listeners =
+                rawBookListenerMap.get(ticker);
+        if (listeners == null || listeners.isEmpty()) {
+            return;
+        }
+        JsonNode bidNode = data.path("bid");
+        JsonNode askNode = data.path("ask");
+        java.util.List<com.fueledbychai.marketdata.RawBookUpdate.Entry> entries = new ArrayList<>();
+        addRawEntries(entries, bidNode.path("levels"), com.fueledbychai.marketdata.RawBookUpdate.Side.BUY, isSnapshot);
+        addRawEntries(entries, askNode.path("levels"), com.fueledbychai.marketdata.RawBookUpdate.Side.SELL, isSnapshot);
+        com.fueledbychai.marketdata.RawBookUpdate.Window window =
+                new com.fueledbychai.marketdata.RawBookUpdate.Window(
+                        parseDecimal(bidNode.path("startPrice")), parseDecimal(bidNode.path("endPrice")),
+                        parseDecimal(askNode.path("startPrice")), parseDecimal(askNode.path("endPrice")));
+        ZonedDateTime timestamp = toTimestamp(message, "timestamp_ms");
+        com.fueledbychai.marketdata.RawBookUpdate update =
+                new com.fueledbychai.marketdata.RawBookUpdate(isSnapshot, -1L, timestamp, entries, window);
+        for (com.fueledbychai.marketdata.RawOrderBookEventListener listener : listeners) {
+            try {
+                listener.onBookUpdate(ticker, update);
+            } catch (RuntimeException e) {
+                logger.warn("Raw book listener failed for {}: {}", ticker.getSymbol(), e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Append one {@link com.fueledbychai.marketdata.RawBookUpdate.Entry} per level in a frame's
+     * side array. Snapshot levels are {@code INSERT}; on Update frames {@code quantity==0} is a
+     * {@code DELETE} (level removed) and a positive quantity is an absolute-size {@code UPDATE}.
+     */
+    private static void addRawEntries(java.util.List<com.fueledbychai.marketdata.RawBookUpdate.Entry> out,
+            JsonNode levels, com.fueledbychai.marketdata.RawBookUpdate.Side side, boolean isSnapshot) {
+        if (levels == null || !levels.isArray()) {
+            return;
+        }
+        for (JsonNode lvl : levels) {
+            BigDecimal price = parseDecimal(lvl.path("price"));
+            BigDecimal qty = parseDecimal(lvl.path("quantity"));
+            if (price == null || qty == null) {
+                continue;
+            }
+            com.fueledbychai.marketdata.RawBookUpdate.Action action;
+            if (isSnapshot) {
+                action = com.fueledbychai.marketdata.RawBookUpdate.Action.INSERT;
+            } else if (qty.signum() <= 0) {
+                action = com.fueledbychai.marketdata.RawBookUpdate.Action.DELETE;
+            } else {
+                action = com.fueledbychai.marketdata.RawBookUpdate.Action.UPDATE;
+            }
+            out.add(new com.fueledbychai.marketdata.RawBookUpdate.Entry(side, action, price, qty.doubleValue()));
         }
     }
 

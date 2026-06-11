@@ -43,7 +43,8 @@ import com.fueledbychai.util.ExchangeWebSocketApiFactory;
 import com.fueledbychai.util.ITickerRegistry;
 import com.fueledbychai.util.TickerRegistryFactory;
 
-public class OkxQuoteEngine extends QuoteEngine {
+public class OkxQuoteEngine extends QuoteEngine
+        implements com.fueledbychai.marketdata.RawOrderBookSubscribable {
 
     protected static final Logger logger = LoggerFactory.getLogger(OkxQuoteEngine.class);
     protected static final ZoneId UTC = ZoneId.of("UTC");
@@ -68,6 +69,14 @@ public class OkxQuoteEngine extends QuoteEngine {
     protected final Set<String> fundingRateSubscriptions = ConcurrentHashMap.newKeySet();
     protected final Set<String> orderBookSubscriptions = ConcurrentHashMap.newKeySet();
     protected final Set<String> orderFlowSubscriptions = ConcurrentHashMap.newKeySet();
+
+    // Raw incremental L2 (`books`) tap for the data recorder — separate from the algo's `books5`
+    // depth path. Maps each sequenced delta verbatim to a RawBookUpdate (seqId/prevSeqId carried
+    // for prev-id gap detection). Keyed by ticker for delivery, by instrumentId for WS lookup.
+    protected final Map<Ticker, List<com.fueledbychai.marketdata.RawOrderBookEventListener>>
+            rawBookListenerMap = new ConcurrentHashMap<>();
+    protected final Map<String, Ticker> rawBookTickersBySymbol = new ConcurrentHashMap<>();
+    protected final Set<String> rawBookSubscriptions = ConcurrentHashMap.newKeySet();
 
     protected volatile boolean started;
 
@@ -219,6 +228,85 @@ public class OkxQuoteEngine extends QuoteEngine {
         level2TickersBySymbol.put(instrumentId, normalizedTicker);
         if (orderBookSubscriptions.add(instrumentId)) {
             webSocketApi.subscribeOrderBook(instrumentId, this::handleOrderBookUpdate);
+        }
+    }
+
+    /**
+     * Register a raw incremental-L2 listener (the data recorder) and start the {@code books}
+     * channel for this instrument. Independent of {@link #subscribeMarketDepth} (the algo's
+     * {@code books5}); both can run for the same instrument without interfering.
+     */
+    public synchronized void subscribeRawOrderBook(Ticker ticker,
+            com.fueledbychai.marketdata.RawOrderBookEventListener listener) {
+        validateTickerAndListener(ticker, listener);
+        Ticker normalizedTicker = normalizeTicker(ticker);
+        String instrumentId = normalizedTicker.getSymbol();
+        rawBookTickersBySymbol.put(instrumentId, normalizedTicker);
+        List<com.fueledbychai.marketdata.RawOrderBookEventListener> ls =
+                rawBookListenerMap.computeIfAbsent(normalizedTicker, k -> new java.util.concurrent.CopyOnWriteArrayList<>());
+        if (!ls.contains(listener)) {
+            ls.add(listener);
+        }
+        if (rawBookSubscriptions.add(instrumentId)) {
+            webSocketApi.subscribeOrderBookL2(instrumentId, this::handleRawOrderBookL2);
+        }
+    }
+
+    /**
+     * Translate an incremental {@code books} frame into a {@link com.fueledbychai.marketdata.RawBookUpdate}
+     * (snapshot anchor on {@code action="snapshot"}, sequenced delta otherwise; {@code seqId}/{@code
+     * prevSeqId} drive prev-id gap detection; size&nbsp;0 = level removed) and deliver it.
+     */
+    protected void handleRawOrderBookL2(OkxOrderBookUpdate update) {
+        if (update == null || update.getInstrumentId() == null) {
+            return;
+        }
+        Ticker ticker = rawBookTickersBySymbol.get(update.getInstrumentId());
+        if (ticker == null) {
+            return;
+        }
+        List<com.fueledbychai.marketdata.RawOrderBookEventListener> listeners = rawBookListenerMap.get(ticker);
+        if (listeners == null || listeners.isEmpty()) {
+            return;
+        }
+        boolean isSnapshot = "snapshot".equalsIgnoreCase(update.getAction());
+        long seq = update.getSeqId() == null ? com.fueledbychai.marketdata.RawBookUpdate.NO_SEQUENCE : update.getSeqId();
+        long prevSeq = update.getPrevSeqId() == null
+                ? com.fueledbychai.marketdata.RawBookUpdate.NO_SEQUENCE : update.getPrevSeqId();
+        List<com.fueledbychai.marketdata.RawBookUpdate.Entry> entries = new ArrayList<>();
+        addRawEntries(entries, update.getBids(), com.fueledbychai.marketdata.RawBookUpdate.Side.BUY, isSnapshot);
+        addRawEntries(entries, update.getAsks(), com.fueledbychai.marketdata.RawBookUpdate.Side.SELL, isSnapshot);
+        com.fueledbychai.marketdata.RawBookUpdate raw = new com.fueledbychai.marketdata.RawBookUpdate(
+                isSnapshot, seq, prevSeq, toZonedDateTime(update.getTimestamp()), entries, null);
+        for (com.fueledbychai.marketdata.RawOrderBookEventListener listener : listeners) {
+            try {
+                listener.onBookUpdate(ticker, raw);
+            } catch (RuntimeException e) {
+                logger.warn("OKX raw book listener failed for {}: {}", ticker.getSymbol(), e.getMessage());
+            }
+        }
+    }
+
+    /** Map OKX book levels to raw entries; size 0 = delete, snapshot levels = INSERT, else UPDATE. */
+    private static void addRawEntries(List<com.fueledbychai.marketdata.RawBookUpdate.Entry> out,
+            List<OkxOrderBookLevel> levels, com.fueledbychai.marketdata.RawBookUpdate.Side side, boolean isSnapshot) {
+        if (levels == null) {
+            return;
+        }
+        for (OkxOrderBookLevel lvl : levels) {
+            if (lvl == null || lvl.getPrice() == null || lvl.getSize() == null) {
+                continue;
+            }
+            double size = lvl.getSize().doubleValue();
+            com.fueledbychai.marketdata.RawBookUpdate.Action action;
+            if (isSnapshot) {
+                action = com.fueledbychai.marketdata.RawBookUpdate.Action.INSERT;
+            } else if (size <= 0.0) {
+                action = com.fueledbychai.marketdata.RawBookUpdate.Action.DELETE;
+            } else {
+                action = com.fueledbychai.marketdata.RawBookUpdate.Action.UPDATE;
+            }
+            out.add(new com.fueledbychai.marketdata.RawBookUpdate.Entry(side, action, lvl.getPrice(), size));
         }
     }
 

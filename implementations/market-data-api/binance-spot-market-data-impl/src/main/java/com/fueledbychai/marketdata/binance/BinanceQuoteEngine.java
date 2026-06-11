@@ -21,6 +21,7 @@ import com.fueledbychai.binance.ws.aggtrade.AggTradeRecordProcessor;
 import com.fueledbychai.binance.ws.aggtrade.TradeRecord;
 import com.fueledbychai.binance.ws.bookticker.BookTickerRecord;
 import com.fueledbychai.binance.ws.bookticker.BookTickerRecordProcessor;
+import com.fueledbychai.binance.ws.RawDiffDepthProcessor;
 import com.fueledbychai.binance.ws.partialbook.OrderBookSnapshot;
 import com.fueledbychai.binance.ws.partialbook.PartialOrderBookProcessor;
 import com.fueledbychai.binance.ws.symbolticker.SymbolTickerRecord;
@@ -41,7 +42,8 @@ import com.fueledbychai.util.ExchangeRestApiFactory;
 import com.fueledbychai.util.ITickerRegistry;
 import com.fueledbychai.util.TickerRegistryFactory;
 
-public class BinanceQuoteEngine extends QuoteEngine {
+public class BinanceQuoteEngine extends QuoteEngine
+        implements com.fueledbychai.marketdata.RawOrderBookSubscribable {
 
     protected static Logger logger = LoggerFactory.getLogger(BinanceQuoteEngine.class);
 
@@ -176,6 +178,136 @@ public class BinanceQuoteEngine extends QuoteEngine {
     @Override
     public void unsubscribeMarketDepth(Ticker ticker, Level2QuoteListener listener) {
         super.unsubscribeMarketDepth(ticker, listener);
+    }
+
+    // Raw full-depth diff tap for the data recorder (the @depth incremental stream + a REST
+    // snapshot anchor) — independent of the algo's @depth5 partial-snapshot path.
+    protected final java.util.Map<Ticker, java.util.List<com.fueledbychai.marketdata.RawOrderBookEventListener>>
+            rawBookListenerMap = new java.util.concurrent.ConcurrentHashMap<>();
+    protected final java.util.Map<Ticker, Boolean> rawDepthStarted = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Register a raw full-depth listener (the recorder) and, on first call per ticker, start the
+     * {@code @depth} diff stream and REST snapshot anchor. Independent of {@link #subscribeMarketDepth}
+     * (the algo's {@code @depth5} partial book); both can run for the same instrument.
+     */
+    public void subscribeRawOrderBook(Ticker ticker,
+            com.fueledbychai.marketdata.RawOrderBookEventListener listener) {
+        java.util.List<com.fueledbychai.marketdata.RawOrderBookEventListener> ls =
+                rawBookListenerMap.computeIfAbsent(ticker, k -> new java.util.concurrent.CopyOnWriteArrayList<>());
+        if (!ls.contains(listener)) {
+            ls.add(listener);
+        }
+        if (rawDepthStarted.putIfAbsent(ticker, Boolean.TRUE) == null) {
+            startRawDiffDepthClient(ticker);
+        }
+    }
+
+    /**
+     * (Re)connect the diff-depth stream, then fetch a REST depth snapshot to re-anchor. The stream
+     * is connected before the snapshot so no deltas are missed; deltas before the anchor are
+     * recorded but flagged out-of-epoch by the downstream sequencer.
+     */
+    protected void startRawDiffDepthClient(final Ticker ticker) {
+        try {
+            RawDiffDepthProcessor processor = new RawDiffDepthProcessor(() -> {
+                logger.info("Raw diff-depth WebSocket closed for {}, restarting...", ticker.getSymbol());
+                startRawDiffDepthClient(ticker);
+            });
+            processor.addEventListener((JsonNode msg) -> {
+                try {
+                    onRawDiffDepth(ticker, msg);
+                } catch (Exception e) {
+                    logger.error("Error processing raw diff-depth update", e);
+                }
+            });
+            BinanceWebSocketClient client = BinanceWebSocketClientBuilder.buildDiffDepth(wsUrl, ticker, processor);
+            client.connect();
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+        try {
+            JsonNode snap = restApi.getDepthSnapshot(ticker.getSymbol(), 1000);
+            fireRawAnchor(ticker, snap);
+        } catch (RuntimeException e) {
+            logger.warn("Failed to fetch raw depth snapshot anchor for {}: {}", ticker.getSymbol(), e.getMessage());
+        }
+    }
+
+    /** Fire a full-book snapshot anchor (from the REST {@code /depth} response) to raw listeners. */
+    protected void fireRawAnchor(Ticker ticker, JsonNode snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        long lastUpdateId = snapshot.path("lastUpdateId").asLong(com.fueledbychai.marketdata.RawBookUpdate.NO_SEQUENCE);
+        java.util.List<com.fueledbychai.marketdata.RawBookUpdate.Entry> entries = new java.util.ArrayList<>();
+        addRawEntries(entries, snapshot.path("bids"), com.fueledbychai.marketdata.RawBookUpdate.Side.BUY, true);
+        addRawEntries(entries, snapshot.path("asks"), com.fueledbychai.marketdata.RawBookUpdate.Side.SELL, true);
+        fireRaw(ticker, new com.fueledbychai.marketdata.RawBookUpdate(true, lastUpdateId,
+                com.fueledbychai.marketdata.RawBookUpdate.NO_SEQUENCE, ZonedDateTime.now(ZoneId.of("UTC")),
+                entries, null));
+    }
+
+    /**
+     * Map a spot {@code @depth} diff frame to a sequenced {@link com.fueledbychai.marketdata.RawBookUpdate}.
+     * Spot continuity is {@code U == last u + 1}, so the prev-id is {@code U - 1}; qty 0 = remove.
+     */
+    protected void onRawDiffDepth(Ticker ticker, JsonNode message) {
+        java.util.List<com.fueledbychai.marketdata.RawOrderBookEventListener> listeners = rawBookListenerMap.get(ticker);
+        if (listeners == null || listeners.isEmpty() || message == null) {
+            return;
+        }
+        long u = message.path("u").asLong(com.fueledbychai.marketdata.RawBookUpdate.NO_SEQUENCE);
+        long firstU = message.path("U").asLong(com.fueledbychai.marketdata.RawBookUpdate.NO_SEQUENCE);
+        long prevSeq = firstU >= 0 ? firstU - 1 : com.fueledbychai.marketdata.RawBookUpdate.NO_SEQUENCE;
+        java.util.List<com.fueledbychai.marketdata.RawBookUpdate.Entry> entries = new java.util.ArrayList<>();
+        addRawEntries(entries, message.path("b"), com.fueledbychai.marketdata.RawBookUpdate.Side.BUY, false);
+        addRawEntries(entries, message.path("a"), com.fueledbychai.marketdata.RawBookUpdate.Side.SELL, false);
+        fireRaw(ticker, new com.fueledbychai.marketdata.RawBookUpdate(false, u, prevSeq,
+                toTimestamp(message.path("E").asLong(0L)), entries, null));
+    }
+
+    private void fireRaw(Ticker ticker, com.fueledbychai.marketdata.RawBookUpdate update) {
+        java.util.List<com.fueledbychai.marketdata.RawOrderBookEventListener> listeners = rawBookListenerMap.get(ticker);
+        if (listeners == null) {
+            return;
+        }
+        for (com.fueledbychai.marketdata.RawOrderBookEventListener listener : listeners) {
+            try {
+                listener.onBookUpdate(ticker, update);
+            } catch (RuntimeException e) {
+                logger.warn("Raw book listener failed for {}: {}", ticker.getSymbol(), e.getMessage());
+            }
+        }
+    }
+
+    /** Map Binance {@code [price, qty]} level arrays to raw entries; qty 0 = delete. */
+    private static void addRawEntries(java.util.List<com.fueledbychai.marketdata.RawBookUpdate.Entry> out,
+            JsonNode levels, com.fueledbychai.marketdata.RawBookUpdate.Side side, boolean isSnapshot) {
+        if (levels == null || !levels.isArray()) {
+            return;
+        }
+        for (JsonNode lvl : levels) {
+            if (lvl == null || !lvl.isArray() || lvl.size() < 2) {
+                continue;
+            }
+            String priceStr = lvl.get(0).asText("");
+            String qtyStr = lvl.get(1).asText("");
+            if (priceStr.isBlank() || qtyStr.isBlank()) {
+                continue;
+            }
+            double qty = Double.parseDouble(qtyStr);
+            com.fueledbychai.marketdata.RawBookUpdate.Action action;
+            if (isSnapshot) {
+                action = com.fueledbychai.marketdata.RawBookUpdate.Action.INSERT;
+            } else if (qty <= 0.0) {
+                action = com.fueledbychai.marketdata.RawBookUpdate.Action.DELETE;
+            } else {
+                action = com.fueledbychai.marketdata.RawBookUpdate.Action.UPDATE;
+            }
+            out.add(new com.fueledbychai.marketdata.RawBookUpdate.Entry(side, action,
+                    new java.math.BigDecimal(priceStr), qty));
+        }
     }
 
     @Override

@@ -47,6 +47,30 @@ public interface IBinanceFuturesRestApi {
     JsonNode getBookTicker(String symbol);
 
     /**
+     * Returns a full order-book depth snapshot ({@code /fapi/v1/depth}) used to seed/anchor an
+     * absolute book before applying the {@code @depth} diff stream. The response carries
+     * {@code lastUpdateId} plus {@code bids}/{@code asks} arrays.
+     *
+     * @param symbol the exchange symbol
+     * @param limit  number of levels (Binance valid values: 5, 10, 20, 50, 100, 500, 1000)
+     * @return the JSON depth snapshot
+     */
+    JsonNode getDepthSnapshot(String symbol, int limit);
+
+    /**
+     * Returns the premium index ({@code /fapi/v1/premiumIndex}) for the given symbol, which
+     * carries {@code markPrice}, {@code indexPrice}, {@code lastFundingRate}, {@code nextFundingTime}
+     * and {@code time}. Default throws {@link UnsupportedOperationException}; the concrete REST
+     * implementation overrides it.
+     *
+     * @param symbol the exchange symbol
+     * @return the JSON premium-index response
+     */
+    default JsonNode getPremiumIndex(String symbol) {
+        throw new UnsupportedOperationException("getPremiumIndex not supported by this implementation");
+    }
+
+    /**
      * Indicates whether this API instance was created without private
      * credentials.
      *

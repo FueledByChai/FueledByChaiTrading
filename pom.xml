@@ -30,7 +30,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
         <module>implementations</module>
         <module>FueledByChaiParent</module>
         <module>fueledbychai-api</module>
-    
+        <module>market-data-collector</module>
     </modules>
     <distributionManagement>
         <repository>

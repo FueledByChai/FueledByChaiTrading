@@ -135,6 +135,33 @@ public class BinanceRestApi extends BaseRestApi implements IBinanceRestApi {
         }
     }
 
+    @Override
+    public JsonNode getDepthSnapshot(String symbol, int limit) {
+        if (symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("symbol is required");
+        }
+        int lvls = limit <= 0 ? 1000 : limit;
+        String path = "/depth?symbol=" + symbol.trim() + "&limit=" + lvls;
+        String url = baseUrl + path;
+        HttpUrl parsedUrl = HttpUrl.parse(url);
+        if (parsedUrl == null) {
+            throw new IllegalArgumentException("Invalid URL for path " + path);
+        }
+        Request request = new Request.Builder().url(parsedUrl).get().build();
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                String body = response.body() != null ? response.body().string() : "";
+                throw new IOException("Unexpected Binance response " + response.code() + ": " + body);
+            }
+            if (response.body() == null) {
+                throw new IOException("Empty Binance response");
+            }
+            return objectMapper.readTree(response.body().string());
+        } catch (IOException e) {
+            throw new RuntimeException("Unable to load depth snapshot for " + symbol, e);
+        }
+    }
+
     private class ZonedDateTimeAdapter extends TypeAdapter<ZonedDateTime> {
 
         private final DateTimeFormatter FORMATTER = DateTimeFormatter.ISO_ZONED_DATE_TIME;

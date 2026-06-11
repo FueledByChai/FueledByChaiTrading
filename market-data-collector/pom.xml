@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.fueledbychai</groupId>
+    <artifactId>FueledByChaiParent</artifactId>
+    <version>0.2.0-SNAPSHOT</version>
+    <relativePath>../FueledByChaiParent/pom.xml</relativePath>
+  </parent>
+
+  <groupId>com.fueledbychai</groupId>
+  <artifactId>market-data-collector</artifactId>
+  <version>0.2.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <name>market-data-collector</name>
+  <description>Standalone always-on app that records raw L2/trade tape from every configured
+    venue (Paradex, Hibachi, Binance futures/spot, OKX) to partitioned Parquet for offline
+    fair-value forecasting research. Wires the venue QuoteEngines to the data-recording
+    contract via the Recording* adapters and the Parquet storage impl.</description>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <dependencies>
+    <!-- Recording contract (Recorded* records + Recording* adapters) -->
+    <dependency>
+      <groupId>com.fueledbychai</groupId>
+      <artifactId>fueledbychai-data-recording-api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- Parquet storage impl (ParquetMarketDataRecorder + ParquetCompactor) -->
+    <dependency>
+      <groupId>com.fueledbychai</groupId>
+      <artifactId>parquet-data-recording-api-impl</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- Market-data API: QuoteEngine, listeners, ticker registries -->
+    <dependency>
+      <groupId>com.fueledbychai</groupId>
+      <artifactId>fueledbychai-market-data-api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- Venue market-data implementations (registers QuoteEngine providers +
+         ticker registries via ServiceLoader at runtime) -->
+    <dependency>
+      <groupId>com.fueledbychai</groupId>
+      <artifactId>paradex-market-data-impl</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.fueledbychai</groupId>
+      <artifactId>hibachi-market-data-impl</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.fueledbychai</groupId>
+      <artifactId>binance-futures-market-data-impl</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.fueledbychai</groupId>
+      <artifactId>binance-spot-market-data-impl</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.fueledbychai</groupId>
+      <artifactId>okx-market-data-impl</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- Routes JDK System.Logger (collector + recorder) into SLF4J/Logback so all
+         logging shares one config. Logback is already on the classpath transitively. -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-jdk-platform-logging</artifactId>
+      <version>2.0.17</version>
+      <scope>runtime</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter-engine</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>market-data-collector</finalName>
+    <plugins>
+      <!-- Build a runnable fat jar: java -jar market-data-collector.jar [config.properties] -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.6.0</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals><goal>shade</goal></goals>
+            <configuration>
+              <createDependencyReducedPom>false</createDependencyReducedPom>
+              <filters>
+                <filter>
+                  <artifact>*:*</artifact>
+                  <excludes>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                    <exclude>module-info.class</exclude>
+                    <exclude>META-INF/versions/*/module-info.class</exclude>
+                  </excludes>
+                </filter>
+              </filters>
+              <transformers>
+                <!-- Merge ServiceLoader files: QuoteEngineProvider, TickerRegistryProvider,
+                     and the System.LoggerFinder all register via META-INF/services. -->
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>com.fueledbychai.datacollector.CollectorApp</mainClass>
+                </transformer>
+              </transformers>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

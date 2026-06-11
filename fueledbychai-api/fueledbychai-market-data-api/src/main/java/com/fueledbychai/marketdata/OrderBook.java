@@ -43,6 +43,7 @@ public class OrderBook implements IOrderBook {
     protected volatile Double bestBidSize = 0.0; // Best bid size
     protected volatile Double bestAskSize = 0.0; // Best ask size
     protected final List<OrderBookUpdateListener> orderbookUpdateListeners = new CopyOnWriteArrayList<>();
+    protected final List<RawOrderBookEventListener> rawOrderBookEventListeners = new CopyOnWriteArrayList<>();
     protected Ticker ticker;
     protected double obiLambda = 0.75; // Default lambda for OBI calculation
 
@@ -572,6 +573,37 @@ public class OrderBook implements IOrderBook {
     @Override
     public void removeOrderBookUpdateListener(OrderBookUpdateListener listener) {
         orderbookUpdateListeners.remove(listener);
+    }
+
+    @Override
+    public void addRawOrderBookEventListener(RawOrderBookEventListener listener) {
+        rawOrderBookEventListeners.add(listener);
+    }
+
+    @Override
+    public void removeRawOrderBookEventListener(RawOrderBookEventListener listener) {
+        rawOrderBookEventListeners.remove(listener);
+    }
+
+    /**
+     * Delivers a raw book update to registered {@link RawOrderBookEventListener}s. Unlike the
+     * merged-snapshot notifications, this is delivered <b>synchronously on the calling (feed)
+     * thread</b> to preserve strict sequence order &mdash; reordering would corrupt the
+     * sequence/epoch reconstruction. Listeners must therefore be fast and non-blocking
+     * (e.g. enqueue and return). Delta-native venue implementations call this from their
+     * snapshot/delta handlers.
+     */
+    protected void notifyRawOrderBookEventListeners(RawBookUpdate update) {
+        if (rawOrderBookEventListeners.isEmpty()) {
+            return;
+        }
+        for (RawOrderBookEventListener listener : rawOrderBookEventListeners) {
+            try {
+                listener.onBookUpdate(ticker, update);
+            } catch (Throwable t) {
+                logger.error("Raw book event listener threw for {}: {}", ticker, t.getMessage(), t);
+            }
+        }
     }
 
     protected void notifyOrderBookUpdateListenersNewBid(BigDecimal bestBid, Double size, ZonedDateTime timestamp) {

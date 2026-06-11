@@ -41,6 +41,17 @@ public interface IOkxWebSocketApi {
     void subscribeOrderBook(String instrumentId, IOkxOrderBookListener listener);
 
     /**
+     * Subscribes to the incremental L2 {@code books} channel (initial snapshot then sequenced
+     * updates carrying {@code seqId}/{@code prevSeqId}). Distinct from {@link #subscribeOrderBook}
+     * (the snapshot-only {@code books5}); intended for the data recorder, which needs per-event
+     * order flow rather than throttled top-of-book snapshots.
+     *
+     * @param instrumentId the OKX instrument id
+     * @param listener the listener that receives incremental book updates
+     */
+    void subscribeOrderBookL2(String instrumentId, IOkxOrderBookListener listener);
+
+    /**
      * Subscribes to trade prints for a single instrument.
      *
      * @param instrumentId the OKX instrument id

@@ -41,8 +41,11 @@ public class OrderBookRegistry {
             // logger.info("Order book WebSocket closed, trying to restart...");
             // startMarketBookWSClient(ticker, orderBook);
             // }));
+            // Channel suffix is overridable so a data collector can opt into the true delta
+            // stream ("deltas") while trading keeps the throttled top-15 snapshot channel.
+            String channelSuffix = System.getProperty("paradex.orderbook.channel.suffix", "interactive@15@200ms");
             ParadexWebSocketClient orderBookWSClient = new ParadexWebSocketClient(wsUrl,
-                    "order_book." + ticker.getSymbol() + ".interactive@15@200ms",
+                    "order_book." + ticker.getSymbol() + "." + channelSuffix,
                     new MarketBookWebSocketProcessor(orderBook, () -> {
                         logger.info("Order book WebSocket closed, trying to restart...");
                         startMarketBookWSClient(ticker, orderBook);

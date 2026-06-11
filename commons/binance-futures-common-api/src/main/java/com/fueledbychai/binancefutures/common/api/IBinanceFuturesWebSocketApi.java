@@ -56,6 +56,18 @@ public interface IBinanceFuturesWebSocketApi {
             IWebSocketEventListener<JsonNode> listener);
 
     /**
+     * Subscribes to the full-depth incremental diff stream ({@code <symbol>@depth@100ms}):
+     * per-event book mutations with {@code U}/{@code u}/{@code pu} update ids. Distinct from
+     * {@link #subscribePartialDepth} (throttled top-N snapshot); intended for the data recorder,
+     * which seeds an absolute book from a REST depth snapshot and applies these deltas.
+     *
+     * @param ticker the ticker to subscribe
+     * @param listener the listener for JSON payloads
+     * @return the underlying websocket client
+     */
+    BinanceFuturesWebSocketClient subscribeDiffDepth(Ticker ticker, IWebSocketEventListener<JsonNode> listener);
+
+    /**
      * Subscribes to aggregate trade updates.
      *
      * @param ticker the ticker to subscribe

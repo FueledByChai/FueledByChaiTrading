@@ -256,6 +256,36 @@ public class ParadexRestApi extends BaseRestApi implements IParadexRestApi {
         }
     }
 
+    @Override
+    public JsonObject getMarketSummary(String market) {
+        if (market == null || market.isBlank()) {
+            throw new IllegalArgumentException("market is required");
+        }
+        HttpUrl base = HttpUrl.parse(baseUrl + "/markets/summary");
+        if (base == null) {
+            throw new ResponseException("Invalid baseUrl for Paradex markets summary: " + baseUrl, 0);
+        }
+        String newUrl = base.newBuilder().addQueryParameter("market", market.trim()).build().toString();
+
+        Request request = new Request.Builder().url(newUrl).get().build();
+        logger.info("Request: " + request);
+
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                String errorBody = response.body() == null ? "" : response.body().string();
+                logger.error("Error response: " + errorBody);
+                throw new ResponseException("Unexpected code " + response.code() + ": " + errorBody,
+                        response.code());
+            }
+            String responseBody = response.body().string();
+            logger.info("Response output: " + responseBody);
+            return JsonParser.parseString(responseBody).getAsJsonObject();
+        } catch (IOException e) {
+            logger.error(e.getMessage(), e);
+            throw new ResponseException("Network error getting Paradex markets summary: " + e.getMessage(), e);
+        }
+    }
+
     /**
      * Builds the BBO request URL for the given market. Uses
      * {@link HttpUrl.Builder#addPathSegment(String)} so the market is always

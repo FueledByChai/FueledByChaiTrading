@@ -122,6 +122,11 @@ public class BinanceFuturesWebSocketApi implements IBinanceFuturesWebSocketApi {
     }
 
     @Override
+    public BinanceFuturesWebSocketClient subscribeDiffDepth(Ticker ticker, IWebSocketEventListener<JsonNode> listener) {
+        return subscribe(ticker, BinanceFuturesWebSocketClientBuilder.diffDepthChannel(ticker), listener);
+    }
+
+    @Override
     public BinanceFuturesWebSocketClient subscribeAggTrades(Ticker ticker, IWebSocketEventListener<JsonNode> listener) {
         return subscribe(ticker, BinanceFuturesWebSocketClientBuilder.aggTradeChannel(ticker), listener);
     }

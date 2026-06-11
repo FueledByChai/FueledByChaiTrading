@@ -66,6 +66,10 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
     protected final Map<String, CopyOnWriteArrayList<IOkxTickerListener>> tickerListeners = new ConcurrentHashMap<>();
     protected final Map<String, CopyOnWriteArrayList<IOkxFundingRateListener>> fundingRateListeners = new ConcurrentHashMap<>();
     protected final Map<String, CopyOnWriteArrayList<IOkxOrderBookListener>> orderBookListeners = new ConcurrentHashMap<>();
+    // Separate registry for the incremental `books` (L2) channel — the data recorder — so its
+    // sequenced deltas never reach the algo's snapshot-only `books5` listeners (which would
+    // mis-apply a partial-level delta as a full snapshot and corrupt the book).
+    protected final Map<String, CopyOnWriteArrayList<IOkxOrderBookListener>> orderBookL2Listeners = new ConcurrentHashMap<>();
     protected final Map<String, CopyOnWriteArrayList<IOkxTradeListener>> tradeListeners = new ConcurrentHashMap<>();
 
     protected final Set<SubscriptionArg> requestedSubscriptions = ConcurrentHashMap.newKeySet();
@@ -129,6 +133,17 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
     }
 
     @Override
+    public void subscribeOrderBookL2(String instrumentId, IOkxOrderBookListener listener) {
+        String normalizedInstrumentId = normalizeInstrumentId(instrumentId);
+        if (listener == null) {
+            throw new IllegalArgumentException("listener is required");
+        }
+        orderBookL2Listeners.computeIfAbsent(normalizedInstrumentId, key -> new CopyOnWriteArrayList<>()).add(listener);
+        // `books`: 400-level incremental channel (initial snapshot then updates with seqId/prevSeqId).
+        subscribe("books", normalizedInstrumentId);
+    }
+
+    @Override
     public void subscribeTrades(String instrumentId, IOkxTradeListener listener) {
         String normalizedInstrumentId = normalizeInstrumentId(instrumentId);
         if (listener == null) {
@@ -145,6 +160,7 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
         tickerListeners.clear();
         fundingRateListeners.clear();
         orderBookListeners.clear();
+        orderBookL2Listeners.clear();
         tradeListeners.clear();
         requestedSubscriptions.clear();
         clearSubscriptionState();
@@ -473,9 +489,14 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
             dispatchFundingRate(instrumentId, data);
             return;
         }
-        if ("books5".equalsIgnoreCase(channel) || "books".equalsIgnoreCase(channel)
-                || "books-l2-tbt".equalsIgnoreCase(channel) || "bbo-tbt".equalsIgnoreCase(channel)) {
+        if ("books5".equalsIgnoreCase(channel) || "bbo-tbt".equalsIgnoreCase(channel)) {
             dispatchOrderBook(instrumentId, data);
+            return;
+        }
+        if ("books".equalsIgnoreCase(channel) || "books-l2-tbt".equalsIgnoreCase(channel)) {
+            // Incremental L2: `action` ("snapshot"/"update") is at payload level, seqId/prevSeqId
+            // per data element. Routed to the separate L2 listener set (the recorder).
+            dispatchOrderBookL2(instrumentId, getString(payload, "action"), data);
             return;
         }
         if ("trades".equalsIgnoreCase(channel)) {
@@ -605,6 +626,52 @@ public class OkxWebSocketApi implements IOkxWebSocketApi {
                 }
             }
         }
+    }
+
+    /**
+     * Dispatch the incremental {@code books} (L2) channel to recorder listeners. {@code action}
+     * ({@code "snapshot"}/{@code "update"}) is shared by all data elements in the frame; seqId,
+     * prevSeqId and checksum are per element.
+     */
+    protected void dispatchOrderBookL2(String instrumentId, String action, JsonArray data) {
+        if (data == null || data.isEmpty()) {
+            return;
+        }
+        List<IOkxOrderBookListener> listeners = orderBookL2Listeners.get(instrumentId);
+        if (listeners == null || listeners.isEmpty()) {
+            return;
+        }
+        for (JsonElement element : data) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            OkxOrderBookUpdate update = parseOrderBookL2Update(instrumentId, action, element.getAsJsonObject());
+            if (update == null) {
+                continue;
+            }
+            for (IOkxOrderBookListener listener : listeners) {
+                try {
+                    listener.onOrderBook(update);
+                } catch (RuntimeException e) {
+                    logger.warn("OKX L2 order-book listener failed for {}", instrumentId, e);
+                }
+            }
+        }
+    }
+
+    protected OkxOrderBookUpdate parseOrderBookL2Update(String fallbackInstrumentId, String action, JsonObject data) {
+        if (data == null) {
+            return null;
+        }
+        String instrumentId = normalizeInstrumentIdOrNull(getString(data, "instId"));
+        if (instrumentId == null) {
+            instrumentId = fallbackInstrumentId;
+        }
+        List<OkxOrderBookLevel> bids = parseBookLevels(data.getAsJsonArray("bids"));
+        List<OkxOrderBookLevel> asks = parseBookLevels(data.getAsJsonArray("asks"));
+        Long timestamp = getLong(data, "ts");
+        return new OkxOrderBookUpdate(instrumentId, timestamp, bids, asks, action,
+                getLong(data, "seqId"), getLong(data, "prevSeqId"), getLong(data, "checksum"));
     }
 
     protected void dispatchTrades(String instrumentId, JsonArray data) {

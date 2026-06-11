@@ -77,6 +77,16 @@ public interface IParadexRestApi {
      */
     JsonObject getBBO(String market);
 
+    /**
+     * Markets summary for a single market (Paradex {@code /markets/summary}), which carries the
+     * current {@code funding_rate}, {@code mark_price} and related fields. Returns the raw
+     * response object (a {@code results} array with the entry for the requested market).
+     *
+     * @param market the Paradex market symbol (e.g. {@code BTC-USD-PERP})
+     * @return the parsed JSON response object
+     */
+    JsonObject getMarketSummary(String market);
+
     InstrumentDescriptor getInstrumentDescriptor(String symbol);
 
     InstrumentDescriptor[] getAllInstrumentsForTypes(InstrumentType[] instrumentTypes);

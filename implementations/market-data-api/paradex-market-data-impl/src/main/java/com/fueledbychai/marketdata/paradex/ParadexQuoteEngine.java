@@ -35,7 +35,8 @@ import com.fueledbychai.util.TickerRegistryFactory;
 import com.google.gson.JsonObject;
 
 public class ParadexQuoteEngine extends QuoteEngine
-        implements OrderBookUpdateListener, TradesUpdateListener, MarketsSummaryUpdateListener {
+        implements OrderBookUpdateListener, TradesUpdateListener, MarketsSummaryUpdateListener,
+        com.fueledbychai.marketdata.RawOrderBookSubscribable {
 
     protected static final Logger logger = LoggerFactory.getLogger(ParadexQuoteEngine.class);
     protected Map<Ticker, TradesWebSocketClient> tradesClients = new HashMap<>();
@@ -235,6 +236,15 @@ public class ParadexQuoteEngine extends QuoteEngine
     @Override
     public void unsubscribeOrderFlow(Ticker ticker, OrderFlowListener listener) {
         super.unsubscribeOrderFlow(canonicalize(ticker), listener);
+    }
+
+    @Override
+    public void subscribeRawOrderBook(Ticker ticker,
+            com.fueledbychai.marketdata.RawOrderBookEventListener listener) {
+        Ticker canonical = canonicalize(ticker);
+        // getOrderBook lazily starts the order_book WS feed; attach the raw delta tap so the
+        // recorder sees sequenced inserts/updates/deletes (Paradex carries seq_no, no prevSeq).
+        OrderBookRegistry.getInstance().getOrderBook(canonical).addRawOrderBookEventListener(listener);
     }
 
     @Override

@@ -106,6 +106,18 @@ public interface IOrderBook {
     void removeOrderBookUpdateListener(OrderBookUpdateListener listener);
 
     /**
+     * Registers a listener for raw, un-throttled, sequence-bearing book updates
+     * ({@link RawBookUpdate}). Only delta-native venue implementations fire these; the
+     * default is a no-op so snapshot-native implementations and mocks keep compiling.
+     */
+    default void addRawOrderBookEventListener(RawOrderBookEventListener listener) {
+    }
+
+    /** Removes a raw order-book event listener. Default no-op. */
+    default void removeRawOrderBookEventListener(RawOrderBookEventListener listener) {
+    }
+
+    /**
      * Atomically updates the order book from a complete snapshot. This method
      * ensures readers never see inconsistent state during updates.
      * 
