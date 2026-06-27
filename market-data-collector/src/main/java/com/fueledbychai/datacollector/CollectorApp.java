@@ -115,6 +115,23 @@ public final class CollectorApp {
             }
         }
 
+        // REST open-interest poller: perps only, same cadence/structure as funding.
+        if (cfg.oiPollSeconds() > 0) {
+            OpenInterestPoller oiPoller = new OpenInterestPoller(recorder, collector.fundingTargets());
+            if (oiPoller.targetCount() > 0) {
+                long oi = cfg.oiPollSeconds();
+                housekeeping.scheduleAtFixedRate(() -> {
+                    try {
+                        oiPoller.poll();
+                    } catch (Exception e) {
+                        LOG.log(Level.WARNING, "Open-interest poll sweep failed", e);
+                    }
+                }, 5, oi, TimeUnit.SECONDS);
+                LOG.log(Level.INFO, "Open-interest poller active: {0} perp targets every {1}s",
+                        oiPoller.targetCount(), cfg.oiPollSeconds());
+            }
+        }
+
         LOG.log(Level.INFO, "Collector running ({0} instruments), writing to {1}. Ctrl-C to stop.",
                 cfg.instruments().size(), cfg.rootDir().toAbsolutePath());
         shutdown.await();

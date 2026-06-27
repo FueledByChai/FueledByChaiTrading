@@ -521,7 +521,7 @@ public class HibachiQuoteEngine extends QuoteEngine
             logger.info("Hibachi WS recv (no topic): {}", message);
             return;
         }
-        logger.info("Hibachi WS dispatch topic={} symbol={}", topic, symbol);
+        logger.debug("Hibachi WS dispatch topic={} symbol={}", topic, symbol);
         Ticker ticker = lookupTicker(symbol);
         if (ticker == null) {
             logger.warn("Hibachi WS no ticker for symbol={} topic={}", symbol, topic);

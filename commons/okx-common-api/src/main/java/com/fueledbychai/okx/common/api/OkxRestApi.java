@@ -145,6 +145,21 @@ public class OkxRestApi implements IOkxRestApi {
     }
 
     @Override
+    public JsonObject getOpenInterest(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) {
+            throw new IllegalArgumentException("instrumentId is required");
+        }
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("instId", instrumentId.trim().toUpperCase(Locale.US));
+        JsonObject payload = executeGet("public/open-interest", params);
+        JsonArray data = getDataArray(payload);
+        if (data == null || data.isEmpty() || !data.get(0).isJsonObject()) {
+            return null;
+        }
+        return data.get(0).getAsJsonObject();
+    }
+
+    @Override
     public JsonObject getTicker(String instrumentId) {
         if (instrumentId == null || instrumentId.isBlank()) {
             throw new IllegalArgumentException("instrumentId is required");

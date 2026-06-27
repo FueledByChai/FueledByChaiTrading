@@ -28,11 +28,13 @@ import java.util.ServiceLoader;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,6 +53,30 @@ public abstract class QuoteEngine implements IQuoteEngine {
 
     // Thread pool for handling quote notifications
     private final ThreadPoolExecutor quoteExecutor;
+    // Upper bound on the dispatch backlog. The pool previously used an UNBOUNDED
+    // queue (Executors.newFixedThreadPool), so when dispatch fell behind — or
+    // duplicate subscriptions multiplied the submit rate across WS reconnects —
+    // the queue grew without bound and exhausted the heap (OOM, 2026-06-25:
+    // ~1.7M queued tasks). Market data is latest-wins, so we cap the queue and
+    // drop the stalest tasks under saturation.
+    private static final int QUOTE_QUEUE_CAPACITY = 8192;
+    private final AtomicLong droppedQuoteTasks = new AtomicLong();
+    private volatile long lastDropLogMs = 0L;
+
+    // --- dispatch instrumentation: diagnose queue saturation root cause ---
+    // Distinguishes the three failure modes the saturation WARN lumps together:
+    //   (a) sheer volume    -> high fires/s, listener counts STABLE
+    //   (b) slow listener   -> moderate fires/s but queued/active climbing, drops rising
+    //   (c) duplicate subs   -> listener counts GROW over time (the WS-reconnect amplifier)
+    // Logged every 30s at INFO so a few minutes of logs tells us which fix matters.
+    private final AtomicLong l1Fires = new AtomicLong();
+    private final AtomicLong l2Fires = new AtomicLong();
+    private final AtomicLong orderFlowFires = new AtomicLong();
+    private long lastStatsMs = 0L;
+    private long lastL1Fires = 0L;
+    private long lastL2Fires = 0L;
+    private long lastOfFires = 0L;
+    private long lastDroppedStat = 0L;
 
     private static final Map<Class<? extends QuoteEngine>, QuoteEngine> instances = new ConcurrentHashMap<>();
     private static final Map<Exchange, Class<? extends QuoteEngine>> registry = new ConcurrentHashMap<>();
@@ -161,13 +187,88 @@ public abstract class QuoteEngine implements IQuoteEngine {
      */
     public QuoteEngine(int threadPoolSize) {
         errorListeners = new ArrayList<ErrorListener>();
-        // Initialize thread pool with specified number of threads for quote processing
-        quoteExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(threadPoolSize, new QuoteThreadFactory());
-        logger.info("Initialized QuoteEngine with {} threads for quote processing", threadPoolSize);
+        // Bounded dispatch queue with a drop-OLDEST policy. A quote stuck behind
+        // thousands of newer quotes is stale and worthless, so under saturation we
+        // discard the stalest queued task to make room for the newest. This caps
+        // memory regardless of upstream submit rate (the unbounded predecessor
+        // OOM'd). allowCoreThreadTimeOut lets the (large) pool shrink back when
+        // idle instead of holding hundreds of threads forever.
+        quoteExecutor = new ThreadPoolExecutor(
+                threadPoolSize, threadPoolSize,
+                30L, TimeUnit.SECONDS,
+                new LinkedBlockingQueue<Runnable>(QUOTE_QUEUE_CAPACITY),
+                new QuoteThreadFactory(),
+                (r, exec) -> {
+                    // Saturated: drop the oldest queued (stalest) task, enqueue newest.
+                    // Count + throttle-log so the cap is never silent.
+                    exec.getQueue().poll();
+                    long total = droppedQuoteTasks.incrementAndGet();
+                    long now = System.currentTimeMillis();
+                    if (now - lastDropLogMs > 5000L) {
+                        lastDropLogMs = now;
+                        logger.warn("QuoteEngine dispatch queue saturated (capacity={}, threads={}); "
+                                + "dropping stalest quote tasks to cap memory (total dropped={}). "
+                                + "Likely a slow listener or duplicate subscriptions.",
+                                QUOTE_QUEUE_CAPACITY, threadPoolSize, total);
+                    }
+                    if (!exec.isShutdown()) {
+                        exec.getQueue().offer(r);
+                    }
+                });
+        quoteExecutor.allowCoreThreadTimeOut(true);
+        logger.info("Initialized QuoteEngine with {} threads, bounded dispatch queue (capacity={})",
+                threadPoolSize, QUOTE_QUEUE_CAPACITY);
         monitor.scheduleAtFixedRate(() -> {
-            logger.debug("Quote Engine Pool size: " + quoteExecutor.getPoolSize() + ", Active threads: "
-                    + quoteExecutor.getActiveCount());
+            logger.debug("Quote Engine pool={}, active={}, queued={}, dropped={}",
+                    quoteExecutor.getPoolSize(), quoteExecutor.getActiveCount(),
+                    quoteExecutor.getQueue().size(), droppedQuoteTasks.get());
         }, 0, 1, TimeUnit.SECONDS);
+        // Per-stream-type dispatch stats (volume vs slow-listener vs duplicate-subs).
+        monitor.scheduleAtFixedRate(this::logDispatchStats, 30, 30, TimeUnit.SECONDS);
+    }
+
+    /** Count listeners across a per-ticker listener map (the duplicate-subscription tell). */
+    private static int totalListeners(Map<Ticker, ? extends List<?>> map) {
+        int n = 0;
+        synchronized (map) {
+            for (List<?> listeners : map.values()) {
+                if (listeners != null) {
+                    n += listeners.size();
+                }
+            }
+        }
+        return n;
+    }
+
+    /**
+     * Periodic INFO summary to root-cause dispatch saturation. Watch over a few minutes:
+     * listener counts climbing = duplicate subscriptions (WS-reconnect amplifier); stable
+     * counts with high fires/s = volume; rising queued/dropped with modest fires/s = slow listener.
+     */
+    private void logDispatchStats() {
+        long now = System.currentTimeMillis();
+        long f1 = l1Fires.get();
+        long f2 = l2Fires.get();
+        long fof = orderFlowFires.get();
+        long drp = droppedQuoteTasks.get();
+        double secs = (lastStatsMs == 0L) ? 30.0 : Math.max(0.001, (now - lastStatsMs) / 1000.0);
+        int l1Listeners = (globalLevel1ListenerList == null ? 0 : globalLevel1ListenerList.size())
+                + totalListeners(level1ListenerMap);
+        int l2Listeners = totalListeners(level2ListenerMap);
+        int ofListeners = (globalOrderFlowListenerList == null ? 0 : globalOrderFlowListenerList.size())
+                + totalListeners(orderFlowListenerMap);
+        logger.info("QuoteEngine dispatch stats: L1 {}/s (listeners={}), L2 {}/s (listeners={}), "
+                + "OrderFlow {}/s (listeners={}), dropped +{} (total={}), queued={}, active={}, pool={}",
+                Math.round((f1 - lastL1Fires) / secs), l1Listeners,
+                Math.round((f2 - lastL2Fires) / secs), l2Listeners,
+                Math.round((fof - lastOfFires) / secs), ofListeners,
+                (drp - lastDroppedStat), drp,
+                quoteExecutor.getQueue().size(), quoteExecutor.getActiveCount(), quoteExecutor.getPoolSize());
+        lastStatsMs = now;
+        lastL1Fires = f1;
+        lastL2Fires = f2;
+        lastOfFires = fof;
+        lastDroppedStat = drp;
     }
 
     public void addErrorListener(ErrorListener listener) {
@@ -272,6 +373,7 @@ public abstract class QuoteEngine implements IQuoteEngine {
 
     @Override
     public void fireLevel1Quote(final ILevel1Quote quote) {
+        l1Fires.incrementAndGet();
         synchronized (level1ListenerMap) {
             // Fire to global listeners
             if (globalLevel1ListenerList != null) {
@@ -316,6 +418,7 @@ public abstract class QuoteEngine implements IQuoteEngine {
 
     @Override
     public void fireMarketDepthQuote(ILevel2Quote quote) {
+        l2Fires.incrementAndGet();
         synchronized (level2ListenerMap) {
             List<Level2QuoteListener> listeners = level2ListenerMap.get(quote.getTicker());
             if (listeners == null) {
@@ -341,6 +444,7 @@ public abstract class QuoteEngine implements IQuoteEngine {
 
     @Override
     public void fireOrderFlow(OrderFlow orderFlow) {
+        orderFlowFires.incrementAndGet();
         synchronized (orderFlowListenerMap) {
             // Fire to global listeners
             if (globalOrderFlowListenerList != null) {

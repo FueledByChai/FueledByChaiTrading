@@ -22,6 +22,11 @@ public class BookTickerRecordProcessor extends AbstractWebSocketProcessor<BookTi
         try {
             JsonNode root = objectMapper.readTree(message);
             JsonNode dataNode = root.has("data") ? root.get("data") : root;
+            // Ignore control frames (SUBSCRIBE acks etc.). bookTicker payloads
+            // carry no "e" event type, so key off the required quote fields.
+            if (!dataNode.has("s") || !dataNode.has("b") || !dataNode.has("a")) {
+                return null;
+            }
             return objectMapper.treeToValue(dataNode, BookTickerRecord.class);
         } catch (Exception e) {
             logger.error("Error parsing message: " + message, e);

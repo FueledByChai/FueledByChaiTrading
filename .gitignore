@@ -4,6 +4,7 @@ nbbuild/
 dist/
 nbdist/
 target/
+target-bak/
 .history/
 local-stuff/
 nbactions.xml

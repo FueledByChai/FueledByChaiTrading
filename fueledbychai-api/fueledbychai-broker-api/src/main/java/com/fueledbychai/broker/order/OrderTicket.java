@@ -42,7 +42,16 @@ public class OrderTicket implements Serializable {
     };
 
     public enum Modifier {
-        ALL_OR_NONE, POST_ONLY, REDUCE_ONLY
+        ALL_OR_NONE, POST_ONLY, REDUCE_ONLY,
+        /**
+         * Retail Price Improvement (Paradex). A post-only maker order that only
+         * matches against non-API ("retail") flow, sits at lowest priority, and
+         * is excluded from the public/API book — used to capture benign flow and
+         * dodge adverse selection. Only the Paradex translator emits a distinct
+         * instruction for this; other venues fall back to POST_ONLY, so callers
+         * should add POST_ONLY alongside RPI for venue-portable safety.
+         */
+        RPI
     };
 
     protected Ticker ticker;

@@ -158,6 +158,18 @@ public class BinanceFuturesRestApi extends BaseRestApi implements IBinanceFuture
     }
 
     @Override
+    public JsonNode getOpenInterest(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("symbol is required");
+        }
+        try {
+            return getJson(futuresBaseUrl, "/fapi/v1/openInterest?symbol=" + symbol.trim());
+        } catch (IOException e) {
+            throw new RuntimeException("Unable to load open interest for " + symbol, e);
+        }
+    }
+
+    @Override
     public boolean isPublicApiOnly() {
         return publicApiOnly;
     }
