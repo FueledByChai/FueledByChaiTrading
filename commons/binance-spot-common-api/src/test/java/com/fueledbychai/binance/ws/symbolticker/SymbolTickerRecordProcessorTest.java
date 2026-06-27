@@ -20,7 +20,7 @@ public class SymbolTickerRecordProcessorTest {
     @Test
     public void testParseMessageWithEnvelope() {
         String json = """
-            {"stream":"btcusdt@ticker","data":{"E":1768313856798,"s":"BTCUSDT","c":"41000.10","Q":"0.452","v":"145.25","q":"5962287.12"}}
+            {"stream":"btcusdt@ticker","data":{"e":"24hrTicker","E":1768313856798,"s":"BTCUSDT","c":"41000.10","Q":"0.452","v":"145.25","q":"5962287.12"}}
             """;
 
         SymbolTickerRecordProcessor processor = new SymbolTickerRecordProcessor(closedListener);
@@ -38,7 +38,7 @@ public class SymbolTickerRecordProcessorTest {
     @Test
     public void testParseMessageWithoutEnvelope() {
         String json = """
-            {"E":987654321,"s":"ETHUSDT","c":"2000.1","Q":"0.25","v":"500.0","q":"1000050.0"}
+            {"e":"24hrTicker","E":987654321,"s":"ETHUSDT","c":"2000.1","Q":"0.25","v":"500.0","q":"1000050.0"}
             """;
 
         SymbolTickerRecordProcessor processor = new SymbolTickerRecordProcessor(closedListener);
@@ -51,6 +51,15 @@ public class SymbolTickerRecordProcessorTest {
         assertEquals("0.25", record.getLastQuantity());
         assertEquals("500.0", record.getVolume());
         assertEquals("1000050.0", record.getVolumeNotional());
+    }
+
+    @Test
+    public void testSubscribeAckReturnsNull() {
+        // Binance answers SUBSCRIBE commands with {"result":null,"id":N}; it
+        // must be ignored, not deserialized into an all-null record (NPE'd
+        // downstream listeners before the event-type guard existed).
+        SymbolTickerRecordProcessor processor = new SymbolTickerRecordProcessor(closedListener);
+        assertNull(processor.parseMessage("{\"result\":null,\"id\":5}"));
     }
 
     @Test

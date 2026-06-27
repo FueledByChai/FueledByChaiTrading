@@ -71,6 +71,18 @@ public interface IBinanceFuturesRestApi {
     }
 
     /**
+     * Returns present open interest ({@code /fapi/v1/openInterest}) for the given symbol, which
+     * carries {@code openInterest} (base-asset contracts), {@code symbol} and {@code time}.
+     * Default throws {@link UnsupportedOperationException}; the concrete REST impl overrides it.
+     *
+     * @param symbol the exchange symbol
+     * @return the JSON open-interest response
+     */
+    default JsonNode getOpenInterest(String symbol) {
+        throw new UnsupportedOperationException("getOpenInterest not supported by this implementation");
+    }
+
+    /**
      * Indicates whether this API instance was created without private
      * credentials.
      *

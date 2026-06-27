@@ -30,6 +30,7 @@ import com.fueledbychai.broker.order.TradeDirection;
 import com.fueledbychai.data.InstrumentType;
 import com.fueledbychai.data.Ticker;
 import com.fueledbychai.paradex.common.api.ParadexUtil;
+import com.fueledbychai.paradex.common.api.order.Instruction;
 import com.fueledbychai.paradex.common.api.order.OrderType;
 import com.fueledbychai.paradex.common.api.order.ParadexOrder;
 import com.fueledbychai.paradex.common.api.order.Side;
@@ -262,6 +263,26 @@ class ParadexTranslatorTest {
         assertEquals(new BigDecimal("2.0"), result.getSize());
         assertEquals(OrderType.LIMIT, result.getOrderType());
         assertEquals(new BigDecimal("3000.50"), result.getLimitPrice());
+    }
+
+    @Test
+    void testTranslateTradeOrder_RpiModifierMapsToRpiInstruction() {
+        when(mockTradeOrder.getClientOrderId()).thenReturn("CLIENT_RPI");
+        when(mockTradeOrder.getTicker()).thenReturn(mockTicker);
+        when(mockTicker.getSymbol()).thenReturn("ETH-USD");
+        when(mockTradeOrder.getTradeDirection()).thenReturn(TradeDirection.BUY);
+        when(mockTradeOrder.getSize()).thenReturn(new BigDecimal("1.0"));
+        when(mockTradeOrder.getType()).thenReturn(OrderTicket.Type.LIMIT);
+        when(mockTradeOrder.getLimitPrice()).thenReturn(new BigDecimal("2500.00"));
+        // Venue-portable pattern: chaiwala adds POST_ONLY alongside RPI; the
+        // translator must PREFER RPI (it can't combine with another instruction).
+        when(mockTradeOrder.getModifiers())
+                .thenReturn(Arrays.asList(OrderTicket.Modifier.RPI, OrderTicket.Modifier.POST_ONLY));
+
+        ParadexOrder result = translator.translateOrder(mockTradeOrder);
+
+        assertNotNull(result);
+        assertEquals(Instruction.RPI, result.getInstruction());
     }
 
     @Test

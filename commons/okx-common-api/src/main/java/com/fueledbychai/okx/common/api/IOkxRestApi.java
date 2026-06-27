@@ -39,6 +39,16 @@ public interface IOkxRestApi {
     OkxFundingRateUpdate getFundingRate(String instrumentId);
 
     /**
+     * Returns the open-interest data entry ({@code public/open-interest}) for the given
+     * instrument, which carries {@code oi} (contracts), {@code oiCcy} (base ccy), {@code oiUsd}
+     * (notional) and {@code ts}.
+     *
+     * @param instrumentId the OKX instrument id, for example {@code BTC-USDT-SWAP}
+     * @return the open-interest data object, or {@code null} when unavailable
+     */
+    JsonObject getOpenInterest(String instrumentId);
+
+    /**
      * Returns the ticker (BBO) data for the given instrument.
      *
      * @param instrumentId the OKX instrument id, for example {@code BTC-USDT-SWAP}

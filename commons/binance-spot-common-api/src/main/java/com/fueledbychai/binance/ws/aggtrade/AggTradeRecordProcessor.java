@@ -22,6 +22,12 @@ public class AggTradeRecordProcessor extends AbstractWebSocketProcessor<TradeRec
         try {
             JsonNode root = objectMapper.readTree(message);
             JsonNode dataNode = root.has("data") ? root.get("data") : root;
+            // Control frames (e.g. the SUBSCRIBE ack {"result":null,"id":N})
+            // would otherwise deserialize into an all-null record and NPE
+            // downstream. Only aggTrade payloads pass.
+            if (!"aggTrade".equals(dataNode.path("e").asText())) {
+                return null;
+            }
             return objectMapper.treeToValue(dataNode, TradeRecord.class);
         } catch (Exception e) {
             logger.error("Error parsing message: " + message, e);

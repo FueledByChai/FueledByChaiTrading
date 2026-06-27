@@ -210,7 +210,12 @@ public class ParadexTranslator implements IParadexTranslator {
             paradoxOrder.setLimitPrice(limitPrice);
         }
 
-        if (order.getModifiers().contains(Modifier.POST_ONLY)) {
+        // RPI is itself post-only and cannot be combined with another instruction,
+        // so it takes precedence: a ticket carrying both RPI and POST_ONLY (the
+        // venue-portable pattern) maps to a single RPI instruction here.
+        if (order.getModifiers().contains(Modifier.RPI)) {
+            paradoxOrder.setInstruction(Instruction.RPI);
+        } else if (order.getModifiers().contains(Modifier.POST_ONLY)) {
             paradoxOrder.setInstruction(Instruction.POST_ONLY);
         } else if (order.getDuration() == Duration.GOOD_UNTIL_CANCELED) {
             paradoxOrder.setInstruction(Instruction.GTC);

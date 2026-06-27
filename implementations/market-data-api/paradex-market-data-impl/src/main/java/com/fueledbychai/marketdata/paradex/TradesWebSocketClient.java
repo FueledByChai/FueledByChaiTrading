@@ -15,11 +15,15 @@ public class TradesWebSocketClient {
     protected Map<Ticker, ParadexOrderBook> orderBooks = new HashMap<>();
     protected String wsUrl = "wss://ws.api.prod.paradex.trade/v1";
     protected TradesWebSocketProcessor tradesProcessor;
+    // Currently-live WS client — closed before each reconnect so connections
+    // don't accumulate across restarts (see 2026-06-25 OOM).
+    protected ParadexWebSocketClient tradesWSClient;
 
-    public void startTradesWSClient(Ticker ticker, TradesUpdateListener tradesListener) {
+    public synchronized void startTradesWSClient(Ticker ticker, TradesUpdateListener tradesListener) {
         try {
+            MarketsSummaryWebSocketClient.closeQuietly(tradesWSClient);
             logger.info("Starting trades WebSocket client");
-            ParadexWebSocketClient tradesWSClient = new ParadexWebSocketClient(wsUrl, "trades." + ticker.getSymbol(),
+            tradesWSClient = new ParadexWebSocketClient(wsUrl, "trades." + ticker.getSymbol(),
                     getTradesProcessor(ticker, tradesListener));
             tradesWSClient.connect();
         } catch (Exception e) {

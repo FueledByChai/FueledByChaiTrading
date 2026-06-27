@@ -22,6 +22,11 @@ public class SymbolTickerRecordProcessor extends AbstractWebSocketProcessor<Symb
         try {
             JsonNode root = objectMapper.readTree(message);
             JsonNode dataNode = root.has("data") ? root.get("data") : root;
+            // Ignore control frames (SUBSCRIBE acks etc.) — only ticker
+            // events pass.
+            if (!"24hrTicker".equals(dataNode.path("e").asText())) {
+                return null;
+            }
             return objectMapper.treeToValue(dataNode, SymbolTickerRecord.class);
         } catch (Exception e) {
             logger.error("Error parsing message: " + message, e);

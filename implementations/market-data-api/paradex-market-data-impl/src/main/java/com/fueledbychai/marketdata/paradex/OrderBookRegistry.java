@@ -13,6 +13,11 @@ public class OrderBookRegistry {
     protected static final Logger logger = LoggerFactory.getLogger(OrderBookRegistry.class);
     protected static OrderBookRegistry instance = null;
     protected Map<Ticker, ParadexOrderBook> orderBooks = new HashMap<>();
+    // Currently-live WS client per ticker. Reconnects call startMarketBookWSClient
+    // again via the processor's closed-listener; without closing the prior client
+    // each reconnect leaked a live connection (duplicate L2 streams → N× ticks →
+    // dispatch-queue/heap blowup, 2026-06-25).
+    protected Map<Ticker, ParadexWebSocketClient> orderBookClients = new HashMap<>();
     protected String wsUrl = "wss://ws.api.prod.paradex.trade/v1";
 
     public static OrderBookRegistry getInstance() {
@@ -32,8 +37,9 @@ public class OrderBookRegistry {
         return orderBook;
     }
 
-    public void startMarketBookWSClient(Ticker ticker, IParadexOrderBook orderBook) {
+    public synchronized void startMarketBookWSClient(Ticker ticker, IParadexOrderBook orderBook) {
         try {
+            MarketsSummaryWebSocketClient.closeQuietly(orderBookClients.get(ticker));
             logger.info("Starting order book WebSocket client");
             // ParadexWebSocketClient orderBookWSClient = new ParadexWebSocketClient(wsUrl,
             // "order_book." + ticker.getSymbol() + ".deltas", new
@@ -50,6 +56,7 @@ public class OrderBookRegistry {
                         logger.info("Order book WebSocket closed, trying to restart...");
                         startMarketBookWSClient(ticker, orderBook);
                     }));
+            orderBookClients.put(ticker, orderBookWSClient);
             orderBookWSClient.connect();
         } catch (Exception e) {
             throw new IllegalStateException(e);

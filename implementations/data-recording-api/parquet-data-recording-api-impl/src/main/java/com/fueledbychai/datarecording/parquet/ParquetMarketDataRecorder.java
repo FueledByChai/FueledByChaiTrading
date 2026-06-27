@@ -29,6 +29,7 @@ import com.fueledbychai.datarecording.MarketDataRecorder;
 import com.fueledbychai.datarecording.RecordedBookEvent;
 import com.fueledbychai.datarecording.RecordedBookSnapshot;
 import com.fueledbychai.datarecording.RecordedFundingRate;
+import com.fueledbychai.datarecording.RecordedOpenInterest;
 import com.fueledbychai.datarecording.RecordedOwnEvent;
 import com.fueledbychai.datarecording.RecordedTrade;
 import com.jerolba.carpet.CarpetWriter;
@@ -57,6 +58,7 @@ public final class ParquetMarketDataRecorder implements MarketDataRecorder {
     static final String DATA_TYPE_BOOK_SNAPSHOTS = "book_snapshots";
     static final String DATA_TYPE_OWN_EVENTS = "own_events";
     static final String DATA_TYPE_FUNDING = "funding";
+    static final String DATA_TYPE_OPEN_INTEREST = "open_interest";
 
     private static final DateTimeFormatter FILE_TS =
             DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss").withZone(ZoneOffset.UTC);
@@ -131,6 +133,15 @@ public final class ParquetMarketDataRecorder implements MarketDataRecorder {
         }
         enqueue(PartitionKey.of(DATA_TYPE_FUNDING, f.exchange(), f.symbol(), f.recvTimestampMicros()),
                 f.recvTimestampMicros(), f);
+    }
+
+    @Override
+    public void recordOpenInterest(RecordedOpenInterest oi) {
+        if (oi == null) {
+            return;
+        }
+        enqueue(PartitionKey.of(DATA_TYPE_OPEN_INTEREST, oi.exchange(), oi.symbol(), oi.recvTimestampMicros()),
+                oi.recvTimestampMicros(), oi);
     }
 
     private void enqueue(PartitionKey key, long recvMicros, Object row) {
@@ -309,6 +320,7 @@ public final class ParquetMarketDataRecorder implements MarketDataRecorder {
             case DATA_TYPE_BOOK_SNAPSHOTS -> buildCarpet(file, RecordedBookSnapshot.class);
             case DATA_TYPE_OWN_EVENTS -> buildCarpet(file, RecordedOwnEvent.class);
             case DATA_TYPE_FUNDING -> buildCarpet(file, RecordedFundingRate.class);
+            case DATA_TYPE_OPEN_INTEREST -> buildCarpet(file, RecordedOpenInterest.class);
             default -> throw new IllegalArgumentException("Unknown dataType: " + dataType);
         };
     }

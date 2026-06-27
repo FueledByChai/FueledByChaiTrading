@@ -15,11 +15,18 @@ public class MarketsSummaryWebSocketClient {
     protected Map<Ticker, ParadexOrderBook> orderBooks = new HashMap<>();
     protected String wsUrl = "wss://ws.api.prod.paradex.trade/v1";
     protected MarketsSummaryWebSocketProcessor marketsSummaryProcessor;
+    // Currently-live WS client. Reconnects are driven by the processor's
+    // closed-listener calling back into start(); without tracking + closing the
+    // prior client, each reconnect leaked a live connection (duplicate streams →
+    // N× ticks → dispatch-queue/heap blowup, 2026-06-25).
+    protected ParadexWebSocketClient marketsSummaryWSClient;
 
-    public void startMarketsSummaryWSClient(Ticker ticker, MarketsSummaryUpdateListener marketsSummaryListener) {
+    public synchronized void startMarketsSummaryWSClient(Ticker ticker,
+            MarketsSummaryUpdateListener marketsSummaryListener) {
         try {
+            closeQuietly(marketsSummaryWSClient);
             logger.info("Starting markets summary WebSocket client");
-            ParadexWebSocketClient marketsSummaryWSClient = new ParadexWebSocketClient(wsUrl,
+            marketsSummaryWSClient = new ParadexWebSocketClient(wsUrl,
                     "markets_summary." + ticker.getSymbol(),
                     getMarketsSummaryProcessor(ticker, marketsSummaryListener));
             marketsSummaryWSClient.connect();
@@ -27,6 +34,16 @@ public class MarketsSummaryWebSocketClient {
             throw new IllegalStateException(e);
         }
 
+    }
+
+    static void closeQuietly(ParadexWebSocketClient client) {
+        if (client != null) {
+            try {
+                client.close();
+            } catch (Exception ignore) {
+                // already closed / closing — nothing to do
+            }
+        }
     }
 
     protected MarketsSummaryWebSocketProcessor getMarketsSummaryProcessor(Ticker ticker,

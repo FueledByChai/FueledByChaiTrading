@@ -32,6 +32,14 @@ public interface MarketDataRecorder extends AutoCloseable {
         // no-op by default
     }
 
+    /**
+     * Persist a single open-interest observation. Defaults to a no-op so existing sinks remain
+     * source-compatible; backends that record open interest override this.
+     */
+    default void recordOpenInterest(RecordedOpenInterest openInterest) {
+        // no-op by default
+    }
+
     /** Flush any buffered rows to durable storage. Best-effort; may be a no-op. */
     void flush();
 
