@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(mvn test:*)",
-      "Bash(find ~/Code/JavaProjects/FueledByChaiTrading/implementations/broker-api/lighter-broker-api-impl -name *.java -type f)"
-    ]
-  }
-}
