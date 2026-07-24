@@ -123,7 +123,22 @@ public class ParadexTranslator implements IParadexTranslator {
         fill.setTaker(paradexFill.getLiquidity() == ParadexFill.LiquidityType.TAKER);
         fill.setCommission(new BigDecimal(paradexFill.getFee()));
         fill.setClientOrderId(paradexFill.getClientId());
+        // Exchange-authoritative realized P&L / funding for this execution. Preferred
+        // over recomputing from avg-entry (avoids the stale-avg-entry phantom).
+        fill.setRealizedPnl(parseDecimalOrNull(paradexFill.getRealizedPnl()));
+        fill.setRealizedFunding(parseDecimalOrNull(paradexFill.getRealizedFunding()));
         return fill;
+    }
+
+    private static BigDecimal parseDecimalOrNull(String s) {
+        if (s == null || s.isBlank()) {
+            return null;
+        }
+        try {
+            return new BigDecimal(s.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @Override

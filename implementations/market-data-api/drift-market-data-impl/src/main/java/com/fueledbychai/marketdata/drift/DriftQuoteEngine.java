@@ -124,6 +124,7 @@ public class DriftQuoteEngine extends QuoteEngine {
         orderBookSubscriptions.clear();
         marketStatsSubscriptions.clear();
         tickerBySymbol.clear();
+        clearSessionListeners();
     }
 
     @Override

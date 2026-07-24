@@ -117,6 +117,9 @@ public class BinanceFuturesQuoteEngine extends QuoteEngine
         level1StreamsStarted.clear();
         depthStreamsStarted.clear();
         tradeStreamsStarted.clear();
+        rawBookListenerMap.clear();
+        rawDepthStreamsStarted.clear();
+        clearSessionListeners();
         webSocketApi.disconnectAll();
     }
 

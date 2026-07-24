@@ -1,6 +1,7 @@
 package com.fueledbychai.broker.hibachi;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
@@ -48,6 +49,7 @@ public class HibachiBroker extends AbstractBasicBroker {
 
     private static final Logger logger = LoggerFactory.getLogger(HibachiBroker.class);
     protected static final String LATENCY_LOGGER = "latency.hibachi";
+    private static final Logger pipelineLatencyLogger = LoggerFactory.getLogger(LATENCY_LOGGER);
 
     protected final IHibachiRestApi restApi;
     protected final HibachiConfiguration config;
@@ -168,6 +170,7 @@ public class HibachiBroker extends AbstractBasicBroker {
 
     @Override
     public BrokerRequestResult placeOrder(OrderTicket order) {
+        long pipelineStartedNs = System.nanoTime();
         checkConnected();
         if (order == null) {
             return new BrokerRequestResult(false, true, "order is required",
@@ -195,13 +198,23 @@ public class HibachiBroker extends AbstractBasicBroker {
                     transport, order.getClientOrderId(), symbol, order.getTradeDirection(),
                     order.getLimitPrice(), order.getSize(), nonce);
             JsonNode response;
+            long sendInvokedNs;
+            long responseReceivedNs;
             if (viaWs) {
-                response = tradeWs.placeOrder(request.params, request.signature, order.getClientOrderId());
+                HibachiTradeWebSocketClient.TimedResponse timed = tradeWs.placeOrderTimed(
+                        request.params, request.signature, order.getClientOrderId());
+                response = timed.response();
+                sendInvokedNs = timed.sendInvokedNs();
+                responseReceivedNs = timed.responseReceivedNs();
             } else {
                 // translatePlace already embeds `signature` in params, so the WS map
                 // doubles as the REST body without further transformation.
+                sendInvokedNs = System.nanoTime();
                 response = restApi.placeOrder(request.params);
+                responseReceivedNs = System.nanoTime();
             }
+            logOrderPipelineTiming("PLACE", order.getClientOrderId(), transport,
+                    pipelineStartedNs, 0L, request, sendInvokedNs, responseReceivedNs);
             logger.info("HB_LIFECYCLE place RECV ({}) clientId={} response={}",
                     transport, order.getClientOrderId(), response);
             BrokerRequestResult result = interpretResponse(response, "placeOrder");
@@ -251,6 +264,7 @@ public class HibachiBroker extends AbstractBasicBroker {
 
     @Override
     public BrokerRequestResult modifyOrder(OrderTicket order) {
+        long pipelineStartedNs = System.nanoTime();
         checkConnected();
         if (order == null) {
             return new BrokerRequestResult(false, true, "order is required",
@@ -295,6 +309,8 @@ public class HibachiBroker extends AbstractBasicBroker {
                 });
             }
             JsonNode response;
+            long sendInvokedNs;
+            long responseReceivedNs;
             if (viaWs) {
                 // REST and WS modify endpoints disagree on field names:
                 //   REST `PUT /trade/order` → updatedQuantity / updatedPrice
@@ -317,13 +333,21 @@ public class HibachiBroker extends AbstractBasicBroker {
                 if (updatedPx != null) {
                     wsParams.put("price", updatedPx);
                 }
-                response = tradeWs.modifyOrder(wsParams, request.signature, order.getClientOrderId());
+                HibachiTradeWebSocketClient.TimedResponse timed = tradeWs.modifyOrderTimed(
+                        wsParams, request.signature, order.getClientOrderId());
+                response = timed.response();
+                sendInvokedNs = timed.sendInvokedNs();
+                responseReceivedNs = timed.responseReceivedNs();
             } else {
                 // REST requires `signature` to ride inside the JSON body.
                 Map<String, Object> body = new LinkedHashMap<>(request.params);
                 body.putIfAbsent("signature", request.signature);
+                sendInvokedNs = System.nanoTime();
                 response = restApi.modifyOrder(body);
+                responseReceivedNs = System.nanoTime();
             }
+            logOrderPipelineTiming("MODIFY", order.getClientOrderId(), transport,
+                    pipelineStartedNs, 0L, request, sendInvokedNs, responseReceivedNs);
             logger.info("HB_LIFECYCLE modify RECV ({}) clientId={} orderId={} response={}",
                     transport, order.getClientOrderId(), order.getOrderId(), response);
             BrokerRequestResult result = interpretResponse(response, "modifyOrder");
@@ -365,6 +389,11 @@ public class HibachiBroker extends AbstractBasicBroker {
 
     @Override
     public BrokerRequestResult cancelOrder(OrderTicket order) {
+        return cancelOrderTimed(order, System.nanoTime(), 0L);
+    }
+
+    private BrokerRequestResult cancelOrderTimed(
+            OrderTicket order, long pipelineStartedNs, long registryLookupNs) {
         checkConnected();
         if (order == null) {
             return new BrokerRequestResult(false, true, "order is required",
@@ -377,7 +406,12 @@ public class HibachiBroker extends AbstractBasicBroker {
             logger.info("HB_LIFECYCLE cancel SEND clientId={} orderId={} symbol={}",
                     order.getClientOrderId(), order.getOrderId(),
                     order.getTicker() != null ? order.getTicker().getSymbol() : null);
-            JsonNode response = tradeWs.cancelOrder(request.params, request.signature, traceId);
+            HibachiTradeWebSocketClient.TimedResponse timed = tradeWs.cancelOrderTimed(
+                    request.params, request.signature, traceId);
+            JsonNode response = timed.response();
+            logOrderPipelineTiming("CANCEL", traceId, "WS",
+                    pipelineStartedNs, registryLookupNs, request,
+                    timed.sendInvokedNs(), timed.responseReceivedNs());
             logger.info("HB_LIFECYCLE cancel RECV clientId={} orderId={} response={}",
                     order.getClientOrderId(), order.getOrderId(), response);
             invalidateOpenOrdersCache();
@@ -404,16 +438,46 @@ public class HibachiBroker extends AbstractBasicBroker {
 
     @Override
     public BrokerRequestResult cancelOrderByClientOrderId(String clientOrderId) {
+        long pipelineStartedNs = System.nanoTime();
         if (clientOrderId == null || clientOrderId.isBlank()) {
             return new BrokerRequestResult(false, true, "clientOrderId is required",
                     BrokerRequestResult.FailureType.VALIDATION_FAILED);
         }
+        long lookupStartedNs = System.nanoTime();
         OrderTicket existing = orderRegistry.getOrderByClientId(clientOrderId);
+        long registryLookupNs = System.nanoTime() - lookupStartedNs;
         if (existing == null) {
             return new BrokerRequestResult(false, true, "Order not found: " + clientOrderId,
                     BrokerRequestResult.FailureType.ORDER_NOT_FOUND);
         }
-        return cancelOrder(existing);
+        return cancelOrderTimed(existing, pipelineStartedNs, registryLookupNs);
+    }
+
+    private void logOrderPipelineTiming(String operation, String traceId, String transport,
+                                        long pipelineStartedNs, long registryLookupNs,
+                                        HibachiTranslator.SignedRequest request,
+                                        long sendInvokedNs, long responseReceivedNs) {
+        if (request == null || request.packStartedNs <= 0L || request.packCompletedNs <= 0L
+                || request.signCompletedNs <= 0L || sendInvokedNs <= 0L || responseReceivedNs <= 0L) {
+            return;
+        }
+        pipelineLatencyLogger.info(
+                "t={} phase=HB_ORDER_PIPELINE op={} transport={} registryLookupUs={} prePackUs={} "
+                        + "payloadPackUs={} signingUs={} signToSendUs={} wireAckUs={} totalToAckUs={}",
+                traceId,
+                operation,
+                transport,
+                nanosToMicros(registryLookupNs),
+                nanosToMicros(request.packStartedNs - pipelineStartedNs - registryLookupNs),
+                nanosToMicros(request.packCompletedNs - request.packStartedNs),
+                nanosToMicros(request.signCompletedNs - request.packCompletedNs),
+                nanosToMicros(sendInvokedNs - request.signCompletedNs),
+                nanosToMicros(responseReceivedNs - sendInvokedNs),
+                nanosToMicros(responseReceivedNs - pipelineStartedNs));
+    }
+
+    private static double nanosToMicros(long nanos) {
+        return Math.max(0L, nanos) / 1_000.0;
     }
 
     @Override
@@ -1001,7 +1065,22 @@ public class HibachiBroker extends AbstractBasicBroker {
         public void onPositionUpdate(JsonNode frame) {
             logger.info("HB_LIFECYCLE ws_event onPositionUpdate frame={}", frame);
             JsonNode body = bodyOf(frame);
-            Position pos = parsePosition(body);
+            if (body == null) {
+                return;
+            }
+            // Incremental position_update frames nest the position fields under
+            // "updatedPosition" while only the symbol lives on the parent node (the
+            // snapshot, by contrast, is flat). Parse the nested node — falling back to
+            // the parent — and pass the parent symbol so quantity/direction resolve.
+            // Without this, quantity reads null on every update and we WRONGLY evict
+            // the live position from the cache, leaving getAllPositions() empty and the
+            // position-reconcile guard blind.
+            JsonNode posNode = body.path("updatedPosition");
+            if (posNode.isMissingNode() || posNode.isNull()) {
+                posNode = body;
+            }
+            String symbol = textOrNull(body, "symbol");
+            Position pos = parsePosition(posNode, symbol);
             if (pos == null || pos.getTicker() == null) {
                 return;
             }
@@ -1248,6 +1327,10 @@ public class HibachiBroker extends AbstractBasicBroker {
         fill.setPrice(readDecimal(body, "price", "fillPrice"));
         fill.setSize(readDecimal(body, "quantity", "size", "filledQuantity"));
         fill.setCommission(readDecimal(body, "fee", "commission"));
+        // Hibachi's trade_update carries exchange-authoritative realized P&L / funding
+        // for this execution — prefer it over recomputing from avg-entry.
+        fill.setRealizedPnl(readDecimal(body, "realizedPnl", "realized_pnl"));
+        fill.setRealizedFunding(readDecimal(body, "realizedFunding", "realized_funding"));
         String side = textOrNull(body, "side", "direction");
         if (side != null) {
             String s = side.toUpperCase();
@@ -1290,10 +1373,17 @@ public class HibachiBroker extends AbstractBasicBroker {
     }
 
     protected Position parsePosition(JsonNode body) {
+        return parsePosition(body, null);
+    }
+
+    protected Position parsePosition(JsonNode body, String symbolOverride) {
         if (body == null || body.isMissingNode() || body.isNull()) {
             return null;
         }
         String symbol = textOrNull(body, "symbol");
+        if (symbol == null) {
+            symbol = symbolOverride;
+        }
         Ticker ticker = lookupTicker(symbol);
         if (ticker == null) {
             return null;
@@ -1304,6 +1394,14 @@ public class HibachiBroker extends AbstractBasicBroker {
             pos.setSize(size.abs());
         }
         BigDecimal avgPrice = readDecimal(body, "openPrice", "averagePrice", "entryPrice");
+        if (avgPrice == null) {
+            // Incremental position_update frames carry entryNotional + quantity but no
+            // explicit price; derive the entry price so avg cost isn't lost on updates.
+            BigDecimal entryNotional = readDecimal(body, "entryNotional");
+            if (entryNotional != null && size != null && size.abs().signum() > 0) {
+                avgPrice = entryNotional.abs().divide(size.abs(), 10, RoundingMode.HALF_UP);
+            }
+        }
         if (avgPrice != null) {
             pos.setAverageCost(avgPrice);
         }

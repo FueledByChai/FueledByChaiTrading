@@ -8,7 +8,7 @@ import com.fueledbychai.okx.common.api.ws.listener.IOkxTradeListener;
 /**
  * Public websocket contract for the Okx exchange integration.
  */
-public interface IOkxWebSocketApi {
+public interface IOkxWebSocketApi extends com.fueledbychai.websocket.ExchangeWebSocketLifecycle {
 
     /**
      * Opens the main websocket session when the exchange requires an explicit
@@ -62,5 +62,6 @@ public interface IOkxWebSocketApi {
     /**
      * Closes all managed websocket connections and cancels reconnect work.
      */
+    @Override
     void disconnectAll();
 }

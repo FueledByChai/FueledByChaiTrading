@@ -97,7 +97,7 @@ public class ParadexQuoteEngine extends QuoteEngine
     @Override
     public void stopEngine() {
         started = false;
-
+        clearSessionListeners();
     }
 
     @Override

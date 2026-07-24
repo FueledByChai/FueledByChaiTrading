@@ -206,6 +206,8 @@ public class HibachiQuoteEngine extends QuoteEngine
         started = false;
         activeSubscriptions.clear();
         volumePollingSymbols.clear();
+        rawBookListenerMap.clear();
+        clearSessionListeners();
         if (volumeTask != null) {
             volumeTask.cancel(false);
             volumeTask = null;

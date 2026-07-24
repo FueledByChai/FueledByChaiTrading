@@ -109,7 +109,10 @@ Required websocket behaviors:
 - reuse a single connection per logical channel when the same subscription is requested repeatedly
 - support multiple listeners per logical channel
 - validate all public inputs before connecting
-- expose `disconnectAll()` to close every managed connection deterministically
+- implement `ExchangeWebSocketLifecycle` and expose `disconnectAll()` to close every managed connection deterministically
+- treat `disconnectAll()` as an idempotent, restartable session boundary: a later connect or subscribe call on the same factory-cached instance must start a fresh session
+- clear callbacks and desired subscriptions owned by the disconnected session so an in-process application restart cannot multiply listeners
+- recreate any executor or scheduler terminated by `disconnectAll()` before scheduling work for the next session
 
 Connection maintenance conventions:
 
@@ -151,6 +154,8 @@ Every new exchange module should include tests for:
 - websocket reconnect after websocket error
 - auth refresh on reconnect for private streams, when applicable
 - explicit shutdown behavior via `disconnectAll()`
+- restart on the same instance after `disconnectAll()`, followed by successful reconnect after a remote close
+- absence of duplicate callback/subscription replay after that restart
 
 If the module has order-entry websocket support, also test:
 

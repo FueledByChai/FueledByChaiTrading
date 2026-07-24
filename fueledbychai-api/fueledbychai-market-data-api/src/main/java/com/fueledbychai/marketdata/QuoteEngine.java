@@ -506,6 +506,31 @@ public abstract class QuoteEngine implements IQuoteEngine {
     }
 
     /**
+     * Clears consumer-owned callbacks at a restartable session boundary.
+     * Concrete cached quote engines should call this from {@code stopEngine()}.
+     */
+    protected void clearSessionListeners() {
+        synchronized (errorListeners) {
+            errorListeners.clear();
+        }
+        synchronized (level1ListenerMap) {
+            level1ListenerMap.clear();
+        }
+        synchronized (globalLevel1ListenerList) {
+            globalLevel1ListenerList.clear();
+        }
+        synchronized (level2ListenerMap) {
+            level2ListenerMap.clear();
+        }
+        synchronized (orderFlowListenerMap) {
+            orderFlowListenerMap.clear();
+        }
+        synchronized (globalOrderFlowListenerList) {
+            globalOrderFlowListenerList.clear();
+        }
+    }
+
+    /**
      * Shuts down the quote processing thread pool. Should be called when the
      * QuoteEngine is no longer needed to prevent resource leaks.
      */

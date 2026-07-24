@@ -23,8 +23,7 @@ public class DriftWebSocketApi implements IDriftWebSocketApi {
     protected final String dlobWebSocketUrl;
     protected final String gatewayWebSocketUrl;
     protected final Map<String, ManagedSubscription<?>> subscriptions = new ConcurrentHashMap<>();
-    protected final ScheduledExecutorService reconnectExecutor = Executors
-            .newSingleThreadScheduledExecutor(r -> new Thread(r, "drift-ws-reconnect"));
+    protected volatile ScheduledExecutorService reconnectExecutor = newReconnectExecutor();
 
     public DriftWebSocketApi(String dlobWebSocketUrl, String gatewayWebSocketUrl) {
         if (dlobWebSocketUrl == null || dlobWebSocketUrl.isBlank()) {
@@ -90,7 +89,8 @@ public class DriftWebSocketApi implements IDriftWebSocketApi {
         if (subscription == null || subscription.closedByUser) {
             return;
         }
-        reconnectExecutor.schedule(subscription::reconnect, subscription.nextReconnectDelayMillis(), TimeUnit.MILLISECONDS);
+        reconnectExecutor().schedule(subscription::reconnect,
+                subscription.nextReconnectDelayMillis(), TimeUnit.MILLISECONDS);
     }
 
     @Override
@@ -99,7 +99,27 @@ public class DriftWebSocketApi implements IDriftWebSocketApi {
             subscription.close();
         }
         subscriptions.clear();
-        reconnectExecutor.shutdownNow();
+        ScheduledExecutorService executor = reconnectExecutor;
+        reconnectExecutor = null;
+        if (executor != null) {
+            executor.shutdownNow();
+        }
+    }
+
+    /** Recreates reconnect infrastructure after a restartable disconnect. */
+    protected synchronized ScheduledExecutorService reconnectExecutor() {
+        if (reconnectExecutor == null || reconnectExecutor.isShutdown()) {
+            reconnectExecutor = newReconnectExecutor();
+        }
+        return reconnectExecutor;
+    }
+
+    private static ScheduledExecutorService newReconnectExecutor() {
+        return Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "drift-ws-reconnect");
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 
     protected String buildOrderBookSubscribeMessage(String marketName, DriftMarketType marketType) {

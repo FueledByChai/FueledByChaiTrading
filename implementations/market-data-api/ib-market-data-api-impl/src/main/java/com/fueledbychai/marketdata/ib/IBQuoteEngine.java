@@ -245,6 +245,7 @@ public class IBQuoteEngine extends AbstractIBQuoteEngine {
         level2QuoteProcessor.stopProcessor();
         errorQuoteProcessor.stopProcessor();
         started = false;
+        clearSessionListeners();
     }
 
     public void startEngine() {

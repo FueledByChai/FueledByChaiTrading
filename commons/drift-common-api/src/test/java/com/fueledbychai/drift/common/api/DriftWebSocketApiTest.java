@@ -3,6 +3,8 @@ package com.fueledbychai.drift.common.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.concurrent.ScheduledExecutorService;
+
 import org.json.JSONObject;
 import org.junit.jupiter.api.Test;
 
@@ -25,6 +27,20 @@ class DriftWebSocketApiTest {
         assertTrue(message.getBoolean("includeIndicative"));
     }
 
+    @Test
+    void disconnectAllAllowsReconnectInfrastructureToRestart() {
+        TestableDriftWebSocketApi api = new TestableDriftWebSocketApi();
+        ScheduledExecutorService first = api.currentReconnectExecutor();
+
+        api.disconnectAll();
+        ScheduledExecutorService restarted = api.restartReconnectExecutor();
+
+        assertTrue(first.isShutdown());
+        assertTrue(!restarted.isShutdown());
+        assertTrue(first != restarted);
+        api.disconnectAll();
+    }
+
     private static final class TestableDriftWebSocketApi extends DriftWebSocketApi {
 
         private TestableDriftWebSocketApi() {
@@ -33,6 +49,14 @@ class DriftWebSocketApiTest {
 
         private String buildSubscribeMessage(String marketName, DriftMarketType marketType) {
             return super.buildOrderBookSubscribeMessage(marketName, marketType);
+        }
+
+        private ScheduledExecutorService currentReconnectExecutor() {
+            return reconnectExecutor;
+        }
+
+        private ScheduledExecutorService restartReconnectExecutor() {
+            return reconnectExecutor();
         }
     }
 }

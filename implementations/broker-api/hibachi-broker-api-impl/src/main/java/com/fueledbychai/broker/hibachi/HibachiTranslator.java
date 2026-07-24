@@ -31,11 +31,23 @@ public class HibachiTranslator {
         public final byte[] signedBytes;
         public final Map<String, Object> params;
         public final String signature;
+        /** Monotonic timestamps for splitting payload construction from signing. */
+        public final long packStartedNs;
+        public final long packCompletedNs;
+        public final long signCompletedNs;
 
         public SignedRequest(byte[] signedBytes, Map<String, Object> params, String signature) {
+            this(signedBytes, params, signature, 0L, 0L, 0L);
+        }
+
+        public SignedRequest(byte[] signedBytes, Map<String, Object> params, String signature,
+                             long packStartedNs, long packCompletedNs, long signCompletedNs) {
             this.signedBytes = signedBytes;
             this.params = params;
             this.signature = signature;
+            this.packStartedNs = packStartedNs;
+            this.packCompletedNs = packCompletedNs;
+            this.signCompletedNs = signCompletedNs;
         }
     }
 
@@ -58,8 +70,11 @@ public class HibachiTranslator {
             throw new IllegalArgumentException("order size must be > 0");
         }
 
+        long packStartedNs = System.nanoTime();
         byte[] signedBytes = HibachiPayloadPacker.packPlaceOrder(nonce, contract, qty, side, price, maxFeesPercent);
+        long packCompletedNs = System.nanoTime();
         String signature = signer.sign(signedBytes);
+        long signCompletedNs = System.nanoTime();
 
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("nonce", nonce);
@@ -97,7 +112,8 @@ public class HibachiTranslator {
         if (clientId != null) {
             params.put("clientId", clientId);
         }
-        return new SignedRequest(signedBytes, params, signature);
+        return new SignedRequest(signedBytes, params, signature,
+                packStartedNs, packCompletedNs, signCompletedNs);
     }
 
     /**
@@ -139,8 +155,11 @@ public class HibachiTranslator {
             throw new IllegalArgumentException("order size must be > 0");
         }
 
+        long packStartedNs = System.nanoTime();
         byte[] signedBytes = HibachiPayloadPacker.packPlaceOrder(nonce, contract, qty, side, price, maxFeesPercent);
+        long packCompletedNs = System.nanoTime();
         String signature = signer.sign(signedBytes);
+        long signCompletedNs = System.nanoTime();
 
         // Hibachi modify body per the venue's example payload:
         //   { orderId|clientId, accountId, nonce, updatedQuantity,
@@ -171,7 +190,8 @@ public class HibachiTranslator {
         if (creationDeadlineMicros > 0L) {
             params.put("creationDeadline", creationDeadlineMicros);
         }
-        return new SignedRequest(signedBytes, params, signature);
+        return new SignedRequest(signedBytes, params, signature,
+                packStartedNs, packCompletedNs, signCompletedNs);
     }
 
     public SignedRequest translateCancel(OrderTicket order,
@@ -182,8 +202,11 @@ public class HibachiTranslator {
         if (signer == null) throw new IllegalArgumentException("signer is required");
 
         Long orderId = parseLongOrNull(order.getOrderId());
+        long packStartedNs = System.nanoTime();
         byte[] signedBytes = HibachiPayloadPacker.packCancelOrder(orderId, nonce);
+        long packCompletedNs = System.nanoTime();
         String signature = signer.sign(signedBytes);
+        long signCompletedNs = System.nanoTime();
 
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("accountId", accountId);
@@ -192,7 +215,8 @@ public class HibachiTranslator {
         } else if (nonce != null) {
             params.put("nonce", String.valueOf(nonce));
         }
-        return new SignedRequest(signedBytes, params, signature);
+        return new SignedRequest(signedBytes, params, signature,
+                packStartedNs, packCompletedNs, signCompletedNs);
     }
 
     public HibachiSide toSide(TradeDirection direction) {

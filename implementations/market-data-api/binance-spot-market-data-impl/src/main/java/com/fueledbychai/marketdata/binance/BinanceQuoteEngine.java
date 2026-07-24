@@ -110,6 +110,9 @@ public class BinanceQuoteEngine extends QuoteEngine
     @Override
     public void stopEngine() {
         started = false;
+        rawBookListenerMap.clear();
+        rawDepthStarted.clear();
+        clearSessionListeners();
         // stopFundingRateUpdates();
     }
 

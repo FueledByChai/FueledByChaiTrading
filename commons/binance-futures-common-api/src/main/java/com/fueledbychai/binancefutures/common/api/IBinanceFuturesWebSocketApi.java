@@ -8,7 +8,7 @@ import com.fueledbychai.websocket.IWebSocketEventListener;
 /**
  * Public websocket contract for the BinanceFutures exchange integration.
  */
-public interface IBinanceFuturesWebSocketApi {
+public interface IBinanceFuturesWebSocketApi extends com.fueledbychai.websocket.ExchangeWebSocketLifecycle {
 
     /**
      * Opens the main websocket session when the exchange requires an explicit
@@ -88,5 +88,6 @@ public interface IBinanceFuturesWebSocketApi {
     /**
      * Closes all managed websocket connections and cancels reconnect work.
      */
+    @Override
     void disconnectAll();
 }

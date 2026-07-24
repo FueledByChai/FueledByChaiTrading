@@ -112,6 +112,7 @@ public class AsterQuoteEngine extends QuoteEngine {
         level1StreamsStarted.clear();
         depthStreamsStarted.clear();
         tradeStreamsStarted.clear();
+        clearSessionListeners();
         webSocketApi.disconnectAll();
     }
 

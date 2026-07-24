@@ -95,6 +95,7 @@ public class HyperliquidQuoteEngine extends QuoteEngine implements OrderBookUpda
     @Override
     public void stopEngine() {
         started = false;
+        clearSessionListeners();
         // stopFundingRateUpdates();
     }
 

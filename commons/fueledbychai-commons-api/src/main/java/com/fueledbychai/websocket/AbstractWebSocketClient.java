@@ -18,6 +18,14 @@ public abstract class AbstractWebSocketClient extends WebSocketClient {
     protected String channel;
     private final String serverUriString;
 
+    // --- WS disconnect diagnostics (debug the reconnect churn, e.g. HYPE-Hibachi
+    // 2026-06-29). onClose logs WHAT (code/remote/idle age); close()/closeBlocking()
+    // overrides log WHO initiated a client-side close, with the caller stack — the
+    // piece the plain "onClose code=1000 remote=false" line was missing. ---
+    private final long wsCreatedAtMs = System.currentTimeMillis();
+    private volatile long wsLastRecvMs = 0L;
+    private volatile long wsLastSendMs = 0L;
+
     public AbstractWebSocketClient(String serverUri, String channel, IWebSocketProcessor processor) throws Exception {
         super(new URI(serverUri));
         setProxy(ProxyConfig.getInstance().getProxy());
@@ -28,6 +36,7 @@ public abstract class AbstractWebSocketClient extends WebSocketClient {
 
     @Override
     public void onMessage(String message) {
+        wsLastRecvMs = System.currentTimeMillis();
         if (WireTap.isEnabled()) {
             WireTap.publishWs(new WireTap.WsEvent(
                     System.currentTimeMillis(),
@@ -42,6 +51,7 @@ public abstract class AbstractWebSocketClient extends WebSocketClient {
 
     @Override
     public void send(String text) {
+        wsLastSendMs = System.currentTimeMillis();
         if (WireTap.isEnabled()) {
             WireTap.publishWs(new WireTap.WsEvent(
                     System.currentTimeMillis(),
@@ -56,7 +66,41 @@ public abstract class AbstractWebSocketClient extends WebSocketClient {
 
     @Override
     public void onClose(int code, String reason, boolean remote) {
+        long now = System.currentTimeMillis();
+        // remote=true => server/peer closed us; remote=false => closed locally (our
+        // close() call or the WS library). connAge + idle gaps distinguish a fresh
+        // connect-fail loop, an idle/timeout close, and a deliberate teardown.
+        logger.info("WS DIAG onClose ex={} ch={} code={} remote={} reason='{}' connAgeMs={} msSinceRecv={} msSinceSend={}",
+                exchangeFromHost(), channel, code, remote, reason,
+                now - wsCreatedAtMs,
+                wsLastRecvMs == 0L ? -1L : now - wsLastRecvMs,
+                wsLastSendMs == 0L ? -1L : now - wsLastSendMs);
         processor.connectionClosed(code, reason, remote);
+    }
+
+    @Override
+    public void close() {
+        logger.info("WS DIAG close() ex={} ch={} connAgeMs={} — initiated by:\n{}",
+                exchangeFromHost(), channel, System.currentTimeMillis() - wsCreatedAtMs, wsCallerStack());
+        super.close();
+    }
+
+    @Override
+    public void closeBlocking() throws InterruptedException {
+        logger.info("WS DIAG closeBlocking() ex={} ch={} connAgeMs={} — initiated by:\n{}",
+                exchangeFromHost(), channel, System.currentTimeMillis() - wsCreatedAtMs, wsCallerStack());
+        super.closeBlocking();
+    }
+
+    /** Compact caller stack (skips the diagnostic frames) so we can see what triggered a client-side WS close. */
+    private static String wsCallerStack() {
+        StackTraceElement[] st = Thread.currentThread().getStackTrace();
+        StringBuilder sb = new StringBuilder();
+        int shown = 0;
+        for (int i = 3; i < st.length && shown < 12; i++, shown++) {
+            sb.append("    at ").append(st[i]).append('\n');
+        }
+        return sb.toString();
     }
 
     @Override
