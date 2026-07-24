@@ -8,7 +8,7 @@ import com.fueledbychai.data.InstrumentType;
 /**
  * Public websocket contract for Bybit market-data streams.
  */
-public interface IBybitWebSocketApi {
+public interface IBybitWebSocketApi extends com.fueledbychai.websocket.ExchangeWebSocketLifecycle {
 
     void connect();
 
@@ -18,5 +18,6 @@ public interface IBybitWebSocketApi {
 
     void subscribeTrades(String instrumentId, InstrumentType instrumentType, IBybitTradeListener listener);
 
+    @Override
     void disconnectAll();
 }

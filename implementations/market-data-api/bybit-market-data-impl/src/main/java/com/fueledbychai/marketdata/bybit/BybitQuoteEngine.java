@@ -132,6 +132,7 @@ public class BybitQuoteEngine extends QuoteEngine {
         tickerSubscriptions.clear();
         orderBookSubscriptions.clear();
         orderFlowSubscriptions.clear();
+        clearSessionListeners();
     }
 
     @Override

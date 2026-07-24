@@ -11,7 +11,7 @@ import com.fueledbychai.websocket.IWebSocketEventListener;
  * Aster exposes Binance-style websocket surfaces for both public spot/perpetual
  * market data and listen-key user streams.
  */
-public interface IAsterWebSocketApi {
+public interface IAsterWebSocketApi extends com.fueledbychai.websocket.ExchangeWebSocketLifecycle {
 
     /**
      * Opens the main websocket session when the exchange requires an explicit
@@ -50,5 +50,6 @@ public interface IAsterWebSocketApi {
     /**
      * Closes all managed websocket connections and cancels reconnect work.
      */
+    @Override
     void disconnectAll();
 }

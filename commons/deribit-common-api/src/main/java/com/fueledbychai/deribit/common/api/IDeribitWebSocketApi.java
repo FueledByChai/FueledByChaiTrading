@@ -7,7 +7,7 @@ import com.fueledbychai.deribit.common.api.ws.listener.IDeribitTradeListener;
 /**
  * Public websocket contract for the Deribit exchange integration.
  */
-public interface IDeribitWebSocketApi {
+public interface IDeribitWebSocketApi extends com.fueledbychai.websocket.ExchangeWebSocketLifecycle {
 
     /**
      * Opens the shared websocket session if it is not already connected.
@@ -41,5 +41,6 @@ public interface IDeribitWebSocketApi {
     /**
      * Closes all managed websocket connections and cancels reconnect work.
      */
+    @Override
     void disconnectAll();
 }

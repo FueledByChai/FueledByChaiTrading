@@ -90,7 +90,12 @@ public interface IQuoteEngine {
     public abstract void startEngine(Properties props);
 
     /**
-     * Stops the quote engine
+     * Stops the current quote-engine session.
+     *
+     * <p>Quote engines are cached process-wide. This operation must therefore be
+     * idempotent and restartable: a later {@link #startEngine()} plus new
+     * subscriptions must create a clean session without retaining listeners from
+     * the stopped consumer.</p>
      */
     public abstract void stopEngine();
 

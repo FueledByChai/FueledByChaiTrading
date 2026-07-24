@@ -125,6 +125,7 @@ public class DyDxLevel1QuoteEngine extends QuoteEngine implements Runnable {
     @Override
     public void stopEngine() {
         started = false;
+        clearSessionListeners();
     }
 
     @Override

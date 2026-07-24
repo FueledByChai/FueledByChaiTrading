@@ -143,6 +143,10 @@ public class OkxQuoteEngine extends QuoteEngine
         fundingRateSubscriptions.clear();
         orderBookSubscriptions.clear();
         orderFlowSubscriptions.clear();
+        rawBookListenerMap.clear();
+        rawBookTickersBySymbol.clear();
+        rawBookSubscriptions.clear();
+        clearSessionListeners();
     }
 
     public ILevel1Quote requestLevel1Snapshot(Ticker ticker) {

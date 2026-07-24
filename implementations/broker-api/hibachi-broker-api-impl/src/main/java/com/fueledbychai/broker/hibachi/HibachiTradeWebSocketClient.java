@@ -44,6 +44,10 @@ import com.fueledbychai.hibachi.common.api.ws.trade.HibachiTradeEnvelope;
  */
 public class HibachiTradeWebSocketClient {
 
+    /** Actual transport timing, captured around the WebSocket send and correlated response. */
+    public record TimedResponse(JsonNode response, long sendInvokedNs, long responseReceivedNs) {}
+    protected record ReceivedMessage(JsonNode response, long receivedNs) {}
+
     private static final Logger logger = LoggerFactory.getLogger(HibachiTradeWebSocketClient.class);
     private static final long DEFAULT_REQUEST_TIMEOUT_MILLIS = 10_000L;
     private static final long SEND_RECONNECT_WAIT_MILLIS = 5_000L;
@@ -52,7 +56,7 @@ public class HibachiTradeWebSocketClient {
     protected final HibachiConfiguration config;
     protected final long accountId;
     protected final String apiKey;
-    protected final Map<Long, CompletableFuture<JsonNode>> pendingRequests = new ConcurrentHashMap<>();
+    protected final Map<Long, CompletableFuture<ReceivedMessage>> pendingRequests = new ConcurrentHashMap<>();
     protected volatile HibachiWebSocketClient client;
     protected volatile HibachiJsonProcessor processor;
     protected volatile HibachiOrderStatusListener orderStatusListener;
@@ -116,20 +120,38 @@ public class HibachiTradeWebSocketClient {
      * Sends an {@code order.place} request and awaits the response.
      */
     public JsonNode placeOrder(Map<String, Object> params, String signature, String traceId) throws Exception {
+        return placeOrderTimed(params, signature, traceId).response();
+    }
+
+    public TimedResponse placeOrderTimed(
+            Map<String, Object> params, String signature, String traceId) throws Exception {
         long id = HibachiTradeEnvelope.nextCorrelationId();
-        return await(id, HibachiTradeEnvelope.buildPlace(id, params, signature), "HB_PLACE_ORDER_WS", traceId);
+        return awaitTimed(id, HibachiTradeEnvelope.buildPlace(id, params, signature),
+                "HB_PLACE_ORDER_WS", traceId);
     }
 
     /** Sends an {@code order.modify} request and awaits the response. */
     public JsonNode modifyOrder(Map<String, Object> params, String signature, String traceId) throws Exception {
+        return modifyOrderTimed(params, signature, traceId).response();
+    }
+
+    public TimedResponse modifyOrderTimed(
+            Map<String, Object> params, String signature, String traceId) throws Exception {
         long id = HibachiTradeEnvelope.nextCorrelationId();
-        return await(id, HibachiTradeEnvelope.buildModify(id, params, signature), "HB_MODIFY_ORDER_WS", traceId);
+        return awaitTimed(id, HibachiTradeEnvelope.buildModify(id, params, signature),
+                "HB_MODIFY_ORDER_WS", traceId);
     }
 
     /** Sends an {@code order.cancel} request and awaits the response. */
     public JsonNode cancelOrder(Map<String, Object> params, String signature, String traceId) throws Exception {
+        return cancelOrderTimed(params, signature, traceId).response();
+    }
+
+    public TimedResponse cancelOrderTimed(
+            Map<String, Object> params, String signature, String traceId) throws Exception {
         long id = HibachiTradeEnvelope.nextCorrelationId();
-        return await(id, HibachiTradeEnvelope.buildCancel(id, params, signature), "HB_CANCEL_ORDER_WS", traceId);
+        return awaitTimed(id, HibachiTradeEnvelope.buildCancel(id, params, signature),
+                "HB_CANCEL_ORDER_WS", traceId);
     }
 
     /** Sends an {@code orders.cancel} (cancel-all) request and awaits the response. */
@@ -160,11 +182,17 @@ public class HibachiTradeWebSocketClient {
     }
 
     protected JsonNode await(long id, String message, String spanPhase, String traceId) throws Exception {
-        CompletableFuture<JsonNode> future = new CompletableFuture<>();
+        return awaitTimed(id, message, spanPhase, traceId).response();
+    }
+
+    protected TimedResponse awaitTimed(
+            long id, String message, String spanPhase, String traceId) throws Exception {
+        CompletableFuture<ReceivedMessage> future = new CompletableFuture<>();
         pendingRequests.put(id, future);
         try (var s = Span.start(spanPhase, traceId == null ? String.valueOf(id) : traceId, LATENCY_LOGGER)) {
-            send(message);
-            return future.get(DEFAULT_REQUEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
+            long sendInvokedNs = sendAndTimestamp(message);
+            ReceivedMessage received = future.get(DEFAULT_REQUEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
+            return new TimedResponse(received.response(), sendInvokedNs, received.receivedNs());
         } catch (TimeoutException te) {
             pendingRequests.remove(id);
             throw new IllegalStateException("Timed out waiting for Hibachi trade WS response id=" + id, te);
@@ -172,6 +200,10 @@ public class HibachiTradeWebSocketClient {
     }
 
     protected void send(String message) {
+        sendAndTimestamp(message);
+    }
+
+    protected long sendAndTimestamp(String message) {
         if (!ensureConnected()) {
             throw new IllegalStateException("Hibachi trade WS is not connected");
         }
@@ -180,7 +212,9 @@ public class HibachiTradeWebSocketClient {
             throw new IllegalStateException("Hibachi trade WS is not connected");
         }
         logger.info("Hibachi trade WS raw -> {}", message);
+        long sendInvokedNs = System.nanoTime();
         c.send(message);
+        return sendInvokedNs;
     }
 
     /**
@@ -342,14 +376,15 @@ public class HibachiTradeWebSocketClient {
     }
 
     protected void onMessage(JsonNode message) {
+        long responseReceivedNs = System.nanoTime();
         if (message == null) {
             return;
         }
         if (message.has("id")) {
             long id = message.path("id").asLong();
-            CompletableFuture<JsonNode> pending = pendingRequests.remove(id);
+            CompletableFuture<ReceivedMessage> pending = pendingRequests.remove(id);
             if (pending != null) {
-                pending.complete(message);
+                pending.complete(new ReceivedMessage(message, responseReceivedNs));
             }
         }
         Consumer<JsonNode> raw = rawListener;
@@ -387,7 +422,7 @@ public class HibachiTradeWebSocketClient {
     }
 
     protected void failPending(Throwable cause) {
-        for (CompletableFuture<JsonNode> pending : pendingRequests.values()) {
+        for (CompletableFuture<ReceivedMessage> pending : pendingRequests.values()) {
             pending.completeExceptionally(cause);
         }
         pendingRequests.clear();

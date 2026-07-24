@@ -23,7 +23,7 @@ import org.json.JSONObject;
  * {@link #disconnectAll()}. Concrete implementations may also provide optional
  * dedicated transaction sockets for lower-latency order entry.
  */
-public interface ILighterWebSocketApi {
+public interface ILighterWebSocketApi extends com.fueledbychai.websocket.ExchangeWebSocketLifecycle {
 
     /**
      * Subscribes to market stats for a single market.
@@ -170,5 +170,6 @@ public interface ILighterWebSocketApi {
     /**
      * Closes all managed websocket connections and cancels any reconnect work.
      */
+    @Override
     void disconnectAll();
 }

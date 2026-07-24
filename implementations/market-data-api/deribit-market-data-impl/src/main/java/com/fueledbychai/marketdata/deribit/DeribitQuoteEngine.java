@@ -134,6 +134,7 @@ public class DeribitQuoteEngine extends QuoteEngine {
         tickerSubscriptions.clear();
         orderBookSubscriptions.clear();
         orderFlowSubscriptions.clear();
+        clearSessionListeners();
     }
 
     @Override

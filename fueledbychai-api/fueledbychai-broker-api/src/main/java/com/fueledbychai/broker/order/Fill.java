@@ -18,6 +18,12 @@ public class Fill {
     protected BigDecimal commission;
     protected String fillId;
     protected boolean isTaker;
+    // Exchange-reported realized P&L / funding for THIS execution (closing portion
+    // only; opening fills report 0). Authoritative — handles partial fills, flips,
+    // and avg-entry natively. Null when the venue doesn't supply it. Consumers
+    // should prefer this over recomputing realized from (price - avgEntry) * size.
+    protected BigDecimal realizedPnl;
+    protected BigDecimal realizedFunding;
 
     public Ticker getTicker() {
         return ticker;
@@ -107,6 +113,24 @@ public class Fill {
         this.isSnapshot = isSnapshot;
     }
 
+    /** Exchange-reported realized P&L for this execution (null if the venue didn't supply it). */
+    public BigDecimal getRealizedPnl() {
+        return realizedPnl;
+    }
+
+    public void setRealizedPnl(BigDecimal realizedPnl) {
+        this.realizedPnl = realizedPnl;
+    }
+
+    /** Exchange-reported realized funding for this execution (null if not supplied). */
+    public BigDecimal getRealizedFunding() {
+        return realizedFunding;
+    }
+
+    public void setRealizedFunding(BigDecimal realizedFunding) {
+        this.realizedFunding = realizedFunding;
+    }
+
     @Override
     public int hashCode() {
         final int prime = 31;
@@ -187,7 +211,8 @@ public class Fill {
     public String toString() {
         return "Fill [ticker=" + ticker + ", price=" + price + ", size=" + size + ", side=" + side + ", time=" + time
                 + ", orderId=" + orderId + ", clientOrderId=" + clientOrderId + ", commission=" + commission
-                + ", fillId=" + fillId + ", isTaker=" + isTaker + ", isSnapshot=" + isSnapshot + "]";
+                + ", fillId=" + fillId + ", isTaker=" + isTaker + ", isSnapshot=" + isSnapshot
+                + ", realizedPnl=" + realizedPnl + ", realizedFunding=" + realizedFunding + "]";
     }
 
 }

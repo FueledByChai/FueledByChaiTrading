@@ -627,8 +627,7 @@ public abstract class AbstractIBQuoteEngine extends QuoteEngine implements IBCon
 
     @Override
     public void stopEngine() {
-        // TODO Auto-generated method stub
-
+        clearSessionListeners();
     }
 
     @Override

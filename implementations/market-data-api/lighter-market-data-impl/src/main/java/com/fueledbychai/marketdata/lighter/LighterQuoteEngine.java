@@ -139,6 +139,7 @@ public class LighterQuoteEngine extends QuoteEngine {
         orderBookTickerByMarketId.clear();
         orderFlowTickerByMarketId.clear();
         orderBookStateByMarketId.clear();
+        clearSessionListeners();
     }
 
     @Override

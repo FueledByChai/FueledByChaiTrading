@@ -54,6 +54,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     <module>drift-common-api</module>
     <module>aster-common-api</module>
     <module>hibachi-common-api</module>
+    <module>grvt-common-api</module>
   </modules>
   
 </project>
