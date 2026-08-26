@@ -685,7 +685,64 @@ public class HibachiBroker extends AbstractBasicBroker {
                 out.setTradeDirection(TradeDirection.SELL);
             }
         }
+        // Status MUST come from the venue, never from `existing`.
+        //
+        // /trade/orders returns only currently-ACTIVE orders (open, partially
+        // filled, triggered) — Hibachi's own SDK exposes it as get_pending_orders.
+        // So anything present in this response is live at the venue by definition.
+        //
+        // Previously this method never touched the status, so when `existing` was
+        // reused from the registry the ticket carried whatever the last WS event
+        // had written — frequently CANCELED. chaiwala's reconcile reads
+        // getCurrentStatus() to decide whether an untracked open order is a real
+        // orphan, saw that stale CANCELED, and skipped it as a "stale
+        // terminal-status echo". The order then leaked permanently: never tracked
+        // locally, never cancelled. HYPE-Hibachi 2026-07-28 skipped 5 live orders
+        // 144,294 times this way while the venue kept reporting them open.
+        //
+        // Fall back to UNKNOWN rather than inheriting: UNKNOWN is deliberately NOT
+        // in chaiwala's TERMINAL_STATUSES, so an absent or unrecognised status is
+        // treated as live and gets cancelled, which is the safe direction here.
+        OrderStatus.Status venueStatus = resolveRestOrderStatus(node);
+        if (venueStatus == OrderStatus.Status.UNKNOWN && logger.isDebugEnabled()) {
+            logger.debug("HB_LIFECYCLE /trade/orders entry has no recognised status field "
+                    + "(orderId={}, fields={}); treating as live so reconcile can cancel it",
+                    orderId, fieldNames(node));
+        }
+        out.setCurrentStatus(venueStatus);
         return out;
+    }
+
+    /**
+     * Resolves the venue-reported status of a single {@code /trade/orders} entry.
+     *
+     * <p>Never returns null and never returns a terminal status for an absent or
+     * unrecognised field — an unknown shape must stay cancellable rather than be
+     * mistaken for an already-dead order. Static and package-visible so the
+     * invariant can be tested without constructing a live broker.
+     */
+    static OrderStatus.Status resolveRestOrderStatus(JsonNode node) {
+        if (node == null) {
+            return OrderStatus.Status.UNKNOWN;
+        }
+        OrderStatus.Status parsed = parseOrderStatus(
+                textOrNull(node, "status", "orderStatus", "state"));
+        return parsed != null ? parsed : OrderStatus.Status.UNKNOWN;
+    }
+
+    /** Comma-joined field names of a JSON object, for diagnosing shape drift. */
+    private static String fieldNames(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        node.fieldNames().forEachRemaining(n -> {
+            if (sb.length() > 0) {
+                sb.append(',');
+            }
+            sb.append(n);
+        });
+        return sb.toString();
     }
 
     /**
