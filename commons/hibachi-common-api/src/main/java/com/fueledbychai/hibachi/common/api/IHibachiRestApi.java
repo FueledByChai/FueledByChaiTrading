@@ -54,6 +54,12 @@ public interface IHibachiRestApi {
     /** Historical klines for a symbol. */
     JsonNode getKlines(String symbol, String interval, Integer limit);
 
+    /**
+     * Historical klines within a time window (epoch millis, either bound may be null).
+     * The venue caps each response at 1000 candles, so page for longer windows.
+     */
+    JsonNode getKlines(String symbol, String interval, Long fromMs, Long toMs, Integer limit);
+
     /** Open interest for a symbol. */
     JsonNode getOpenInterest(String symbol);
 
