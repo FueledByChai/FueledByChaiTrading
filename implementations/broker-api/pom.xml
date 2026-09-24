@@ -48,5 +48,6 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
         <module>aster-broker-api-impl</module>
         <module>hibachi-broker-api-impl</module>
         <module>grvt-broker-api-impl</module>
+    <module>qfex-broker-api-impl</module>
     </modules>
 </project>

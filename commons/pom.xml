@@ -55,6 +55,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     <module>aster-common-api</module>
     <module>hibachi-common-api</module>
     <module>grvt-common-api</module>
+    <module>qfex-common-api</module>
   </modules>
   
 </project>
