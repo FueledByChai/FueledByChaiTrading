@@ -13,6 +13,7 @@ import com.fueledbychai.hibachi.common.api.HibachiContract;
 import com.fueledbychai.hibachi.common.api.order.HibachiOrderFlag;
 import com.fueledbychai.hibachi.common.api.order.HibachiOrderType;
 import com.fueledbychai.hibachi.common.api.order.HibachiSide;
+import com.fueledbychai.hibachi.common.api.order.HibachiTriggerDirection;
 import com.fueledbychai.hibachi.common.api.signer.HibachiPayloadPacker;
 import com.fueledbychai.hibachi.common.api.signer.IHibachiSigner;
 
@@ -90,6 +91,13 @@ public class HibachiTranslator {
         HibachiOrderFlag flag = toFlag(order);
         if (flag != null) {
             params.put("orderFlags", flag.getWireValue());
+        }
+        // STOP / STOP_LIMIT become Hibachi trigger orders. triggerPrice and
+        // triggerDirection are JSON-only (not in signed bytes), matching the
+        // venue SDK's _create_order_request_data.
+        if (isTriggerOrder(order)) {
+            params.put("triggerPrice", requireStopPrice(order).toPlainString());
+            params.put("triggerDirection", toTriggerDirection(order).getWireValue());
         }
         // creationDeadline is JSON-only (not in signed bytes). Microseconds
         // since epoch — same unit as nonce. The venue compares it against its
@@ -185,6 +193,13 @@ public class HibachiTranslator {
             params.put("updatedPrice", price.toPlainString());
         }
         params.put("maxFeesPercent", maxFeesPercent.toPlainString());
+        // The venue SDK sends both spellings for trigger updates, same as it
+        // does for quantity/price.
+        if (isTriggerOrder(order)) {
+            String trigger = requireStopPrice(order).toPlainString();
+            params.put("updatedTriggerPrice", trigger);
+            params.put("triggerPrice", trigger);
+        }
         // Refresh the order's deadline on every modify so the venue doesn't
         // self-cancel mid-life. JSON-only, not in signed bytes.
         if (creationDeadlineMicros > 0L) {
@@ -249,6 +264,29 @@ public class HibachiTranslator {
             default:
                 return HibachiOrderType.MARKET;
         }
+    }
+
+    public boolean isTriggerOrder(OrderTicket order) {
+        return order != null
+                && (order.getType() == OrderTicket.Type.STOP || order.getType() == OrderTicket.Type.STOP_LIMIT);
+    }
+
+    /**
+     * Standard stop semantics: a buy stop fires when price rises through the
+     * trigger, a sell stop when it falls through it.
+     */
+    public HibachiTriggerDirection toTriggerDirection(OrderTicket order) {
+        return toSide(order.getTradeDirection()) == HibachiSide.BID
+                ? HibachiTriggerDirection.HIGH
+                : HibachiTriggerDirection.LOW;
+    }
+
+    private static BigDecimal requireStopPrice(OrderTicket order) {
+        BigDecimal stop = order.getStopPrice();
+        if (stop == null || stop.signum() <= 0) {
+            throw new IllegalArgumentException(order.getType() + " order requires a stopPrice > 0");
+        }
+        return stop;
     }
 
     public HibachiOrderFlag toFlag(OrderTicket order) {
