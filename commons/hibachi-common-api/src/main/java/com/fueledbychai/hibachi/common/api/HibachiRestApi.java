@@ -171,6 +171,17 @@ public class HibachiRestApi extends BaseRestApi implements IHibachiRestApi {
     }
 
     @Override
+    public JsonNode getKlines(String symbol, String interval, Long fromMs, Long toMs, Integer limit) {
+        Map<String, String> params = new LinkedHashMap<>();
+        if (symbol != null) params.put("symbol", symbol);
+        if (interval != null) params.put("interval", interval);
+        if (limit != null) params.put("limit", limit.toString());
+        if (fromMs != null) params.put("fromMs", fromMs.toString());
+        if (toMs != null) params.put("toMs", toMs.toString());
+        return publicRequest(dataBaseUrl, "/market/data/klines", params);
+    }
+
+    @Override
     public JsonNode getOpenInterest(String symbol) {
         return publicRequest(dataBaseUrl, "/market/data/open-interest", symbolParams(symbol));
     }
