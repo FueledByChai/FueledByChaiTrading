@@ -60,6 +60,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     <module>drift-market-data-impl</module>
     <module>hibachi-market-data-impl</module>
     <module>grvt-market-data-impl</module>
+    <module>qfex-market-data-impl</module>
   </modules>
   
 </project>
