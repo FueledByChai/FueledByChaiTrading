@@ -674,6 +674,18 @@ public class HibachiBroker extends AbstractBasicBroker {
         if (totalQty != null) {
             out.setSize(totalQty);
         }
+        // Trigger (stop) orders carry triggerPrice; surface it as the stop
+        // price and, for tickets we didn't originate, infer the type.
+        BigDecimal triggerPrice = readDecimal(node, "triggerPrice");
+        if (triggerPrice != null) {
+            out.setStopPrice(triggerPrice);
+            if (out.getType() == null) {
+                String orderType = textOrNull(node, "orderType");
+                out.setType("LIMIT".equalsIgnoreCase(orderType)
+                        ? OrderTicket.Type.STOP_LIMIT
+                        : OrderTicket.Type.STOP);
+            }
+        }
         if (filled != null) {
             out.setFilledSize(filled);
         }
