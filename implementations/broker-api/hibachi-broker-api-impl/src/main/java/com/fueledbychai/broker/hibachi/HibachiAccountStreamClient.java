@@ -209,7 +209,9 @@ public class HibachiAccountStreamClient {
             return;
         }
         synchronized (this) {
-            if (reconnectTask != null && !reconnectTask.isDone()) {
+            // Rechecked under the monitor: disconnect() may have run while we
+            // waited for it, and must not be followed by a new scheduler.
+            if (shutdown || (reconnectTask != null && !reconnectTask.isDone())) {
                 return;
             }
             if (reconnectScheduler == null) {
