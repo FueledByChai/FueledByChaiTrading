@@ -82,6 +82,7 @@ public class HibachiTradeWebSocketClient {
             return;
         }
         shutdown = false;
+        startReconnectWatchdog();
         try {
             doConnect();
         } catch (Exception e) {
@@ -360,8 +361,42 @@ public class HibachiTradeWebSocketClient {
             }
         } catch (Exception e) {
             logger.warn("Hibachi trade WS reconnect failed; rescheduling", e);
+            // This attempt IS reconnectTask and is still running, so
+            // scheduleReconnect() would see a pending task and skip - ending
+            // the retry chain for good (seen live after a short internet drop).
+            synchronized (this) {
+                reconnectTask = null;
+            }
             scheduleReconnect();
         }
+    }
+
+    protected volatile ScheduledExecutorService reconnectWatchdog;
+
+    /**
+     * Every 30 s: if the socket is down and no reconnect is pending, start
+     * one. A backstop for any path that drops the retry chain.
+     */
+    protected synchronized void startReconnectWatchdog() {
+        if (reconnectWatchdog != null) {
+            return;
+        }
+        reconnectWatchdog = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "hibachi-trade-reconnect-watchdog");
+            t.setDaemon(true);
+            return t;
+        });
+        reconnectWatchdog.scheduleWithFixedDelay(() -> {
+            try {
+                ScheduledFuture<?> pending = reconnectTask;
+                if (!shutdown && !isConnected() && (pending == null || pending.isDone())) {
+                    logger.warn("Hibachi trade WS down with no reconnect pending; restarting reconnects");
+                    scheduleReconnect();
+                }
+            } catch (Exception e) {
+                logger.warn("Hibachi trade WS reconnect watchdog failed", e);
+            }
+        }, 30, 30, TimeUnit.SECONDS);
     }
 
     protected synchronized void cancelReconnect() {
