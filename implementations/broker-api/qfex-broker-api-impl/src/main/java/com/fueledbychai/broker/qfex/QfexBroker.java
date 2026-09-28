@@ -309,7 +309,9 @@ public class QfexBroker extends AbstractBasicBroker implements QfexTradeListener
     @Override
     public List<Position> getAllPositions() {
         refreshPositionsFromRest();
-        return new ArrayList<>(positions.values());
+        synchronized (positions) {
+            return new ArrayList<>(positions.values());
+        }
     }
 
     private volatile long positionsRefreshedAtMs;
@@ -333,16 +335,17 @@ public class QfexBroker extends AbstractBasicBroker implements QfexTradeListener
             if (!list.isArray()) {
                 return;
             }
-            java.util.Set<String> open = new java.util.HashSet<>();
+            Map<String, Position> fresh = new java.util.HashMap<>();
             for (JsonNode p : list) {
-                onPosition(p);
-                String symbol = p.path("symbol").asText(null);
-                BigDecimal signed = QfexTranslator.decimal(p, "position");
-                if (symbol != null && signed != null && signed.signum() != 0) {
-                    open.add(symbol);
+                Position pos = toPosition(p);
+                if (pos != null) {
+                    fresh.put(p.path("symbol").asText(), pos);
                 }
             }
-            positions.keySet().retainAll(open);
+            synchronized (positions) { // readers see the old or the new snapshot, never a mix
+                positions.clear();
+                positions.putAll(fresh);
+            }
         } catch (RuntimeException e) {
             log.warn("QFEX positions REST refresh failed; using the socket's view: {}", e.getMessage());
         } finally {
@@ -397,14 +400,25 @@ public class QfexBroker extends AbstractBasicBroker implements QfexTradeListener
         if (symbol == null) {
             return;
         }
-        BigDecimal signed = QfexTranslator.decimal(p, "position");
-        if (signed == null || signed.signum() == 0) {
-            positions.remove(symbol);
-            return;
+        Position pos = toPosition(p);
+        synchronized (positions) {
+            if (pos == null) {
+                positions.remove(symbol);
+            } else {
+                positions.put(symbol, pos);
+            }
         }
-        Position pos = new Position(ticker(symbol), signed.signum() > 0 ? Side.LONG : Side.SHORT, signed.abs(),
+    }
+
+    /** A position frame as a Position; null when flat or unparseable. */
+    private Position toPosition(JsonNode p) {
+        String symbol = p.path("symbol").asText(null);
+        BigDecimal signed = QfexTranslator.decimal(p, "position");
+        if (symbol == null || signed == null || signed.signum() == 0) {
+            return null;
+        }
+        return new Position(ticker(symbol), signed.signum() > 0 ? Side.LONG : Side.SHORT, signed.abs(),
                 QfexTranslator.decimal(p, "average_price"), Position.Status.OPEN);
-        positions.put(symbol, pos);
     }
 
     @Override
