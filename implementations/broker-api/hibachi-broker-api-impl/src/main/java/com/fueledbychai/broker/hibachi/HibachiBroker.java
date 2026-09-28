@@ -768,7 +768,42 @@ public class HibachiBroker extends AbstractBasicBroker {
 
     @Override
     public List<Position> getAllPositions() {
+        refreshPositionsFromRest();
         return new ArrayList<>(positionsCache.values());
+    }
+
+    private volatile long positionsRefreshedAtMs;
+
+    /**
+     * The position cache is fed by the account stream, which can silently
+     * stop delivering (an expired listenKey). Positions drive risk decisions,
+     * so read them from the venue; fall back to the cache if REST fails.
+     * Refreshed at most every 2 seconds.
+     */
+    protected synchronized void refreshPositionsFromRest() {
+        long now = System.currentTimeMillis();
+        if (now - positionsRefreshedAtMs < 2_000) {
+            return;
+        }
+        try {
+            JsonNode info = restApi.getTradeAccountInfo();
+            JsonNode positions = info == null ? null : info.path("positions");
+            if (positions == null || !positions.isArray()) {
+                return;
+            }
+            Map<String, Position> fresh = new java.util.HashMap<>();
+            for (JsonNode p : positions) {
+                Position pos = parsePosition(p);
+                if (pos != null && pos.getTicker() != null) {
+                    fresh.put(pos.getTicker().getSymbol(), pos);
+                }
+            }
+            positionsCache.keySet().retainAll(fresh.keySet());
+            positionsCache.putAll(fresh);
+            positionsRefreshedAtMs = now;
+        } catch (Exception e) {
+            logger.warn("Hibachi positions REST refresh failed; using the stream cache", e);
+        }
     }
 
     @Override
