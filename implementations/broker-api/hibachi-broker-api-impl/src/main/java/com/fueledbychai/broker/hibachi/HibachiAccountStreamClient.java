@@ -214,6 +214,12 @@ public class HibachiAccountStreamClient {
             return;
         }
         logger.info("Hibachi account WS raw <- {}", message);
+        if (isStreamGone(message)) {
+            // The listenKey is dead: pings keep "succeeding" at the socket
+            // level, but no account events will ever arrive on it again.
+            forceReconnect(message.path("event").isMissingNode() ? "subscription not found" : "stream expired");
+            return;
+        }
         HibachiAccountEventListener l = eventListener;
 
         JsonNode result = message.path("result");
@@ -315,6 +321,34 @@ public class HibachiAccountStreamClient {
             return key + ": " + payload.toString();
         }
         return error.toString();
+    }
+
+    /**
+     * Hibachi expires the account stream's listenKey after some hours: it
+     * sends {@code {"event":"stream_expired"}} and then answers every ping
+     * with 404 "Subscription ... not found".
+     */
+    static boolean isStreamGone(JsonNode message) {
+        if ("stream_expired".equalsIgnoreCase(message.path("event").asText(""))) {
+            return true;
+        }
+        return message.path("status").asInt(0) == 404
+                && message.path("error").path("message").asText("").toLowerCase().contains("not found");
+    }
+
+    /** Drops the socket and reconnects, which starts a new stream (new listenKey and snapshot). */
+    protected void forceReconnect(String reason) {
+        if (shutdown) {
+            return;
+        }
+        logger.warn("Hibachi account stream lost ({}); reconnecting for a new listenKey", reason);
+        synchronized (this) {
+            stopPing();
+            listenKey = null;
+            cleanupClient();
+        }
+        notifyState(false);
+        scheduleReconnect();
     }
 
     protected void onClosed() {
