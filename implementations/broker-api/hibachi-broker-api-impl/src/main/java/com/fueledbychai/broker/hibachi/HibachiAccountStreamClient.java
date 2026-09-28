@@ -43,6 +43,20 @@ public class HibachiAccountStreamClient {
     protected volatile boolean shutdown;
     protected final AtomicLong listenKeyHolder = new AtomicLong();
     protected volatile String listenKey;
+    /**
+     * Bumped for every socket. Callbacks from an older socket (a close or
+     * message arriving after its replacement connected) are ignored, so they
+     * can't tear down the new stream.
+     */
+    protected volatile long generation;
+    /** True once Hibachi has answered stream.start with a listenKey on the current socket. */
+    protected volatile boolean streamReady;
+    protected static final long STREAM_READY_TIMEOUT_MS = 15_000;
+    protected final ScheduledExecutorService watchdog = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "hibachi-account-watchdog");
+        t.setDaemon(true);
+        return t;
+    });
     protected volatile HibachiAccountEventListener eventListener;
     protected volatile Consumer<Boolean> connectionStateListener;
 
@@ -72,6 +86,22 @@ public class HibachiAccountStreamClient {
         } catch (Exception e) {
             throw new IllegalStateException("Failed to open Hibachi account WS", e);
         }
+        // Not connected until the account subscription exists; wait for it
+        // here so callers don't start trading on a stream that isn't there.
+        long deadline = System.currentTimeMillis() + STREAM_READY_TIMEOUT_MS;
+        while (!streamReady && System.currentTimeMillis() < deadline) {
+            try {
+                wait(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        if (!streamReady) {
+            disconnect();
+            throw new IllegalStateException("Hibachi account stream did not start within "
+                    + STREAM_READY_TIMEOUT_MS + " ms");
+        }
     }
 
     public synchronized void disconnect() {
@@ -80,12 +110,14 @@ public class HibachiAccountStreamClient {
         stopPing();
         cleanupClient();
         listenKey = null;
+        streamReady = false;
         notifyState(false);
     }
 
+    /** Open socket and a live account subscription (not just an open socket). */
     public boolean isConnected() {
         HibachiWebSocketClient c = client;
-        return c != null && c.isOpen();
+        return c != null && c.isOpen() && streamReady;
     }
 
     public String getListenKey() {
@@ -94,8 +126,15 @@ public class HibachiAccountStreamClient {
 
     protected synchronized void doConnect() throws Exception {
         cleanupClient();
-        processor = new HibachiJsonProcessor(this::onClosed);
-        processor.addEventListener(this::onMessage);
+        final long gen = ++generation;
+        streamReady = false;
+        listenKey = null;
+        processor = new HibachiJsonProcessor(() -> onClosed(gen));
+        processor.addEventListener(message -> {
+            if (gen == generation) {
+                onMessage(message);
+            }
+        });
         client = HibachiWebSocketClient.createPrivate(
                 config.getAccountWsUrl(), String.valueOf(accountId), processor, apiKey, config.getClient());
         if (!client.connectBlocking(15, TimeUnit.SECONDS)) {
@@ -106,7 +145,13 @@ public class HibachiAccountStreamClient {
         startPing();
         cancelReconnect();
         reconnectBackoffMs = Math.max(100L, config.getWsReconnectInitialBackoffMs());
-        notifyState(true);
+        // Connected is reported when the listenKey arrives (onMessage); if it
+        // never does, reconnect rather than sit on a socket with no stream.
+        watchdog.schedule(() -> {
+            if (gen == generation && !streamReady && !shutdown) {
+                forceReconnect("no stream.start reply");
+            }
+        }, STREAM_READY_TIMEOUT_MS, TimeUnit.MILLISECONDS);
     }
 
     protected synchronized void cleanupClient() {
@@ -227,6 +272,13 @@ public class HibachiAccountStreamClient {
             listenKey = result.path("listenKey").asText(null);
             listenKeyHolder.set(System.currentTimeMillis());
             logger.info("Hibachi account stream started; listenKey={}", listenKey);
+            if (listenKey != null && !streamReady) {
+                streamReady = true;
+                synchronized (this) {
+                    notifyAll();
+                }
+                notifyState(true);
+            }
         }
         if (l != null && result.has("accountSnapshot")) {
             safeDispatch(() -> l.onAccountSnapshot(result.path("accountSnapshot")));
@@ -343,6 +395,8 @@ public class HibachiAccountStreamClient {
         }
         logger.warn("Hibachi account stream lost ({}); reconnecting for a new listenKey", reason);
         synchronized (this) {
+            generation++; // the old socket's close and messages are stale from here on
+            streamReady = false;
             stopPing();
             listenKey = null;
             cleanupClient();
@@ -351,9 +405,13 @@ public class HibachiAccountStreamClient {
         scheduleReconnect();
     }
 
-    protected void onClosed() {
+    protected void onClosed(long gen) {
+        if (gen != generation) {
+            return; // an old socket closing after its replacement took over
+        }
         stopPing();
         listenKey = null;
+        streamReady = false;
         notifyState(false);
         if (!shutdown) {
             scheduleReconnect();

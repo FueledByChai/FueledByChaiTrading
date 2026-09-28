@@ -773,16 +773,19 @@ public class HibachiBroker extends AbstractBasicBroker {
     }
 
     private volatile long positionsRefreshedAtMs;
+    private final java.util.concurrent.locks.ReentrantLock positionsRefreshLock =
+            new java.util.concurrent.locks.ReentrantLock();
 
     /**
      * The position cache is fed by the account stream, which can silently
      * stop delivering (an expired listenKey). Positions drive risk decisions,
      * so read them from the venue; fall back to the cache if REST fails.
-     * Refreshed at most every 2 seconds.
+     * At most one attempt every 2 seconds (successful or not, timed from when
+     * it finished), and callers never queue behind an attempt in flight -
+     * they get the cache instead.
      */
-    protected synchronized void refreshPositionsFromRest() {
-        long now = System.currentTimeMillis();
-        if (now - positionsRefreshedAtMs < 2_000) {
+    protected void refreshPositionsFromRest() {
+        if (System.currentTimeMillis() - positionsRefreshedAtMs < 2_000 || !positionsRefreshLock.tryLock()) {
             return;
         }
         try {
@@ -800,9 +803,11 @@ public class HibachiBroker extends AbstractBasicBroker {
             }
             positionsCache.keySet().retainAll(fresh.keySet());
             positionsCache.putAll(fresh);
-            positionsRefreshedAtMs = now;
         } catch (Exception e) {
             logger.warn("Hibachi positions REST refresh failed; using the stream cache", e);
+        } finally {
+            positionsRefreshedAtMs = System.currentTimeMillis();
+            positionsRefreshLock.unlock();
         }
     }
 

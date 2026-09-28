@@ -313,15 +313,19 @@ public class QfexBroker extends AbstractBasicBroker implements QfexTradeListener
     }
 
     private volatile long positionsRefreshedAtMs;
+    private final java.util.concurrent.locks.ReentrantLock positionsRefreshLock =
+            new java.util.concurrent.locks.ReentrantLock();
 
     /**
      * The position map is fed by the trade socket, which can miss updates
      * across a reconnect. Positions drive risk decisions, so read them from
-     * the venue (at most every 2 s); keep the socket's view if REST fails.
+     * the venue; keep the socket's view if REST fails. At most one attempt
+     * every 2 seconds (successful or not, timed from when it finished), and
+     * callers never queue behind an attempt in flight.
      */
-    protected synchronized void refreshPositionsFromRest() {
-        long now = System.currentTimeMillis();
-        if (restApi.isPublicApiOnly() || now - positionsRefreshedAtMs < 2_000) {
+    protected void refreshPositionsFromRest() {
+        if (restApi.isPublicApiOnly() || System.currentTimeMillis() - positionsRefreshedAtMs < 2_000
+                || !positionsRefreshLock.tryLock()) {
             return;
         }
         try {
@@ -339,9 +343,11 @@ public class QfexBroker extends AbstractBasicBroker implements QfexTradeListener
                 }
             }
             positions.keySet().retainAll(open);
-            positionsRefreshedAtMs = now;
         } catch (RuntimeException e) {
             log.warn("QFEX positions REST refresh failed; using the socket's view: {}", e.getMessage());
+        } finally {
+            positionsRefreshedAtMs = System.currentTimeMillis();
+            positionsRefreshLock.unlock();
         }
     }
 

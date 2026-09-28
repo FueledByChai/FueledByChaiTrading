@@ -1,11 +1,16 @@
 package com.fueledbychai.broker.hibachi;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fueledbychai.hibachi.common.api.HibachiConfiguration;
 
 /**
  * Regression cover for Longshot on Hibachi, 2026-09-27: the account stream's
@@ -39,5 +44,42 @@ class HibachiAccountStreamExpiryTest {
                 "{\"id\":1,\"status\":200,\"result\":{\"listenKey\":\"k\"}}")));
         assertFalse(HibachiAccountStreamClient.isStreamGone(MAPPER.readTree(
                 "{\"event\":\"order_request_rejected\",\"data\":{\"error\":\"Order not found\"}}")));
+    }
+
+    @Test
+    void connectedIsReportedWhenTheListenKeyArrivesNotWhenTheSocketOpens() throws Exception {
+        List<Boolean> states = new ArrayList<>();
+        HibachiAccountStreamClient c = client(states);
+        c.generation = 1;
+
+        c.onMessage(MAPPER.readTree("{\"id\":1,\"status\":200,\"result\":{\"listenKey\":\"k1\"}}"));
+
+        assertTrue(c.streamReady);
+        assertEquals(List.of(true), states);
+    }
+
+    @Test
+    void aCloseFromAnOlderSocketDoesNotTearDownTheReplacement() throws Exception {
+        List<Boolean> states = new ArrayList<>();
+        HibachiAccountStreamClient c = client(states);
+        c.shutdown = true; // no reconnect scheduling in this test
+        c.generation = 2;
+        c.streamReady = true;
+        c.listenKey = "k2";
+
+        c.onClosed(1); // the expired socket's close arrives late
+        assertTrue(c.streamReady);
+        assertEquals("k2", c.listenKey);
+        assertTrue(states.isEmpty());
+
+        c.onClosed(2);
+        assertFalse(c.streamReady);
+        assertEquals(List.of(false), states);
+    }
+
+    private static HibachiAccountStreamClient client(List<Boolean> states) {
+        HibachiAccountStreamClient c = new HibachiAccountStreamClient(HibachiConfiguration.getInstance(), 1L, "key");
+        c.setConnectionStateListener(states::add);
+        return c;
     }
 }
