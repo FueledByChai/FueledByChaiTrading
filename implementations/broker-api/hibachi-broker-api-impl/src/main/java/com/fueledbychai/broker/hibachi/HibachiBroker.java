@@ -172,6 +172,12 @@ public class HibachiBroker extends AbstractBasicBroker {
     public BrokerRequestResult placeOrder(OrderTicket order) {
         long pipelineStartedNs = System.nanoTime();
         checkConnected();
+        if (!accountWs.isConnected()) {
+            // Without a live account subscription we'd never hear about the
+            // fill; cancels stay allowed so callers can still pull orders.
+            return new BrokerRequestResult(false, true, "Hibachi account stream not ready",
+                    BrokerRequestResult.FailureType.UNKNOWN);
+        }
         if (order == null) {
             return new BrokerRequestResult(false, true, "order is required",
                     BrokerRequestResult.FailureType.VALIDATION_FAILED);
@@ -266,6 +272,12 @@ public class HibachiBroker extends AbstractBasicBroker {
     public BrokerRequestResult modifyOrder(OrderTicket order) {
         long pipelineStartedNs = System.nanoTime();
         checkConnected();
+        if (!accountWs.isConnected()) {
+            // Without a live account subscription we'd never hear about the
+            // fill; cancels stay allowed so callers can still pull orders.
+            return new BrokerRequestResult(false, true, "Hibachi account stream not ready",
+                    BrokerRequestResult.FailureType.UNKNOWN);
+        }
         if (order == null) {
             return new BrokerRequestResult(false, true, "order is required",
                     BrokerRequestResult.FailureType.VALIDATION_FAILED);
@@ -769,7 +781,9 @@ public class HibachiBroker extends AbstractBasicBroker {
     @Override
     public List<Position> getAllPositions() {
         refreshPositionsFromRest();
-        return new ArrayList<>(positionsCache.values());
+        synchronized (positionsCache) {
+            return new ArrayList<>(positionsCache.values());
+        }
     }
 
     private volatile long positionsRefreshedAtMs;
@@ -801,8 +815,10 @@ public class HibachiBroker extends AbstractBasicBroker {
                     fresh.put(pos.getTicker().getSymbol(), pos);
                 }
             }
-            positionsCache.keySet().retainAll(fresh.keySet());
-            positionsCache.putAll(fresh);
+            synchronized (positionsCache) { // readers see the old or the new snapshot, never a mix
+                positionsCache.clear();
+                positionsCache.putAll(fresh);
+            }
         } catch (Exception e) {
             logger.warn("Hibachi positions REST refresh failed; using the stream cache", e);
         } finally {
@@ -1159,12 +1175,16 @@ public class HibachiBroker extends AbstractBasicBroker {
             }
             JsonNode positions = snapshot.path("positions");
             if (positions.isArray()) {
-                positionsCache.clear();
+                Map<String, Position> fresh = new java.util.HashMap<>();
                 for (JsonNode p : positions) {
                     Position pos = parsePosition(p);
                     if (pos != null && pos.getTicker() != null) {
-                        positionsCache.put(pos.getTicker().getSymbol(), pos);
+                        fresh.put(pos.getTicker().getSymbol(), pos);
                     }
+                }
+                synchronized (positionsCache) {
+                    positionsCache.clear();
+                    positionsCache.putAll(fresh);
                 }
             }
             applyBalance(snapshot);
@@ -1194,10 +1214,12 @@ public class HibachiBroker extends AbstractBasicBroker {
                 return;
             }
             BigDecimal size = pos.getSize();
-            if (size == null || size.signum() == 0) {
-                positionsCache.remove(pos.getTicker().getSymbol());
-            } else {
-                positionsCache.put(pos.getTicker().getSymbol(), pos);
+            synchronized (positionsCache) {
+                if (size == null || size.signum() == 0) {
+                    positionsCache.remove(pos.getTicker().getSymbol());
+                } else {
+                    positionsCache.put(pos.getTicker().getSymbol(), pos);
+                }
             }
         }
 
