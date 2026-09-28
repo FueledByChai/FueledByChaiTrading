@@ -308,7 +308,41 @@ public class QfexBroker extends AbstractBasicBroker implements QfexTradeListener
 
     @Override
     public List<Position> getAllPositions() {
+        refreshPositionsFromRest();
         return new ArrayList<>(positions.values());
+    }
+
+    private volatile long positionsRefreshedAtMs;
+
+    /**
+     * The position map is fed by the trade socket, which can miss updates
+     * across a reconnect. Positions drive risk decisions, so read them from
+     * the venue (at most every 2 s); keep the socket's view if REST fails.
+     */
+    protected synchronized void refreshPositionsFromRest() {
+        long now = System.currentTimeMillis();
+        if (restApi.isPublicApiOnly() || now - positionsRefreshedAtMs < 2_000) {
+            return;
+        }
+        try {
+            JsonNode list = restApi.getPositions().path("positions");
+            if (!list.isArray()) {
+                return;
+            }
+            java.util.Set<String> open = new java.util.HashSet<>();
+            for (JsonNode p : list) {
+                onPosition(p);
+                String symbol = p.path("symbol").asText(null);
+                BigDecimal signed = QfexTranslator.decimal(p, "position");
+                if (symbol != null && signed != null && signed.signum() != 0) {
+                    open.add(symbol);
+                }
+            }
+            positions.keySet().retainAll(open);
+            positionsRefreshedAtMs = now;
+        } catch (RuntimeException e) {
+            log.warn("QFEX positions REST refresh failed; using the socket's view: {}", e.getMessage());
+        }
     }
 
     // ------------------------------------------------------------------
