@@ -92,6 +92,7 @@ public class HibachiTradeWebSocketClient {
 
     public synchronized void disconnect() {
         shutdown = true;
+        stopReconnectWatchdog();
         cancelReconnect();
         stopPing();
         cleanupClient();
@@ -397,6 +398,14 @@ public class HibachiTradeWebSocketClient {
                 logger.warn("Hibachi trade WS reconnect watchdog failed", e);
             }
         }, 30, 30, TimeUnit.SECONDS);
+    }
+
+    /** Stops and releases the watchdog; connect() starts a fresh one. */
+    protected synchronized void stopReconnectWatchdog() {
+        if (reconnectWatchdog != null) {
+            reconnectWatchdog.shutdownNow();
+            reconnectWatchdog = null;
+        }
     }
 
     protected synchronized void cancelReconnect() {
