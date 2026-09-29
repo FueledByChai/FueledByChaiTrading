@@ -76,4 +76,17 @@ class HibachiReconnectChainTest {
         }
         return cond.getAsBoolean();
     }
+
+    @Test
+    void aFailedFirstConnectLeavesNoWatchdogBehind() {
+        HibachiTradeWebSocketClient c = new HibachiTradeWebSocketClient(HibachiConfiguration.getInstance(), 1L, "k") {
+            @Override
+            protected synchronized void doConnect() throws Exception {
+                throw new IllegalStateException("Hibachi trade WS handshake timed out");
+            }
+        };
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, c::connect);
+        org.junit.jupiter.api.Assertions.assertNull(c.reconnectWatchdog);
+        assertTrue(c.shutdown);
+    }
 }

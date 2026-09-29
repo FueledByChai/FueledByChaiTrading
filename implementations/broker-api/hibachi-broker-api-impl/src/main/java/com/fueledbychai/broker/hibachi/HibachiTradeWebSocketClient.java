@@ -86,6 +86,10 @@ public class HibachiTradeWebSocketClient {
         try {
             doConnect();
         } catch (Exception e) {
+            // The caller gets the failure and may drop this client: don't leave
+            // the watchdog behind to reconnect it later on its own.
+            shutdown = true;
+            stopReconnectWatchdog();
             throw new IllegalStateException("Failed to open Hibachi trade WS", e);
         }
     }
