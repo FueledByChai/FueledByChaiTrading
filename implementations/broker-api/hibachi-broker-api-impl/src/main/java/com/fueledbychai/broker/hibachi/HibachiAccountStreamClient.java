@@ -81,9 +81,14 @@ public class HibachiAccountStreamClient {
             return;
         }
         shutdown = false;
+        startReconnectWatchdog();
         try {
             doConnect();
         } catch (Exception e) {
+            // The caller gets the failure and may drop this client: don't leave
+            // the watchdog behind to reconnect it later on its own.
+            shutdown = true;
+            stopReconnectWatchdog();
             throw new IllegalStateException("Failed to open Hibachi account WS", e);
         }
         // Not connected until the account subscription exists; wait for it
@@ -106,6 +111,7 @@ public class HibachiAccountStreamClient {
 
     public synchronized void disconnect() {
         shutdown = true;
+        stopReconnectWatchdog();
         cancelReconnect();
         stopPing();
         cleanupClient();
@@ -207,7 +213,9 @@ public class HibachiAccountStreamClient {
             return;
         }
         synchronized (this) {
-            if (reconnectTask != null && !reconnectTask.isDone()) {
+            // Rechecked under the monitor: disconnect() may have run while we
+            // waited for it, and must not be followed by a new scheduler.
+            if (shutdown || (reconnectTask != null && !reconnectTask.isDone())) {
                 return;
             }
             if (reconnectScheduler == null) {
@@ -239,7 +247,53 @@ public class HibachiAccountStreamClient {
             }
         } catch (Exception e) {
             logger.warn("Hibachi account WS reconnect failed; rescheduling", e);
+            // This attempt IS reconnectTask and is still running, so
+            // scheduleReconnect() would see a pending task and skip - ending
+            // the retry chain for good (seen live after a short internet drop).
+            synchronized (this) {
+                reconnectTask = null;
+            }
             scheduleReconnect();
+        }
+    }
+
+    protected volatile ScheduledExecutorService reconnectWatchdog;
+
+    /**
+     * Every 30 s: if the socket is down and no reconnect is pending, start
+     * one. A backstop for any path that drops the retry chain.
+     */
+    protected synchronized void startReconnectWatchdog() {
+        if (reconnectWatchdog != null) {
+            return;
+        }
+        reconnectWatchdog = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "hibachi-account-reconnect-watchdog");
+            t.setDaemon(true);
+            return t;
+        });
+        reconnectWatchdog.scheduleWithFixedDelay(() -> {
+            try {
+                ScheduledFuture<?> pending = reconnectTask;
+                // Socket-level: an open socket still waiting for its listenKey
+                // is the stream-ready watchdog's job, not a dead connection.
+                HibachiWebSocketClient c = client;
+                boolean socketOpen = c != null && c.isOpen();
+                if (!shutdown && !socketOpen && (pending == null || pending.isDone())) {
+                    logger.warn("Hibachi account WS down with no reconnect pending; restarting reconnects");
+                    scheduleReconnect();
+                }
+            } catch (Exception e) {
+                logger.warn("Hibachi account WS reconnect watchdog failed", e);
+            }
+        }, 30, 30, TimeUnit.SECONDS);
+    }
+
+    /** Stops and releases the watchdog; connect() starts a fresh one. */
+    protected synchronized void stopReconnectWatchdog() {
+        if (reconnectWatchdog != null) {
+            reconnectWatchdog.shutdownNow();
+            reconnectWatchdog = null;
         }
     }
 
