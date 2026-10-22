@@ -66,8 +66,18 @@ public interface IHibachiRestApi {
     /** Funding rates for a symbol. */
     JsonNode getFundingRates(String symbol);
 
-    /** Mark-price + spot-price snapshot. */
+    /**
+     * Mark-price + spot-price snapshot. The endpoint requires a symbol;
+     * prefer {@link #getPrices(String)}.
+     */
     JsonNode getPrices();
+
+    /**
+     * Prices for one symbol: {@code spotPrice} (the oracle index the perp
+     * tracks), {@code markPrice}, {@code tradePrice}, {@code bidPrice},
+     * {@code askPrice}.
+     */
+    JsonNode getPrices(String symbol);
 
     // ---------- private trading ----------
 
