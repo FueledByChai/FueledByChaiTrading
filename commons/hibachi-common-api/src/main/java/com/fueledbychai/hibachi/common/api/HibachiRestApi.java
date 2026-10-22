@@ -197,6 +197,11 @@ public class HibachiRestApi extends BaseRestApi implements IHibachiRestApi {
     }
 
     @Override
+    public JsonNode getPrices(String symbol) {
+        return publicRequest(dataBaseUrl, "/market/data/prices", symbolParams(symbol));
+    }
+
+    @Override
     public JsonNode getTradeAccountInfo() {
         requirePrivateApi();
         return privateRequest(tradingBaseUrl, "/trade/account/info", null);
